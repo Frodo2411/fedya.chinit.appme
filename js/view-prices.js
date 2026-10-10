@@ -3,6 +3,23 @@
 import { h, fill, icon, money, toast, copyText } from './ui.js';
 import { SERVICES, clientPrice, diffCoef, noveltyCoef } from './engine.js';
 import { store } from './store.js';
+import { telHref } from './view-orders.js';
+
+// Заметка «как заказать»: @бот → Telegram, адрес сайта и телефон — тоже нажимаются
+export function linkify(text) {
+  const out = [];
+  const re = /(https?:\/\/[^\s,;]+)|((?:www\.|t\.me\/)[^\s,;]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:by|ru|com|net|org|shop|store)\b(?:\/[^\s,;]*)?)|(@[A-Za-z][A-Za-z0-9_]{3,31})|(\+?\d[\d\s()-]{7,}\d)/gi;
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const t = m[0];
+    const href = m[1] ? t : m[2] ? 'https://' + t : m[3] ? 'https://t.me/' + t.slice(1) : telHref(t);
+    out.push(h('a', { href, target: '_blank', rel: 'noopener', text: t }));
+    last = m.index + t.length;
+  }
+  out.push(text.slice(last));
+  return out;
+}
 
 export const SVC = { b: 'Аккумулятор', d: 'Дисплей', p: 'Разъём зарядки', c: 'Задняя крышка' };
 export const VAR_APP = {
@@ -150,7 +167,7 @@ export function createPricesView(app) {
         h('span', { class: 'copyhint' }, 'копировать')),
       h('span', { class: 'pname', text: p.part }),
       !p.override && o.colours > 1 ? h('span', { class: 'tiny faint', text: 'Цветов: ' + o.colours + ', цена по самому дорогому' }) : null),
-      note ? h('div', { class: 'tiny muted', style: 'margin-top:6px' }, 'Как заказать: ', note) : null,
+      note ? h('div', { class: 'small muted', style: 'margin-top:8px' }, 'Как заказать: ', linkify(note)) : null,
       o.alt && !p.override ? h('div', { class: 'alt' }, 'Второй поставщик: ', h('b', { text: supName(o.alt.sup) + ' — ' + money(o.alt.cost) }), ' ', stockBadge(o.alt.sup, o.alt.stock),
         h('div', { class: 'tiny faint break', text: o.alt.part })) : null,
       h('div', { class: 'sfline', text: sfText }),
