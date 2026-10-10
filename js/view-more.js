@@ -51,10 +51,15 @@ export function createMoreView(app) {
       h('div', { class: 'card' },
         h('h3', { text: 'Как заказывать у поставщиков' }),
         h('div', { class: 'small muted', text: 'Сайт, бот, телефон, срок доставки. Покажу под деталью.' }),
-        sups.map(([k, s]) => field(s.name, h('textarea', {
-          class: 'input', value: (app.settings.supplierNotes || {})[k] || '', placeholder: 'Например: Telegram-бот @…, доставка завтра, от 50 р.',
-          onchange: (e) => app.saveSettings({ supplierNotes: { ...(app.settings.supplierNotes || {}), [k]: e.target.value } }, { redraw: false }),
-        })))),
+        sups.map(([k, s]) => {
+          const site = s.site || ((app.repoData && app.repoData.suppliers[k]) || {}).site;
+          return h('div', {},
+            field(s.name, h('textarea', {
+              class: 'input', value: (app.settings.supplierNotes || {})[k] || '', placeholder: 'Например: Telegram-бот @…, доставка завтра, от 50 р.',
+              onchange: (e) => app.saveSettings({ supplierNotes: { ...(app.settings.supplierNotes || {}), [k]: e.target.value } }, { redraw: false }),
+            })),
+            site ? h('a', { class: 'small', style: 'display:inline-block;margin-top:6px', href: site, target: '_blank', rel: 'noopener', text: 'Сайт: ' + site.replace(/^https?:\/\//, '').replace(/\/$/, '') }) : null);
+        })),
 
       h('div', { class: 'card' },
         h('h3', { text: 'Google Таблица' }),

@@ -61,6 +61,7 @@ function supplierNames(prev) {
     const [k, v] = pair.split('=').map((x) => (x || '').trim());
     if (k && v) out[k] = v;
   }
+  out.prev = prev ? prev.suppliers : {};
   return out;
 }
 
@@ -89,7 +90,11 @@ function buildFromWork(work, priceDate, names) {
   }
   return {
     v: 1, priceDate, sfDate: '2026-10-10',
-    suppliers: { P: { name: names.P, stock: true, rank: 0 }, E: { name: names.E, stock: false, rank: 1 } },
+    // имя, сайт и прочее о поставщике переносим из прошлого пакета
+    suppliers: {
+      P: { ...(names.prev.P || {}), name: names.P, stock: true, rank: 0 },
+      E: { ...(names.prev.E || {}), name: names.E, stock: false, rank: 1 },
+    },
     models, parts, history: [],
   };
 }

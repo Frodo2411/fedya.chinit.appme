@@ -138,6 +138,23 @@ export function createPricesView(app) {
     return (app.data.suppliers[key] && app.data.suppliers[key].name) || key;
   }
 
+  function supSite(key) {
+    const s = app.data.suppliers[key] || {};
+    const r = (app.repoData && app.repoData.suppliers[key]) || {};
+    return s.site || r.site || null;
+  }
+
+  // Одно нажатие: название детали в буфер и сайт поставщика в новой вкладке — останется вставить в поиск
+  function siteButton(sup, partName, small) {
+    const site = supSite(sup);
+    if (!site) return null;
+    const host = site.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    return h('a', {
+      class: small ? 'link' : 'btn small block', style: small ? 'margin-left:6px' : 'margin-top:8px', href: site, target: '_blank', rel: 'noopener',
+      onclick: () => { copyText(partName); toast('Название скопировано: вставь его в поиск на сайте', 3500); },
+    }, small ? 'сайт ↗' : 'Открыть ' + host + ' ↗');
+  }
+
   function variantCard(entry, svc, o) {
     const S = app.pricer.S;
     const p = priceOf(entry, svc, o);
@@ -167,8 +184,10 @@ export function createPricesView(app) {
         h('span', { class: 'copyhint' }, 'копировать')),
       h('span', { class: 'pname', text: p.part }),
       !p.override && o.colours > 1 ? h('span', { class: 'tiny faint', text: 'Цветов: ' + o.colours + ', цена по самому дорогому' }) : null),
+      siteButton(p.sup, p.part),
       note ? h('div', { class: 'small muted', style: 'margin-top:8px' }, 'Как заказать: ', linkify(note)) : null,
       o.alt && !p.override ? h('div', { class: 'alt' }, 'Второй поставщик: ', h('b', { text: supName(o.alt.sup) + ' — ' + money(o.alt.cost) }), ' ', stockBadge(o.alt.sup, o.alt.stock),
+        siteButton(o.alt.sup, o.alt.part, true),
         h('div', { class: 'tiny faint break', text: o.alt.part })) : null,
       h('div', { class: 'sfline', text: sfText }),
       o.hidden ? h('div', { class: 'tiny', style: 'color:var(--accent);margin-top:6px', text: 'Скрыт: не дешевле варианта получше' }) : null,

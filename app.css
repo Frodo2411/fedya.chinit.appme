@@ -73,6 +73,7 @@ h3 { font-size: 17px; margin: 0 0 6px; }
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-align: center;
 }
 .btn:active { transform: scale(0.98); }
+a.btn { text-decoration: none; }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .btn.ghost { background: transparent; }
 .btn.danger { color: var(--bad); }
