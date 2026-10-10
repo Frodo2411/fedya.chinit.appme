@@ -24,6 +24,8 @@ export function makeBook(json) {
   function sheetsParse(v) {
     if (typeof v !== 'string') return v;
     if (v.startsWith("'")) return v.slice(1);
+    if (/^\s*[=+@]/.test(v) && !/^\s*\+?\d+([.,]\d+)?$/.test(v)) return { formulaError: v };
+    if (/^\s*-/.test(v) && !/^\s*-\d+([.,]\d+)?$/.test(v)) return { formulaError: v };
     if (/^-?\d+([.,]\d+)?$/.test(v.trim())) return Number(v.trim().replace(',', '.'));
     if (/^\d{1,2}[./]\d{1,2}([./]\d{2,4})?$/.test(v.trim())) return { parsedAsDate: v };
     return v;

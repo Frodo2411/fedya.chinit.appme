@@ -90,14 +90,23 @@ function toJson_(k, v) {
   return v;
 }
 
+// Строку, которую таблица сама превратила бы в формулу («=…», «+…», «-…»), дату или число, пишем с апострофом:
+// так она остаётся текстом, а сам апостроф в значение не попадает
+function asText_(v) {
+  return /^\s*[=+\-@]/.test(v) || /^[\d\s.,\/:+-]+$/.test(v) ? "'" + v : v;
+}
+
 function fromJson_(k, v) {
   if (v === null || v === undefined || v === '') return '';
   if (DATE_KEYS.indexOf(k) >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(v))) return Utilities.parseDate(String(v), tz_(), 'yyyy-MM-dd');
   if (NUMBER_KEYS.indexOf(k) >= 0 && typeof v === 'string' && /^-?\d+([.,]\d+)?$/.test(v.trim())) return Number(v.replace(',', '.'));
-  // телефон храним цифрами, как в таблице: 375291234567
-  if (k === 'phone') { const d = String(v).replace(/\D/g, ''); return d.length >= 7 && d.length <= 15 ? Number(d) : String(v); }
-  // текст вроде «12/13» или «1.2» таблица сама превратит в дату или число: апостроф оставляет его текстом
-  if (TEXT_KEYS.indexOf(k) >= 0 && typeof v === 'string' && /^[\d\s.,\/:+-]+$/.test(v)) return "'" + v;
+  // телефон храним цифрами, как в таблице: 375291234567; номер с ведущим нулём — текстом, иначе ноль пропадёт
+  if (k === 'phone') {
+    const d = String(v).replace(/\D/g, '');
+    if (d.length >= 7 && d.length <= 15 && d[0] !== '0') return Number(d);
+    return asText_(String(v));
+  }
+  if (TEXT_KEYS.indexOf(k) >= 0 && typeof v === 'string') return asText_(v);
   return v;
 }
 
@@ -154,11 +163,23 @@ function runOp_(op) {
   const props = PropertiesService.getScriptProperties();
   const done = JSON.parse(props.getProperty('done') || '{}');
   if (op.id && done[op.id]) return { id: op.id, ok: true, row: done[op.id][0], num: done[op.id][1], repeat: true };
+  // Правка строки, которую приложение только что добавило и ещё не знает её номер: берём его из журнала
+  if (op.ref && done[op.ref]) {
+    op.row = done[op.ref][0];
+    if (done[op.ref][1] !== null) op.num = done[op.ref][1];
+    op.byRef = true;
+  }
+  // Если добавление прервалось на середине, повтор пишет в ту же строку, а не в новую
+  const pend = JSON.parse(props.getProperty('pend') || '{}');
+  const reserve = function (row, num) {
+    pend[op.id] = [row, num];
+    props.setProperty('pend', JSON.stringify(pend));
+  };
   let res;
   try {
-    if (op.op === 'addOrder') res = addRow_(SHEET_ORDERS, ORDER_COLS, op.fields, isOrder_, true);
+    if (op.op === 'addOrder') res = addRow_(SHEET_ORDERS, ORDER_COLS, op.fields, isOrder_, true, pend[op.id], reserve);
     else if (op.op === 'updateOrder') res = updateOrder_(op);
-    else if (op.op === 'addExpense') res = addRow_(SHEET_EXPENSES, EXPENSE_COLS, op.fields, isExpense_, false);
+    else if (op.op === 'addExpense') res = addRow_(SHEET_EXPENSES, EXPENSE_COLS, op.fields, isExpense_, false, pend[op.id], reserve);
     else if (op.op === 'updateExpense') res = updateExpense_(op);
     else throw new Error('Неизвестная операция: ' + op.op);
     res.ok = true;
@@ -171,6 +192,10 @@ function runOp_(op) {
     const ids = Object.keys(done);
     if (ids.length > 150) ids.slice(0, ids.length - 150).forEach(function (k) { delete done[k]; });
     props.setProperty('done', JSON.stringify(done));
+    if (pend[op.id]) {
+      delete pend[op.id];
+      props.setProperty('pend', JSON.stringify(pend));
+    }
   }
   return res;
 }
@@ -179,7 +204,9 @@ function writeFields_(sh, row, cols, fields) {
   const width = sh.getLastColumn();
   const formulas = sh.getRange(row, 1, 1, width).getFormulas()[0];
   Object.keys(fields || {}).forEach(function (k) {
-    if (!cols[k] || FORMULA_KEYS.indexOf(k) >= 0 || formulas[cols[k] - 1]) return;
+    // формулу не трогаем; но в текстовом столбце «формула» — это ошибочно сохранённый текст, его можно перезаписать
+    if (!cols[k] || FORMULA_KEYS.indexOf(k) >= 0) return;
+    if (formulas[cols[k] - 1] && TEXT_KEYS.indexOf(k) < 0 && k !== 'phone') return;
     const cell = sh.getRange(row, cols[k]);
     const value = fromJson_(k, fields[k]);
     cell.setValue(value);
@@ -199,19 +226,25 @@ function fillFormulas_(sh, row, cols) {
   });
 }
 
-function addRow_(name, spec, fields, isRow, numbered) {
+function addRow_(name, spec, fields, isRow, numbered, reserved, reserve) {
   const sh = sheet_(name);
   const cols = columns_(sh, spec);
-  const rows = readRows_(sh, cols, function () { return true; });
-  let target = null;
-  let maxNum = 0;
-  rows.forEach(function (o) {
-    if (numbered && typeof o.num === 'number' && o.num > maxNum) maxNum = o.num;
-    if (target === null && !isRow(o)) target = o.row;
-  });
-  if (target === null) target = Math.max(sh.getLastRow(), 1) + 1;
   const f = Object.assign({}, fields);
-  if (numbered && (f.num === undefined || f.num === null || f.num === '')) f.num = maxNum + 1;
+  let target = null;
+  if (reserved) {
+    target = reserved[0];
+    if (numbered) f.num = reserved[1];
+  } else {
+    const rows = readRows_(sh, cols, function () { return true; });
+    let maxNum = 0;
+    rows.forEach(function (o) {
+      if (numbered && typeof o.num === 'number' && o.num > maxNum) maxNum = o.num;
+      if (target === null && !isRow(o)) target = o.row;
+    });
+    if (target === null) target = Math.max(sh.getLastRow(), 1) + 1;
+    if (numbered && (f.num === undefined || f.num === null || f.num === '')) f.num = maxNum + 1;
+    if (reserve) reserve(target, numbered ? f.num : null);
+  }
   writeFields_(sh, target, cols, f);
   fillFormulas_(sh, target, cols);
   return { row: target, num: numbered ? f.num : null };
@@ -220,6 +253,7 @@ function addRow_(name, spec, fields, isRow, numbered) {
 function updateOrder_(op) {
   const sh = sheet_(SHEET_ORDERS);
   const cols = columns_(sh, ORDER_COLS);
+  if (op.num === null || op.num === undefined || op.num === '') throw new Error('У заказа нет номера: обнови список и попробуй ещё раз');
   let row = null;
   if (op.row && cols.num && Number(sh.getRange(op.row, cols.num).getValue()) === Number(op.num)) row = op.row;
   if (row === null) {
@@ -234,6 +268,11 @@ function updateOrder_(op) {
 function updateExpense_(op) {
   const sh = sheet_(SHEET_EXPENSES);
   const cols = columns_(sh, EXPENSE_COLS);
+  if (op.byRef) {
+    writeFields_(sh, op.row, cols, op.fields);
+    return { row: op.row };
+  }
+  if (!op.was) throw new Error('Не понял, какой расход править: обнови список и попробуй ещё раз');
   const same = function (o) { return o.date === op.was.date && String(o.what) === String(op.was.what) && Number(o.sum) === Number(op.was.sum); };
   let row = null;
   if (op.row) {
@@ -282,7 +321,8 @@ function kvSet_(name, value, ts) {
     for (let i = 0; i < keys.length; i++) if (keys[i][0] === name) { row = i + 2; break; }
   }
   const width = Math.max(sh.getLastColumn(), chunks.length + 2);
-  const line = [name, ts || Date.now()].concat(chunks);
+  // апостроф: кусок base64 может начинаться с «+», и таблица приняла бы его за формулу
+  const line = [name, ts || Date.now()].concat(chunks.map(function (c) { return "'" + c; }));
   while (line.length < width) line.push('');
   sh.getRange(row, 1, 1, width).setValues([line]);
   return { ts: line[1] };

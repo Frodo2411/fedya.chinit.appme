@@ -22,6 +22,8 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+/* под прозрачной строкой статуса айфона: контент уходит под неё, а не просвечивает */
+body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: var(--safe-t); background: var(--bg); z-index: 30; }
 body {
   margin: 0;
   background: var(--bg);
@@ -155,7 +157,7 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
   margin-top: 12px; width: 100%; text-align: left; border: 1px dashed var(--line); background: var(--bg);
   border-radius: 12px; padding: 10px 12px; display: block;
 }
-.part .sup { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); font-weight: 650; }
+.part .sup { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13.5px; color: var(--muted); font-weight: 650; }
 .part .pname { display: block; margin-top: 4px; font-size: 15.5px; overflow-wrap: anywhere; }
 .part .copyhint { margin-left: auto; font-size: 12.5px; color: var(--faint); font-weight: 600; }
 .alt { margin-top: 8px; font-size: 14.5px; color: var(--muted); }
@@ -225,7 +227,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; font-varian
 .sheet-foot .btn { flex: 1; }
 
 .toast {
-  position: fixed; left: 50%; transform: translateX(-50%); z-index: 80;
+  position: fixed; left: 16px; right: 16px; margin: 0 auto; width: fit-content; z-index: 80;
   top: calc(var(--safe-t) + 12px); max-width: calc(100% - 32px);
   background: #f3f5f8; color: #0d0f12; font-weight: 650; font-size: 15px; padding: 12px 18px; border-radius: 14px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); animation: up 0.15s ease-out;

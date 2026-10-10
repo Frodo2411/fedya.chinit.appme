@@ -44,8 +44,8 @@ export function createMoreView(app) {
 
       h('div', { class: 'card' },
         h('h3', { text: 'Текст для клиента' }),
-        field('Строка в конце', h('textarea', { class: 'input', value: app.settings.clientFooter || '', onchange: (e) => app.saveSettings({ clientFooter: e.target.value }) })),
-        h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: app.settings.clientHints !== false, onchange: (e) => app.saveSettings({ clientHints: e.target.checked }) }),
+        field('Строка в конце', h('textarea', { class: 'input', value: app.settings.clientFooter || '', onchange: (e) => app.saveSettings({ clientFooter: e.target.value }, { redraw: false }) })),
+        h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: app.settings.clientHints !== false, onchange: (e) => app.saveSettings({ clientHints: e.target.checked }, { redraw: false }) }),
           'Пояснять варианты («цвета и яркость ближе к оригиналу»)')),
 
       h('div', { class: 'card' },
@@ -53,7 +53,7 @@ export function createMoreView(app) {
         h('div', { class: 'small muted', text: 'Сайт, бот, телефон, срок доставки. Покажу под деталью.' }),
         sups.map(([k, s]) => field(s.name, h('textarea', {
           class: 'input', value: (app.settings.supplierNotes || {})[k] || '', placeholder: 'Например: Telegram-бот @…, доставка завтра, от 50 р.',
-          onchange: (e) => app.saveSettings({ supplierNotes: { ...(app.settings.supplierNotes || {}), [k]: e.target.value } }),
+          onchange: (e) => app.saveSettings({ supplierNotes: { ...(app.settings.supplierNotes || {}), [k]: e.target.value } }, { redraw: false }),
         })))),
 
       h('div', { class: 'card' },

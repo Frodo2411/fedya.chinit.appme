@@ -15,6 +15,24 @@ export function statusBadge(s) {
   return s ? h('span', { class: 'badge st-' + (STATUS_CLASS[s] || 'later'), text: s }) : null;
 }
 
+// Номер для набора: 375… → +375…, 80… → +375…, девять цифр → +375…
+export function telHref(p) {
+  const raw = String(p || '').trim();
+  const d = raw.replace(/\D/g, '');
+  if (d.length === 12 && d.startsWith('375')) return 'tel:+' + d;
+  if (d.length === 11 && d.startsWith('80')) return 'tel:+375' + d.slice(2);
+  if (d.length === 9) return 'tel:+375' + d;
+  return 'tel:' + (raw.startsWith('+') ? '+' : '') + d;
+}
+
+// Как храним в таблице: белорусский номер — 375 и девять цифр
+export function normPhone(p) {
+  const d = String(p || '').replace(/\D/g, '');
+  if (d.length === 11 && d.startsWith('80')) return '375' + d.slice(2);
+  if (d.length === 9) return '375' + d;
+  return String(p || '').trim();
+}
+
 export function phoneText(p) {
   const d = String(p || '').replace(/\D/g, '');
   if (d.length === 12 && d.startsWith('375')) return '+375 ' + d.slice(3, 5) + ' ' + d.slice(5, 8) + '-' + d.slice(8, 10) + '-' + d.slice(10);
@@ -83,11 +101,27 @@ export function createOrdersView(app) {
           o.pending ? h('span', { class: 'badge warn', style: 'margin-left:6px', text: 'не отправлено' }) : null)));
   }
 
+  // Постоянная часть экрана: строку поиска не пересоздаём, иначе при фоновом обновлении закрывается клавиатура
+  const title = h('h1', { text: 'Заказы' });
+  const connectBox = h('div');
+  const syncBox = h('div', { class: 'syncbar' });
+  const failedBox = h('div');
+  const chipsBox = h('div');
+  const connected = h('div', {},
+    syncBox, failedBox,
+    h('div', { class: 'searchbar', style: 'padding-top:0;margin-top:0;top:var(--safe-t)' }, search),
+    chipsBox, h('div', { style: 'height:12px' }), listBox,
+    h('button', { class: 'fab', onclick: () => openOrderForm(app, null) }, icon('plus'), 'Заказ'));
+  root.append(title, connectBox, connected);
+
   function draw() {
     if (!app.sheet.connected) {
-      fill(root, h('h1', { text: 'Заказы' }), connectCard(app, 'Заказы'));
+      connected.hidden = true;
+      fill(connectBox, connectCard(app, 'Заказы'));
       return;
     }
+    fill(connectBox);
+    connected.hidden = false;
     const all = app.sheet.orders();
     const count = (f) => all.filter((o) => inFilter(o, f)).length;
     const s = app.sheet;
@@ -96,24 +130,17 @@ export function createOrdersView(app) {
     else if (s.error) syncText = h('span', { style: 'color:var(--bad)', text: s.error });
     else if (s.outbox.length) syncText = 'Не отправлено: ' + s.outbox.length;
     else syncText = s.cache ? 'Обновлено в ' + new Date(s.cache.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'Ещё не загружено';
-    fill(root, 
-      h('div', { class: 'row' }, h('h1', { class: 'grow', text: 'Заказы' })),
-      h('div', { class: 'syncbar' }, h('div', { class: 'grow' }, syncText),
-        h('button', { class: 'btn small', 'aria-label': 'Обновить', disabled: s.busy, onclick: () => s.refresh() }, icon('refresh'))),
-      s.failed.map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
-        h('div', {}, h('b', { text: 'Не записалось в таблицу: ' }), describeOp(f), ' — ', f.error),
-        h('div', { class: 'row', style: 'margin-top:8px' },
-          h('button', { class: 'btn small', text: 'Повторить', onclick: () => { s.dropFailed(f.id); s.outbox.push({ ...f, error: undefined }); s.save(); s.flush(); } }),
-          h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => s.dropFailed(f.id) })))),
-      h('div', { class: 'searchbar', style: 'padding-top:0;margin-top:0' }, search),
-      chips([
-        { value: 'active', label: 'Активные · ' + count('active') }, { value: 'ready', label: 'Готов · ' + count('ready') },
-        { value: 'done', label: 'Выданы' }, { value: 'refused', label: 'Отказ' }, { value: 'all', label: 'Все · ' + all.length },
-      ], st.filter, (v) => { st.filter = v; drawList(); }),
-      h('div', { style: 'height:12px' }),
-      listBox,
-      h('button', { class: 'fab', onclick: () => openOrderForm(app, null) }, icon('plus'), 'Заказ'),
-    );
+    fill(syncBox, h('div', { class: 'grow' }, syncText),
+      h('button', { class: 'btn small', 'aria-label': 'Обновить', disabled: s.busy, onclick: () => s.refresh() }, icon('refresh')));
+    fill(failedBox, s.failed.map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
+      h('div', {}, h('b', { text: 'Не записалось в таблицу: ' }), describeOp(f), ' — ', f.error),
+      h('div', { class: 'row', style: 'margin-top:8px' },
+        h('button', { class: 'btn small', text: 'Повторить', onclick: () => { s.dropFailed(f.id); s.outbox.push({ ...f, error: undefined }); s.save(); s.flush(); } }),
+        h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => s.dropFailed(f.id) })))));
+    fill(chipsBox, chips([
+      { value: 'active', label: 'Активные · ' + count('active') }, { value: 'ready', label: 'Готов · ' + count('ready') },
+      { value: 'done', label: 'Выданы' }, { value: 'refused', label: 'Отказ' }, { value: 'all', label: 'Все · ' + all.length },
+    ], st.filter, (v) => { st.filter = v; drawList(); }));
     drawList();
   }
 
@@ -188,7 +215,7 @@ export function openOrderForm(app, order, prefill) {
       h('summary', { text: 'Клиент (необязательно)' }),
       text('client', 'Имя'),
       text('phone', 'Телефон', { type: 'tel', inputmode: 'tel' }),
-      o.phone ? h('a', { href: 'tel:+' + String(o.phone).replace(/\D/g, ''), class: 'small', text: 'Позвонить ' + phoneText(o.phone) }) : null,
+      o.phone ? h('a', { href: telHref(o.phone), class: 'small', text: 'Позвонить ' + phoneText(o.phone) }) : null,
       text('address', 'Адрес')),
     text('comment', 'Комментарий', { area: true }),
   );
@@ -197,6 +224,7 @@ export function openOrderForm(app, order, prefill) {
   const save = h('button', {
     class: 'btn primary', text: isNew ? 'Записать' : 'Сохранить',
     onclick: () => {
+      if (o.phone) o.phone = normPhone(o.phone);
       if (isNew) {
         const fields = {};
         for (const k of EDITABLE) if (o[k] !== null && o[k] !== undefined && o[k] !== '') fields[k] = o[k];

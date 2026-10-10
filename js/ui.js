@@ -1,9 +1,13 @@
 // Мелкие помощники интерфейса. Текст из таблицы и прайсов вставляем только через textContent.
 
+const STRING_ATTRS = ['autocorrect', 'autocapitalize', 'spellcheck', 'autocomplete', 'inputmode', 'enterkeyhint'];
+
 export function h(tag, props, ...children) {
   const el = document.createElement(tag);
   if (props) {
     for (const [k, v] of Object.entries(props)) {
+      // iOS: autocorrect как свойство превращает 'off' в true; задаём эти атрибуты строкой, false тоже
+      if (STRING_ATTRS.includes(k)) { if (v !== null && v !== undefined) el.setAttribute(k, String(v)); continue; }
       if (v === null || v === undefined || v === false) continue;
       if (k === 'class') el.className = v;
       else if (k === 'text') el.textContent = v;

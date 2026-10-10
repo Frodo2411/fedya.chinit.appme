@@ -39,13 +39,14 @@ const app = {
     drawTabbar();
   },
 
-  saveSettings(patch) {
+  // redraw: false — для текстовых полей «Ещё»: перерисовка сбросила бы фокус
+  saveSettings(patch, opts = {}) {
     const next = { ...this.settings, ...patch, ts: Date.now() };
     if (patch.formula === null) next.formula = null;
     this.settings = next;
     store.set('settings', next);
     if ('formula' in patch) this.pricer = new Pricer(this.data, next.formula);
-    this.redraw();
+    if (opts.redraw !== false) this.redraw();
     backupSettings();
   },
 
@@ -84,7 +85,7 @@ const app = {
     this.setData(decode(encode(next)));
     this.views.prices.reset();
     this.redraw();
-    backupPrices(env);
+    pricesChanged();
   },
 
   hasPrevData() {
@@ -101,10 +102,10 @@ const app = {
     } else {
       this.setData(decode(await open(prev, this.key)));
       store.set('prices.local', prev);
-      backupPrices(prev);
     }
     if (cur) store.set('prices.prev', cur);
     else store.remove('prices.prev');
+    pricesChanged();
     this.views.prices.reset();
     this.redraw();
     toast('Вернул прошлые прайсы');
@@ -142,9 +143,22 @@ function backupSettings() {
   }, 1500);
 }
 
-function backupPrices(env) {
+// Прайсы на телефоне поменялись (обновление или «вернуть прошлые»): запоминаем время и отправляем копию в таблицу.
+// Пока копия не дошла, стоит флажок: при следующей связи с таблицей наша версия главнее.
+function pricesChanged() {
+  store.set('prices.ts', Date.now());
+  store.set('prices.push', true);
+  pushPrices();
+}
+
+async function pushPrices() {
   if (!app.sheet || !app.sheet.connected) return;
-  app.sheet.backupSet('prices', JSON.stringify(env), Date.now()).catch(() => {});
+  const local = store.get('prices.local');
+  try {
+    // пустое значение — «прайс из приложения, своего обновления нет»
+    await app.sheet.backupSet('prices', local ? JSON.stringify(local) : '', store.get('prices.ts', Date.now()));
+    store.remove('prices.push');
+  } catch { /* отправим при следующей связи */ }
 }
 
 async function syncBackups() {
@@ -160,20 +174,30 @@ async function syncBackups() {
     } else if (app.settings.ts && (!rs || rs.ts < app.settings.ts)) {
       backupSettings();
     }
+    if (store.get('prices.push')) { await pushPrices(); return; }
+    const localTs = store.get('prices.ts', 0);
     const rp = await app.sheet.backupGet('prices');
-    if (rp && rp.value) {
-      const env = JSON.parse(rp.value);
-      const remote = decode(await open(env, app.key));
-      if (remote.priceDate > app.data.priceDate) {
+    if (!rp) { if (localTs) await pushPrices(); return; }
+    if (rp.ts > localTs) {
+      // в таблице более свежее состояние (например, обновлял прайс с компьютера)
+      if (rp.value) {
+        const env = JSON.parse(rp.value);
+        const remote = decode(await open(env, app.key));
+        if (remote.priceDate < app.repoData.priceDate) return; // прайс в приложении новее этой копии
         store.set('prices.local', env);
+        store.set('prices.ts', rp.ts);
         app.setData(remote);
-        app.views.prices.reset();
-        app.redraw();
         toast('Загрузил прайсы от ' + remote.priceDate.split('-').reverse().join('.') + ' из таблицы');
+      } else {
+        store.set('prices.ts', rp.ts);
+        if (!store.get('prices.local')) return;
+        store.remove('prices.local');
+        app.setData(app.repoData);
       }
-    } else {
-      const local = store.get('prices.local');
-      if (local) backupPrices(local);
+      app.views.prices.reset();
+      app.redraw();
+    } else if (rp.ts < localTs) {
+      await pushPrices();
     }
   } catch { /* резервная копия не обязательна */ }
 }
@@ -229,19 +253,39 @@ function startUI() {
     app.sheet.refresh();
     syncBackups();
   }
-  window.addEventListener('online', () => app.sheet.flush());
+  // Вернулся в приложение или появилась сеть: отправить очередь, а если список устарел или была ошибка — перечитать
+  const syncNow = () => {
+    if (!app.sheet.connected) return;
+    const stale = !app.sheet.cache || Date.now() - app.sheet.cache.at > 60000;
+    if (app.sheet.error || stale) app.sheet.refresh();
+    else app.sheet.flush();
+    if (store.get('prices.push')) pushPrices();
+  };
+  window.addEventListener('online', syncNow);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (pendingReload && !document.querySelector('.sheet')) { location.reload(); return; }
-    if (app.sheet.connected) app.sheet.flush();
+    syncNow();
   });
 }
 
 // --- Вход
+// Прайс из сети, а при плохой связи — из кэша телефона, не дольше нескольких секунд ожидания
 async function fetchBundle() {
-  const res = await fetch('data/prices.enc', { cache: 'no-cache' });
-  if (!res.ok) throw new Error('Не загрузились данные прайса (' + res.status + ')');
-  return res.json();
+  let cached = null;
+  try { cached = 'caches' in window ? await caches.match('data/prices.enc') : null; } catch { cached = null; }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), cached ? 4000 : 30000);
+  try {
+    const res = await fetch('data/prices.enc', { cache: 'no-cache', signal: ctrl.signal });
+    if (!res.ok) throw new Error('Не загрузились данные прайса (' + res.status + ')');
+    return await res.json();
+  } catch (e) {
+    if (cached) return cached.json();
+    throw e.name === 'AbortError' ? new Error('Слишком медленный интернет') : e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function unlock(keyBytes, env) {
@@ -253,10 +297,16 @@ async function unlock(keyBytes, env) {
   let data = repo;
   const localEnv = store.get('prices.local');
   if (localEnv) {
-    try {
-      const local = decode(await open(localEnv, keyBytes));
-      if (local.priceDate >= repo.priceDate) data = local;
-    } catch { /* старый ключ — используем прайс из приложения */ }
+    let local = null;
+    try { local = decode(await open(localEnv, keyBytes)); } catch { local = null; }
+    if (local && local.priceDate >= repo.priceDate) data = local;
+    else {
+      // прайс в приложении новее своего обновления (или старый ключ): своё больше не нужно
+      store.remove('prices.local');
+      store.remove('prices.prev');
+      store.set('prices.ts', Date.now());
+      store.set('prices.push', true);
+    }
   }
   app.setData(data);
 }

@@ -70,7 +70,13 @@ function colIndex(ref) {
   return n - 1;
 }
 
+// Некоторые программы пишут теги с префиксом: <x:row>, <x:c>. Убираем префиксы, разбор дальше общий.
+function stripPrefixes(xml) {
+  return xml.replace(/<(\/?)[A-Za-z][\w.-]*:(?=[A-Za-z])/g, '<$1');
+}
+
 function parseSheet(xml, shared) {
+  xml = stripPrefixes(xml);
   const rows = [];
   let nextRow = 0;
   for (const rm of xml.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
@@ -117,11 +123,11 @@ export async function readXlsx(buffer) {
   const dec = new TextDecoder();
   const text = (n) => (files.has(n) ? dec.decode(files.get(n)) : '');
   const shared = [];
-  for (const m of text('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>|<si\/>/g)) shared.push(m[1] ? richText(m[1]) : '');
+  for (const m of stripPrefixes(text('xl/sharedStrings.xml')).matchAll(/<si>([\s\S]*?)<\/si>|<si\/>/g)) shared.push(m[1] ? richText(m[1]) : '');
   const rels = new Map();
   for (const m of text('xl/_rels/workbook.xml.rels').matchAll(/<Relationship\b([^>]*)\/?>/g)) rels.set(attr(m[1], 'Id'), attr(m[1], 'Target'));
   const sheets = [];
-  for (const m of text('xl/workbook.xml').matchAll(/<sheet\b([^>]*)\/?>/g)) {
+  for (const m of stripPrefixes(text('xl/workbook.xml')).matchAll(/<sheet\b([^>]*)\/?>/g)) {
     const target = rels.get(attr(m[1], 'r:id'));
     const path = target ? resolveTarget(target) : null;
     if (!path || !files.has(path)) continue;

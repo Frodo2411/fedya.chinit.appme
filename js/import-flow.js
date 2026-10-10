@@ -20,6 +20,7 @@ export async function openImport(app, supKey, file) {
   const body = h('div');
   const applyBtn = h('button', { class: 'btn primary', text: 'Применить' });
   let result = null;
+  const opened = new Set(); // какие списки раскрыты: при перерисовке оставляем как было
 
   function colOptions(selected, allowNone) {
     const rows = sheets[cols.sheet].rows;
@@ -71,12 +72,19 @@ export async function openImport(app, supKey, file) {
     const changeRow = (c) => h('div', { class: 'other' },
       h('div', { class: 'grow' }, h('div', { class: 'small', text: c.model }), h('div', { class: 'tiny muted', text: SVC[c.svc] + ' · ' + VAR_APP[c.tier] })),
       h('div', { class: 'nowrap small mono', text: (c.old === null ? 'нет' : c.old) + ' → ' + (c.price === null ? 'нет' : c.price) }));
-    const list = (title, items, render, open = false) => items.length
-      ? h('details', { open }, h('summary', { text: title + ': ' + items.length }), h('div', {}, items.slice(0, 300).map(render), items.length > 300 ? h('div', { class: 'tiny faint', text: '…и ещё ' + (items.length - 300) }) : null))
+    const list = (title, items, render) => items.length
+      ? h('details', { open: opened.has(title), ontoggle: (e) => { if (e.target.open) opened.add(title); else opened.delete(title); } },
+        h('summary', { text: title + ': ' + items.length }),
+        h('div', {}, items.slice(0, 300).map(render), items.length > 300 ? h('div', { class: 'tiny faint', text: '…и ещё ' + (items.length - 300) }) : null))
       : null;
+    const before = app.data.parts.filter((p) => p.sup === supKey && p.cost).length;
+    const strange = before > 50 && r.known < before * 0.3;
+    const scroller = sheet ? sheet.el.querySelector('.sheet-body') : null;
+    const scrollTop = scroller ? scroller.scrollTop : 0;
     fill(body, 
       h('div', { class: 'small muted', text: 'Файл: ' + file.name + ' · лист «' + sheets[cols.sheet].name + '»' }),
       warn ? h('div', { class: 'banner warn', style: 'margin-top:10px', text: 'Цены в выбранном столбце сильно отличаются от прошлых. Проверь столбец цены ниже: может быть, выбраны доллары или розница.' }) : null,
+      strange ? h('div', { class: 'banner bad', style: 'margin-top:10px', text: 'Почти ни одна позиция не совпала с прошлым прайсом ' + sup.name + '. Это точно его файл? Если нет — нажми «Отмена».' }) : null,
       columnsBox(),
       h('div', { class: 'tiles', style: 'margin-top:8px' },
         tile('Позиций в файле', r.file.parts), tile('Знакомых', r.known),
@@ -104,6 +112,7 @@ export async function openImport(app, supKey, file) {
       list('Подешевели у поставщика', r.priceDown, (x) => h('div', { class: 'tiny muted break', style: 'padding:4px 0', text: x.name + ': ' + x.old + ' → ' + x.cost })),
       r.file.noPrice ? h('div', { class: 'tiny faint', style: 'margin-top:10px', text: 'Без цены в файле: ' + r.file.noPrice + ' поз.' }) : null,
     );
+    if (scroller) scroller.scrollTop = scrollTop;
   }
 
   function tile(label, v) {

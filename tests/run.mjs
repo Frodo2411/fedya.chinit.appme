@@ -206,9 +206,71 @@ await test('Apps Script: ключ, список, запись, повтор, ф�
   assert.ok(sh.getRange(8, 13).getFormula().includes('K8'), 'формулы скопированы в новую строку');
   gas.post({ op: 'kvSet', key: 'test-key', name: 'x', value: 'z'.repeat(100000), ts: 5 });
   assert.equal(gas.post({ op: 'kvGet', key: 'test-key', name: 'x' }).data.value.length, 100000);
+  // текст, похожий на формулу, остаётся текстом; телефон с ведущим нулём не теряет ноль
+  gas.post({ op: 'batch', key: 'test-key', ops: [{ id: 'f1', op: 'addOrder', fields: { model: '+ разбит экран', problem: '=SUM(1)', comment: '-', phone: '0291234567' } }] });
+  const fr = list.orders.length + 6;
+  const rowF = gas.post({ op: 'list', key: 'test-key' }).data.orders.find((o) => o.model === '+ разбит экран');
+  assert.ok(rowF, 'строка с «+» записана текстом');
+  assert.equal(rowF.problem, '=SUM(1)');
+  assert.equal(rowF.phone, '0291234567');
+  // правка только что добавленной строки по ref, пока номер ещё неизвестен приложению
+  const addR = gas.post({ op: 'batch', key: 'test-key', ops: [
+    { id: 'n1', op: 'addOrder', fields: { model: 'новый' } },
+    { id: 'n2', op: 'updateOrder', ref: 'n1', num: null, fields: { status: 'Принят' } },
+  ] }).data;
+  assert.equal(addR[1].ok, true);
+  assert.equal(addR[1].row, addR[0].row, 'правка ушла в ту же строку');
+  const noNum = gas.post({ op: 'batch', key: 'test-key', ops: [{ id: 'n3', op: 'updateOrder', num: null, fields: { status: 'Готов' } }] }).data[0];
+  assert.equal(noNum.ok, false, 'без номера и ref — ошибка, а не запись в чужую строку');
+  // кусок резервной копии, начинающийся с «+», не становится формулой
+  gas.post({ op: 'kvSet', key: 'test-key', name: 'p', value: '+abc' + 'q'.repeat(50000), ts: 6 });
+  assert.equal(gas.post({ op: 'kvGet', key: 'test-key', name: 'p' }).data.value.slice(0, 4), '+abc');
+  assert.ok(fr > 0);
   // заглушка ключа не работает
   const raw = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, '__KEY__');
   assert.equal(raw.post({ op: 'ping', key: '__KEY__' }).ok, false);
+});
+
+await test('очередь приложения: правка заказа во время отправки, из открытой формы, две правки расхода', async () => {
+  const { makeBook, loadScript } = await import('./gas-mock.mjs');
+  const cell = (v) => ({ v, f: '', fmt: '' });
+  const head = ['№', 'Дата приёма', 'Модель', 'Цена для клиента, р.', 'Статус'];
+  const book = makeBook({ 'Заказы': [head.map(cell)], 'Расходы': [['Дата', 'Что купил', 'Категория', 'Сумма, р.', 'Где купил'].map(cell)], 'Настройки': [[cell('Настройки')]] });
+  const gas = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, 'k');
+  const ls = new Map();
+  globalThis.localStorage = { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) };
+  let offline = false;
+  globalThis.fetch = async (url, o) => {
+    await new Promise((r) => setTimeout(r, 15));
+    if (offline) throw new TypeError('offline');
+    return new Response(gas.ctx.doPost({ postData: { contents: o.body } }).content);
+  };
+  const { SheetSync } = await import(path.join(ROOT, 'js/sheet.js') + '?q=' + Date.now());
+  const s = new SheetSync();
+  s.configure({ url: 'https://script.google.com/x', key: 'k' });
+  s.add('addOrder', { model: 'Тест' });
+  const held = s.orders().find((o) => o.pendingId);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(s.inflight.size, 1, 'добавление в пути');
+  s.update('updateOrder', held, { status: 'Готов' });
+  while (s.outbox.length || s.running) await (s.running || s.flush());
+  const sh = book.getSheetByName('Заказы');
+  assert.deepEqual([sh.getRange(2, 3).getValue(), sh.getRange(2, 5).getValue()], ['Тест', 'Готов']);
+  s.update('updateOrder', held, { price: 100 });
+  while (s.outbox.length || s.running) await (s.running || s.flush());
+  assert.equal(sh.getRange(2, 4).getValue(), 100, 'правка из старой формы ушла в ту же строку');
+  assert.equal(s.failed.length, 0);
+  s.add('addExpense', { date: '2026-10-10', what: 'Флюс', sum: 10 });
+  while (s.outbox.length || s.running) await (s.running || s.flush());
+  offline = true;
+  s.update('updateExpense', s.expenses()[0], { sum: 12 });
+  s.update('updateExpense', s.expenses()[0], { what: 'Флюс RMA' });
+  offline = false;
+  s.again = true;
+  while (s.outbox.length || s.running) await (s.running || s.flush());
+  const ex = book.getSheetByName('Расходы');
+  assert.deepEqual([ex.getRange(2, 2).getValue(), ex.getRange(2, 4).getValue()], ['Флюс RMA', 12]);
+  assert.equal(s.failed.length, 0);
 });
 
 // --- Настоящий прайс: только с паролем
