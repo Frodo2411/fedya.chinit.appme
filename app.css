@@ -89,8 +89,10 @@ h3 { font-size: 17px; margin: 0 0 6px; }
 textarea.input { min-height: 84px; resize: vertical; }
 .input:focus { border-color: var(--accent); }
 .input.num { font-variant-numeric: tabular-nums; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.grid3 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+/* iOS Safari не сжимает поле даты по ширине без этого */
+input[type="date"].input { display: block; min-width: 0; -webkit-appearance: none; appearance: none; text-align: left; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
@@ -160,7 +162,7 @@ textarea.input { min-height: 84px; resize: vertical; }
 .alt b { color: var(--text); }
 .sfline { margin-top: 6px; font-size: 13.5px; color: var(--faint); }
 .actions { display: flex; gap: 8px; margin-top: 12px; }
-.actions .btn { flex: 1; }
+.actions .btn { flex: 1; min-width: 0; white-space: nowrap; padding: 0 10px; }
 .others { margin-top: 10px; border-top: 1px solid var(--line); }
 .other { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .other:last-child { border-bottom: 0; }
@@ -172,7 +174,8 @@ textarea.input { min-height: 84px; resize: vertical; }
   background: linear-gradient(to top, var(--bg) 70%, rgba(13, 15, 18, 0));
 }
 .dock .inner { max-width: 720px; margin: 0 auto; display: flex; gap: 8px; }
-.dock .btn.primary { flex: 1; }
+.dock .btn { white-space: nowrap; padding: 0 14px; }
+.dock .btn.primary { flex: 1; min-width: 0; font-size: 16px; }
 
 .fab {
   position: fixed; right: 16px; bottom: calc(var(--tabbar) + var(--safe-b) + 16px); z-index: 15;
@@ -223,7 +226,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; font-varian
 
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%); z-index: 80;
-  bottom: calc(var(--tabbar) + var(--safe-b) + 84px); max-width: calc(100% - 32px);
+  top: calc(var(--safe-t) + 12px); max-width: calc(100% - 32px);
   background: #f3f5f8; color: #0d0f12; font-weight: 650; font-size: 15px; padding: 12px 18px; border-radius: 14px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); animation: up 0.15s ease-out;
 }
