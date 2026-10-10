@@ -1,0 +1,4 @@
+node_modules/
+*.local.json
+*.decrypted.json
+.DS_Store
