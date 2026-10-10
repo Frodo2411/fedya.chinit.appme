@@ -49,7 +49,9 @@ export class SheetSync {
     try {
       res = await fetch(cfg.url, { method: 'POST', body: JSON.stringify({ ...payload, op, key: cfg.key }), redirect: 'follow' });
     } catch {
-      throw new Error('Нет связи с таблицей. Проверь интернет и что в развертывании доступ «Все».');
+      const err = new Error('Скрипт таблицы не ответил приложению. Проверь интернет и настройки развертывания.');
+      err.network = true;
+      throw err;
     }
     if (!res.ok) throw new Error('Таблица ответила ошибкой ' + res.status);
     let j;

@@ -24,7 +24,12 @@ const TEXT_KEYS = ['client', 'address', 'source', 'device', 'model', 'problem', 
 const FORMULA_KEYS = ['profit', 'due', 'warranty', 'month'];
 
 function doGet(e) {
-  return respond_(e && e.parameter && e.parameter.q ? JSON.parse(e.parameter.q) : {});
+  // Просто открыть адрес в браузере — проверка, что скрипт развёрнут правильно. Данных без ключа не отдаём.
+  if (!(e && e.parameter && e.parameter.q)) {
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, status: 'Скрипт работает. Подключение — в приложении мастера.' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  return respond_(JSON.parse(e.parameter.q));
 }
 
 function doPost(e) {
