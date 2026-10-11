@@ -1,6 +1,6 @@
 // Экран «Заказы»: журнал из Google Таблицы, форма заказа, статусы.
 
-import { h, fill, icon, money, fmtDate, toast, openSheet, field, chips, parseNum } from './ui.js';
+import { h, fill, icon, money, fmtDate, toast, openSheet, field, select, parseNum } from './ui.js';
 import { ACTIVE, computed } from './orders.js';
 import { store, today } from './store.js';
 
@@ -137,10 +137,10 @@ export function createOrdersView(app) {
       h('div', { class: 'row', style: 'margin-top:8px' },
         h('button', { class: 'btn small', text: 'Повторить', onclick: () => { s.dropFailed(f.id); s.outbox.push({ ...f, error: undefined }); s.save(); s.flush(); } }),
         h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => s.dropFailed(f.id) })))));
-    fill(chipsBox, chips([
+    fill(chipsBox, select([
       { value: 'active', label: 'Активные · ' + count('active') }, { value: 'ready', label: 'Готов · ' + count('ready') },
-      { value: 'done', label: 'Выданы' }, { value: 'refused', label: 'Отказ' }, { value: 'all', label: 'Все · ' + all.length },
-    ], st.filter, (v) => { st.filter = v; drawList(); }));
+      { value: 'done', label: 'Выданы · ' + count('done') }, { value: 'refused', label: 'Отказ · ' + count('refused') }, { value: 'all', label: 'Все · ' + all.length },
+    ], st.filter, (v) => { st.filter = v; drawList(); }, { label: 'Какие заказы показать' }));
     drawList();
   }
 
@@ -182,24 +182,23 @@ export function openOrderForm(app, order, prefill) {
       ' · к оплате ', h('b', { text: c.due === null ? '—' : money(c.due) }),
       c.warranty ? ' · гарантия до ' + fmtDate(c.warranty) : '');
     statusHint.textContent = lists.hints[o.status] || '';
-    fill(refusalBox, o.status === 'Отказ'
-      ? field('Если отказ: запчасть', chips(['Вернул', 'Осталась у меня'], o.refusal || '', (v) => { o.refusal = v || null; recalc(); }, { toggle: true }))
-      : '');
+    refusalBox.hidden = o.status !== 'Отказ';
   }
+  fill(refusalBox, field('Если отказ: запчасть', select(['Вернул', 'Осталась у меня'], o.refusal || '', (v) => { o.refusal = v || null; recalc(); }, { empty: '—' })));
 
   const clientOpen = !!(o.client || o.phone || o.address);
   body.append(
-    field('Статус', chips(lists.statuses, o.status, (v) => {
-      o.status = v;
+    field('Статус', select(lists.statuses, o.status || '', (v) => {
+      o.status = v || null;
       if (v === 'Выдан' && !o.issued) { o.issued = today(); issuedInput.value = o.issued; }
       recalc();
-    }), null),
+    }, { empty: '—' })),
     statusHint,
     refusalBox,
     h('div', { class: 'grid2' },
       field('Дата приёма', h('input', { class: 'input', type: 'date', value: o.date || '', oninput: (e) => { o.date = e.target.value || null; recalc(); } })),
       field('Дата выдачи', issuedInput)),
-    field('Устройство', chips(lists.devices, o.device || '', (v) => { o.device = v || null; }, { toggle: true })),
+    field('Устройство', select(lists.devices, o.device || '', (v) => { o.device = v || null; }, { empty: '—' })),
     text('model', 'Модель', { placeholder: 'iPhone 13, Redmi Note 8 Pro…' }),
     text('problem', 'Неисправность', { placeholder: 'Разбит дисплей, замена АКБ…' }),
     text('done', 'Что сделано'),
@@ -208,7 +207,7 @@ export function openOrderForm(app, order, prefill) {
       text('part', 'Запчасть, р.', { inputmode: 'decimal', num: true }),
       text('prepay', 'Предоплата', { inputmode: 'decimal', num: true })),
     info,
-    field('Источник', chips(lists.sources, o.source || '', (v) => { o.source = v || null; }, { toggle: true })),
+    field('Источник', select(lists.sources, o.source || '', (v) => { o.source = v || null; }, { empty: '—' })),
     h('label', { class: 'switch', style: 'margin-top:8px' },
       h('input', { type: 'checkbox', checked: o.urgent === 'Да', onchange: (e) => { o.urgent = e.target.checked ? 'Да' : 'Нет'; } }), 'Срочно'),
     h('details', { open: clientOpen },

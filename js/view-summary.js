@@ -1,6 +1,6 @@
 // Экран «Итоги»: месяц, выручка, прибыль, расходы. Считается так же, как лист «Итоги» в таблице.
 
-import { h, fill, money, fmtDate, monthTitle, toast, openSheet, field, chips, parseNum } from './ui.js';
+import { h, fill, money, fmtDate, monthTitle, toast, openSheet, field, select, parseNum } from './ui.js';
 import { summary, statusCounts, months } from './orders.js';
 import { today } from './store.js';
 import { connectCard } from './view-orders.js';
@@ -80,7 +80,7 @@ export function openExpenseForm(app, exp) {
   const body = h('div', {},
     input('what', 'Что купил'),
     h('div', { class: 'grid2' }, input('sum', 'Сумма, р.', { inputmode: 'decimal', num: true }), input('date', 'Дата', { type: 'date' })),
-    field('Категория', chips(lists.expenseCats, e.cat || '', (v) => { e.cat = v; }, { toggle: true })),
+    field('Категория', select(lists.expenseCats, e.cat || '', (v) => { e.cat = v; }, { empty: '—' })),
     input('where', 'Где купил'),
     input('comment', 'Комментарий'));
   const KEYS = ['date', 'what', 'cat', 'sum', 'where', 'comment'];

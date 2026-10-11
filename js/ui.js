@@ -123,6 +123,18 @@ export function field(label, input, hint) {
   return h(tag, { class: 'field' }, h('span', { text: label }), input, hint ? h('div', { class: 'tiny faint', style: 'margin-top:6px', text: hint }) : null);
 }
 
+// Выпадающий список. empty — подпись пустого варианта («—»). Значение не из списка (старое из таблицы) не теряем.
+export function select(options, value, onPick, opts = {}) {
+  const norm = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
+  const cur = value ?? '';
+  if (cur && !norm.some((o) => o.value === cur)) norm.push({ value: cur, label: cur });
+  const el = h('select', { class: 'input select', 'aria-label': opts.label || null, onchange: (e) => onPick(e.target.value) },
+    opts.empty !== undefined ? h('option', { value: '', text: opts.empty }) : null,
+    norm.map((o) => h('option', { value: o.value, text: o.label })));
+  el.value = cur;
+  return el;
+}
+
 export function chips(options, value, onPick, opts = {}) {
   const box = h('div', { class: 'chips' });
   const draw = (cur) => {
