@@ -1,7 +1,7 @@
 // Экран «Цены»: поиск модели, ремонты, варианты деталей с ценой клиенту, поставщиком и заработком.
 
 import { h, fill, icon, money, toast, copyText } from './ui.js';
-import { SERVICES, clientPrice, diffCoef, noveltyCoef } from './engine.js';
+import { SERVICES, clientPrice, diffCoef, noveltyCoef, GLUE_NAME } from './engine.js';
 import { store } from './store.js';
 import { telHref } from './view-orders.js';
 
@@ -21,10 +21,11 @@ export function linkify(text) {
   return out;
 }
 
-export const SVC = { b: 'Аккумулятор', d: 'Дисплей', p: 'Разъём зарядки', c: 'Задняя крышка' };
+export const SVC = { b: 'Аккумулятор', d: 'Дисплей', p: 'Разъём зарядки', c: 'Задняя крышка', g: 'Проклейка' };
 export const VAR_APP = {
   copy: 'Копия', copy_boost: 'Копия усиленная', verified: 'Копия без ошибки', copy_lcd: 'Копия ЖК (In-Cell, TFT)', copy_oled: 'Копия OLED',
   orig_reglass: 'Оригинал, переклей', orig_used: 'Оригинал, снятый', orig_new: 'Оригинал новый',
+  gd: 'дисплея', gc: 'задней крышки', gb: 'батареи',
 };
 // Как на сайте
 export const VAR_CLIENT = {
@@ -155,11 +156,25 @@ export function createPricesView(app) {
     }, small ? 'сайт ↗' : 'Открыть ' + host + ' ↗');
   }
 
+  // Проклейка к ремонту: что взять и где; на цену клиенту не влияет, только на заработок
+  function glueRow(g) {
+    if (g.fallback) return h('div', { class: 'glue' }, h('span', { class: 'small', text: 'Проклейка: ' + money(g.cost) }), h('span', { class: 'tiny faint', text: ' · ' + g.name }));
+    return h('div', { class: 'glue' },
+      h('button', {
+        class: 'glue-name', 'aria-label': 'Скопировать название проклейки',
+        onclick: async () => { if (await copyText(g.name)) toast('Название проклейки скопировано'); },
+      },
+      h('span', { class: 'small' }, 'Проклейка ' + GLUE_NAME[g.type] + ': ', h('b', { text: money(g.cost) }), g.pack ? h('span', { class: 'faint', text: ' (штука из набора)' }) : null),
+      h('span', { class: 'tiny muted break', style: 'display:block', text: supName(g.sup) + ' · ' + g.name })),
+      h('span', { class: 'glue-side' }, stockBadge(g.sup, g.stock), siteButton(g.sup, g.name, true)));
+  }
+
   function variantCard(entry, svc, o) {
     const S = app.pricer.S;
     const p = priceOf(entry, svc, o);
     const key = entry.model + '|' + svc + '|' + o.tier;
-    const earn = p.price - p.cost;
+    const glue = app.pricer.glueFor(entry.model, svc);
+    const earn = p.price - p.cost - glue.total;
     const others = app.pricer.partsFor(entry.model, svc, o.tier);
     const note = (app.settings.supplierNotes || {})[p.sup];
     let sfText = null;
@@ -174,7 +189,8 @@ export function createPricesView(app) {
     }
     const card = h('div', { class: 'card variant' + (o.hidden ? ' dim' : '') },
       h('div', { class: 'head' }, h('div', { class: 'vname', text: VAR_APP[o.tier] }), h('div', { class: 'price', text: p.price + ' р.' })),
-      h('div', { class: 'earn' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), ' · деталь ', money(p.cost), ' · работа ', o.work, ' р.',
+      h('div', { class: 'earn' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), ' · деталь ', money(p.cost),
+        glue.total ? ' · проклейка ' + money(glue.total) : '', ' · работа ', o.work, ' р.',
         h('span', { class: 'faint', text: ' · налог ' + Math.round(p.price * S.tax) + ' р.' })),
       h('button', {
         class: 'part', 'aria-label': 'Скопировать название детали',
@@ -186,6 +202,7 @@ export function createPricesView(app) {
       !p.override && o.colours > 1 ? h('span', { class: 'tiny faint', text: 'Цветов: ' + o.colours + ', цена по самому дорогому' }) : null),
       siteButton(p.sup, p.part),
       note ? h('div', { class: 'small muted', style: 'margin-top:8px' }, 'Как заказать: ', linkify(note)) : null,
+      glue.items.map((g) => glueRow(g)),
       o.alt && !p.override ? h('div', { class: 'alt' }, 'Второй поставщик: ', h('b', { text: supName(o.alt.sup) + ' — ' + money(o.alt.cost) }), ' ', stockBadge(o.alt.sup, o.alt.stock),
         siteButton(o.alt.sup, o.alt.part, true),
         h('div', { class: 'tiny faint break', text: o.alt.part })) : null,

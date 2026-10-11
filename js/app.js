@@ -51,11 +51,15 @@ const app = {
   },
 
   newOrderFromPrice(entry, svc, o, p) {
-    const sup = (this.data.suppliers[p.sup] || {}).name || p.sup;
+    const supName = (k) => (this.data.suppliers[k] || {}).name || k;
     const variant = VAR_APP[o.tier];
+    // в «Запчасть» — деталь вместе с проклейкой: это расход на ремонт
+    const glue = this.pricer.glueFor(entry.model, svc);
+    const glueText = glue.items.map((g) => (g.fallback ? 'клей/скотч ' : supName(g.sup) + ' — ' + g.name + ' ') + g.cost + ' р.').join('; ');
     openOrderForm(this, null, {
       device: 'Телефон', model: entry.model, problem: REPAIR[svc] + ' (' + variant[0].toLowerCase() + variant.slice(1) + ')',
-      price: p.price, part: p.cost, comment: 'Деталь: ' + sup + ' — ' + p.part,
+      price: p.price, part: Math.round((p.cost + glue.total) * 100) / 100,
+      comment: 'Деталь: ' + supName(p.sup) + ' — ' + p.part + ' ' + p.cost + ' р.' + (glueText ? '; проклейка: ' + glueText : ''),
     });
     if (!this.sheet.connected) toast('Таблица не подключена: заказ уйдёт в неё после подключения', 4000);
   },

@@ -32,6 +32,8 @@ export const DEFAULTS = {
   diff_default: 1.0,
   novelty: [[0, 1.3], [2, 1.15], [4, 1.0]],
   year: 0, // 0 — текущий год
+  glue: true, // учитывать проклейку в заработке и в заказе (на цену клиенту не влияет)
+  glue_default: 0, // проклейка, если своей нет в прайсе (клей, скотч), р. на ремонт
   // Задняя крышка iPhone только там, где не нужен лазер
   no_laser: ['iPhone 14', 'iPhone 14 Plus', 'iPhone 15', 'iPhone 15 Plus', 'iPhone 15 Pro', 'iPhone 15 Pro Max', 'iPhone 16',
     'iPhone 16 Plus', 'iPhone 16 Pro', 'iPhone 16 Pro Max', 'iPhone 16e', 'iPhone 17', 'iPhone Air', 'iPhone 17 Pro',
@@ -114,6 +116,16 @@ export function usable(p) {
   return p.cost !== null && p.cost !== undefined && p.cost > 0 && !DEFECT.test(p.name);
 }
 
+// Проклейка в наборе «(5шт)» — цена за одну штуку
+const PACK = /\((\d+)\s*шт\.?\)/i;
+export function pieceCost(p) {
+  const m = PACK.exec(p.name);
+  const q = m ? Number(m[1]) : 1;
+  return q > 1 ? Math.round((p.cost / q) * 100) / 100 : p.cost;
+}
+
+export const GLUE_NAME = { gd: 'дисплея', gc: 'задней крышки', gb: 'батареи' };
+
 export function sfKey(svc, tier) {
   return SF_KEY[svc + ':' + tier] || null;
 }
@@ -139,8 +151,18 @@ export class Pricer {
 
   buildIndex() {
     const noLaser = new Set(this.S.no_laser);
+    this.noLaser = noLaser;
     const index = new Map();
+    this.glue = new Map();
     for (const p of this.data.parts) {
+      if (p.svc === 'g') {
+        if (!GLUE_NAME[p.tier] || !usable(p)) continue;
+        for (const model of p.models) {
+          if (!this.glue.has(model)) this.glue.set(model, { gd: [], gc: [], gb: [] });
+          this.glue.get(model)[p.tier].push(p);
+        }
+        continue;
+      }
       if (p.tier === 'skip' || !ORDER[p.svc] || !ORDER[p.svc].includes(p.tier)) continue;
       if (p.svc === 'c' && WIDE_CUT.test(p.name)) continue;
       for (const model of p.models) {
@@ -155,6 +177,29 @@ export class Pricer {
       }
     }
     return index;
+  }
+
+  // Какие проклейки нужны ремонту. Айфоны из списка «без лазера» и все Android вскрываются сзади, остальные айфоны — через дисплей.
+  glueTypes(model, svc) {
+    if (!this.S.glue) return [];
+    const open = !model.startsWith('iPhone') || this.noLaser.has(model) ? 'gc' : 'gd';
+    return [...new Set({ d: ['gd'], c: ['gc'], b: ['gb', open], p: [open] }[svc] || [])];
+  }
+
+  // Проклейки для ремонта: самая дешёвая из тех, что в наличии; нет в прайсе — не считаем
+  glueFor(model, svc) {
+    const byType = this.glue.get(model);
+    const items = [];
+    for (const type of this.glueTypes(model, svc)) {
+      const rows = byType ? byType[type] : [];
+      if (!rows.length) continue;
+      const best = [...rows].sort((a, b) => (Number(this.inStock(b)) - Number(this.inStock(a))) || (pieceCost(a) - pieceCost(b)) || (this.rank(a.sup) - this.rank(b.sup)))[0];
+      items.push({ type, cost: pieceCost(best), sup: best.sup, name: best.name, stock: best.stock, inStock: this.inStock(best), pack: best.cost !== pieceCost(best) });
+    }
+    if (!items.length && this.S.glue && this.S.glue_default > 0 && this.glueTypes(model, svc).length) {
+      items.push({ type: null, cost: this.S.glue_default, sup: null, name: 'клей или скотч (своей проклейки нет в прайсе)', stock: null, inStock: true, fallback: true });
+    }
+    return { items, total: Math.round(items.reduce((s, x) => s + x.cost, 0) * 100) / 100 };
   }
 
   // Все подходящие детали варианта: для списка «Другие детали»

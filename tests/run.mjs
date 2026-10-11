@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (f) => import(path.join(ROOT, f));
 const { Pricer, clientPrice, workFee, pyRound2, settingsWithDefaults, siteFile } = await imp('js/engine.js');
-const { mapRow, siteIndex, items, tier, lineKey, kindOf, networkOk, BRAND_FAM } = await imp('js/rules.js');
+const RULES = await imp('js/rules.js');
+const { mapRow, siteIndex, items, tier, lineKey, kindOf, networkOk, BRAND_FAM } = RULES;
 const { ModelSearch } = await imp('js/search.js');
 const { seal, open, deriveKeyBytes, randomBytes, fromB64 } = await imp('js/crypto.js');
 const { decode, encode } = await imp('js/data.js');
@@ -115,6 +116,36 @@ await test('разбор названий для новых строк прай�
   assert.equal(kindOf('Плата зарядки Redmi Note 13 - премиум'), 'p');
   assert.equal(kindOf('Чехол iPhone 11'), null);
   assert.equal(networkOk('Дисплей Samsung A52 4G - OLED', 'Samsung Galaxy A52 5G'), false);
+});
+
+await test('проклейка: какая к какому ремонту, набор за штуку, цена клиенту не меняется', () => {
+  const { glueType } = RULES;
+  assert.equal(glueType('Проклейка дисплея iPhone 15 - Orig'), 'gd');
+  assert.equal(glueType('Проклейка экрана Samsung s23'), 'gd');
+  assert.equal(glueType('Проклейка задней крышки iPhone 15 - 2UUL (5шт)'), 'gc');
+  assert.equal(glueType('Проклейка батареи iPhone 15'), 'gb');
+  assert.equal(kindOf('Проклейка батареи iPhone 15'), 'g');
+  const names = MODELS.map((m) => m.model);
+  const fam = new Map(MODELS.map((m) => [m.model, BRAND_FAM[m.brand]]));
+  assert.deepEqual(mapRow('Проклейка дисплея iPhone 11/ 14 - Orig', 'g', siteIndex(names), fam), { models: ['iPhone 11', 'iPhone 14'], tier: 'gd', line: 'Проклейка дисплея iPhone 11/ 14 - Orig' });
+  const G = (sup, name, cost, stock, t, models) => ({ sup, name, cost, stock, svc: 'g', tier: t, models, line: name });
+  const data = { ...DATA, parts: [...DATA.parts,
+    G('P', 'Проклейка батареи iPhone 14', 1.26, 'В наличии', 'gb', ['iPhone 14']),
+    G('P', 'Проклейка задней крышки iPhone 14 - 2UUL (5шт)', 10.7, 'В наличии', 'gc', ['iPhone 14']),
+    G('E', 'Проклейка задней крышки iPhone 14 - премиум', 4, null, 'gc', ['iPhone 14']),
+    G('P', 'Проклейка дисплея iPhone 11 - Orig', 1.42, 'Нет в наличии', 'gd', ['iPhone 11']),
+    G('E', 'Проклейка дисплея iPhone 11 - премиум', 4, null, 'gd', ['iPhone 11']),
+  ] };
+  const pr = new Pricer(data, { year: 2026 });
+  const g14 = pr.glueFor('iPhone 14', 'b');
+  assert.deepEqual(g14.items.map((x) => [x.type, x.cost]), [['gb', 1.26], ['gc', 2.14]], 'iPhone 14 вскрывается сзади, набор — за штуку');
+  assert.equal(g14.total, 3.4);
+  assert.deepEqual(pr.glueFor('iPhone 11', 'd').items.map((x) => [x.type, x.cost, x.sup]), [['gd', 4, 'E']], 'в наличии важнее цены');
+  assert.deepEqual(pr.glueFor('iPhone 11', 'b').items.map((x) => x.type), ['gd'], 'iPhone 11 вскрывается через дисплей');
+  assert.equal(pr.glueFor('Samsung Galaxy A52', 'b').items.length, 0);
+  assert.equal(new Pricer(data, { year: 2026, glue_default: 1.5 }).glueFor('Samsung Galaxy A52', 'b').total, 1.5);
+  assert.equal(new Pricer(data, { year: 2026, glue: false }).glueFor('iPhone 14', 'b').items.length, 0);
+  assert.deepEqual(new Pricer(data, { year: 2026 }).model('iPhone 11').services, new Pricer(DATA, { year: 2026 }).model('iPhone 11').services, 'цена клиенту та же');
 });
 
 await test('поиск модели по-русски и с ошибками', () => {

@@ -168,6 +168,9 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 .part .pname { display: block; margin-top: 4px; font-size: 15.5px; overflow-wrap: anywhere; }
 .part .copyhint { margin-left: auto; font-size: 12.5px; color: var(--faint); font-weight: 600; }
 .alt { margin-top: 8px; font-size: 14.5px; color: var(--muted); }
+.glue { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.glue-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 0; color: var(--text); }
+.glue-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
 .alt b { color: var(--text); }
 .sfline { margin-top: 6px; font-size: 13.5px; color: var(--faint); }
 .actions { display: flex; gap: 8px; margin-top: 12px; }

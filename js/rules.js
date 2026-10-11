@@ -20,6 +20,7 @@ const NM = [
 
 export function normModel(s) {
   let t = s.toLowerCase().replace(/ё/g, 'е');
+  t = t.replace(/\biphone 17 air\b/, 'iphone air'); // у поставщиков «iPhone 17 Air», на сайте «iPhone Air»
   for (const [re, rep] of NM) t = t.replace(re, rep);
   t = t.replace(/\s+/g, ' ').trim();
   t = t.replace(/^xiaomi xiaomi/, 'xiaomi');
@@ -243,8 +244,21 @@ export function families(name) {
   return out;
 }
 
+// Проклейки (клеевые рамки): дисплея, задней крышки, батареи. Svc 'g', вариант — gd/gc/gb.
+const GLUE_PREFIX = /^Проклейка\s+(дисплея|экрана|большого экрана|задней крышки|батареи|аккумулятора|акб)\s+/i;
+
+export function glueType(name) {
+  const m = GLUE_PREFIX.exec(name.trim());
+  if (!m) return null;
+  const w = m[1].toLowerCase();
+  if (w === 'задней крышки') return 'gc';
+  if (w === 'батареи' || w === 'аккумулятора' || w === 'акб') return 'gb';
+  return 'gd';
+}
+
 export function kindOf(name) {
   const n = name.trim();
+  if (glueType(n)) return 'g';
   if (/^Аккумулятор/i.test(n)) return 'b';
   if (/^Дисплей/i.test(n)) return 'd';
   if (/^Задняя крышка/i.test(n)) return 'c';
@@ -257,9 +271,11 @@ export function kindOf(name) {
 // Разметка новой строки: модели, вариант, линия. Как map_row() из rules.py плюс поправки из merge_mapping.py.
 export function mapRow(name, kind, idx, famOfModel) {
   const fams = families(name);
+  // у проклейки та же запись модели, что у дисплея: «Проклейка дисплея iPhone 15 - Orig» → «Дисплей iPhone 15 - Orig»
+  const forModels = kind === 'g' ? name.trim().replace(GLUE_PREFIX, 'Дисплей ') : name;
   let models = [];
-  for (const m of matchModels(name, idx)) if (fams.has(famOfModel.get(m)) && !models.includes(m)) models.push(m);
-  let t = tier(kind, name);
+  for (const m of matchModels(forModels, idx)) if (fams.has(famOfModel.get(m)) && !models.includes(m)) models.push(m);
+  let t = kind === 'g' ? glueType(name) : tier(kind, name);
   if (t === 'skip') models = [];
   if (!models.length) t = 'skip';
   if (kind === 'b' && /\bOR100\b/.test(name) && (t === 'orig_new' || t === 'orig_used')) t = 'copy';

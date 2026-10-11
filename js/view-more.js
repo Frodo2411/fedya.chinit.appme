@@ -114,6 +114,11 @@ function openFormula(app) {
     num(S.diff_default, 'Нет оценки iFixit — коэффициент', (n) => { S.diff_default = n; }),
     h('h3', { style: 'margin-top:20px', text: 'Новизна модели' }),
     tableRows(S.novelty, 'Возраст от, лет', 'Коэффициент'),
+    h('h3', { style: 'margin-top:20px', text: 'Проклейка' }),
+    h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: S.glue, onchange: (e) => { S.glue = e.target.checked; } }),
+      'Учитывать проклейку в заработке и в заказе'),
+    num(S.glue_default, 'Если своей проклейки нет в прайсе, р.', (n) => { S.glue_default = n; }),
+    h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'На цену клиенту не влияет. Дисплей — проклейка дисплея, крышка — задней крышки, аккумулятор — батареи и стороны вскрытия, разъём — стороны вскрытия. Айфоны из списка ниже и все Android вскрываются сзади, остальные айфоны — через дисплей. Берётся самая дешёвая в наличии, набор «(5шт)» — за штуку.' }),
     h('h3', { style: 'margin-top:20px', text: 'Задняя крышка iPhone' }),
     field('Модели без лазера, по одной в строке', h('textarea', { class: 'input', style: 'min-height:160px', value: S.no_laser.join('\n'), oninput: (e) => { S.no_laser = e.target.value.split('\n').map((x) => x.trim()).filter(Boolean); } })),
   );
