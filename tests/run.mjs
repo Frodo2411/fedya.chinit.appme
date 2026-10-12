@@ -319,6 +319,22 @@ await test('особенности записи у поставщиков: цв�
   assert.equal(kindOf('Шлейф зарядки iPhone 17 Pro - системный разъем/ микрофон - черный (e sim)'), 'p');
 });
 
+await test('список моделей приложения: без повторов, бренды знакомы, годы правдоподобные', async () => {
+  const { APP_MODELS, SITE_ALIASES } = await imp('js/models-app.js');
+  const { normModel } = RULES;
+  assert.ok(APP_MODELS.length > 700);
+  const keys = new Map();
+  for (const [brand, model, year, aka] of APP_MODELS) {
+    assert.ok(BRAND_FAM[brand], 'бренд знаком разбору: ' + brand);
+    assert.ok(Number.isInteger(year) && year >= 2010 && year <= 2026, 'год ' + model + ': ' + year);
+    const k = normModel(model);
+    assert.ok(!keys.has(k), 'одна модель дважды: ' + model + ' и ' + keys.get(k));
+    keys.set(k, model);
+    for (const a of aka || []) assert.ok(typeof a === 'string' && a.length > 3, 'другое название ' + model);
+  }
+  for (const [a, m] of SITE_ALIASES) assert.ok(a && m && !keys.has(normModel(m)), 'другое название сайта ведёт на модель сайта: ' + a);
+});
+
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {
   const salt = randomBytes(16);
   const key = await deriveKeyBytes(' Abcd-Efgh ', salt, 1000);

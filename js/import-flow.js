@@ -22,6 +22,9 @@ export async function openImport(app, supKey, file) {
   const applyBtn = h('button', { class: 'btn primary', text: 'Применить' });
   let result = null;
   const opened = new Set(); // какие списки раскрыты: при перерисовке оставляем как было
+  // Пересчёт цен всех моделей заметен на телефоне: после галочек пересчитываем, когда нажатия закончились
+  let drawTimer = null;
+  const drawSoon = () => { clearTimeout(drawTimer); drawTimer = setTimeout(draw, 500); };
 
   function colOptions(selected, allowNone) {
     const rows = sheets[cols.sheet].rows;
@@ -62,6 +65,7 @@ export async function openImport(app, supKey, file) {
   }
 
   function draw() {
+    clearTimeout(drawTimer);
     const r = result.report;
     const changes = clientChanges(app.data, result.next, app.settings.formula);
     const up = changes.filter((c) => c.old !== null && c.price !== null && c.price > c.old);
@@ -135,7 +139,7 @@ export async function openImport(app, supKey, file) {
           h('button', { class: 'btn small', text: 'Отметить все', onclick: () => setAll(items, true) })),
         items.map((p) => h('label', { class: 'other', style: 'align-items:flex-start' },
           h('input', { type: 'checkbox', checked: p.tier !== 'skip', style: 'width:22px;height:22px;margin-top:2px;accent-color:var(--accent)',
-            onchange: (e) => { p.tier = e.target.checked ? p._tier : 'skip'; draw(); } }),
+            onchange: (e) => { p.tier = e.target.checked ? p._tier : 'skip'; drawSoon(); } }),
           h('div', { class: 'grow' }, h('div', { class: 'small break', text: p.name }),
             h('div', { class: 'tiny muted', text: SVC[p.svc] + ' · ' + VAR_APP[p._tier] + ' · ' + money(p.cost) + ' → ' + p.models.join(', ') }))))) : null);
     });
@@ -146,6 +150,7 @@ export async function openImport(app, supKey, file) {
   }
 
   applyBtn.onclick = async () => {
+    clearTimeout(drawTimer);
     applyBtn.disabled = true;
     try {
       for (const p of result.next.parts) { delete p._tier; delete p.fresh; }
