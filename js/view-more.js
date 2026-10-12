@@ -1,7 +1,7 @@
 // Экран «Ещё»: прайсы, расчёт цены, текст для клиента, поставщики, Google Таблица, приложение.
 
 import { h, fill, toast, openSheet, field, parseNum, fmtDate, shareFile, copyText } from './ui.js';
-import { DEFAULTS, SERVICES, settingsWithDefaults, siteFile } from './engine.js';
+import { DEFAULTS, SERVICES, MORE_SERVICES, settingsWithDefaults, siteFile } from './engine.js';
 import { SVC } from './view-prices.js';
 import { openImport } from './import-flow.js';
 import { monthTitle } from './ui.js';
@@ -97,10 +97,16 @@ function openFormula(app) {
   const body = h('div', {},
     h('h3', { style: 'margin-top:8px', text: 'Работа (база), р.' }),
     h('div', { class: 'grid2' }, SERVICES.map((svc) => num(S.base[svc], SVC[svc], (n) => { S.base[svc] = n; }))),
-    h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Первые четыре ремонта — как на сайте. Остальные есть только в приложении: их цену стоит проверить и подправить под себя.' }),
+    h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Работа для камер, динамиков, шлейфов, корпуса и других новых ремонтов подобрана по прайсам сервисов Минска (октябрь 2026). Если цена не нравится — поправь здесь.' }),
     h('div', { class: 'grid2' },
       num(S.min_work, 'Минимум за работу, р.', (n) => { S.min_work = n; }),
       num(S.round, 'Округлять до, р.', (n) => { S.round = n; })),
+    h('h3', { style: 'margin-top:20px', text: 'Свой минимум за работу' }),
+    h('div', { class: 'tiny faint', style: 'margin-bottom:6px', text: 'Для лёгких ремонтов (SIM-лоток, стекло камеры, динамики) общий минимум делает цену выше рынка. Пусто — общий минимум.' }),
+    h('div', { class: 'grid2' }, MORE_SERVICES.map((svc) => field(SVC[svc], h('input', {
+      class: 'input num', inputmode: 'decimal', placeholder: String(S.min_work), value: S.min_svc[svc] === undefined ? '' : String(S.min_svc[svc]).replace('.', ','),
+      oninput: (e) => { const n = parseNum(e.target.value); if (n === null) delete S.min_svc[svc]; else S.min_svc[svc] = n; },
+    })))),
     h('div', { class: 'grid2' },
       num(Math.round(S.tax * 1000) / 10, 'Налог в цене, %', (n) => { S.tax = n; }, { pct: true }),
       field('Текущий год', h('input', { class: 'input num', inputmode: 'numeric', placeholder: 'сам', value: S.year || '', oninput: (e) => { S.year = parseNum(e.target.value) || 0; } }))),

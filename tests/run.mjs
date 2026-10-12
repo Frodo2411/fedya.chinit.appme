@@ -278,8 +278,12 @@ await test('ремонты по любой детали: вид, вариант,
   const pr = new Pricer(data, { year: 2026 });
   const a52 = pr.model('Samsung Galaxy A52');
   assert.equal(a52.services.cr.opts[0].cost, 30, 'основная камера, а не самая дешёвая');
-  assert.equal(a52.services.cr.opts[0].price, ceilTo((ceilTo(40 * 1.3, 5) + 30) / 0.9, 5));
-  assert.equal(a52.services.sim.opts[0].price, ceilTo((50 + 4) / 0.9, 5), 'минимальная работа');
+  assert.equal(a52.services.cr.opts[0].work, 60, '45 × 1,3 = 58,5 → 60');
+  assert.equal(a52.services.cr.opts[0].price, ceilTo((60 + 30) / 0.9, 5));
+  assert.equal(a52.services.sim.opts[0].work, 15, 'у SIM-лотка свой минимум 15, а не общий 50');
+  assert.equal(a52.services.sim.opts[0].price, 25);
+  assert.equal(new Pricer(data, { year: 2026, min_svc: { sim: 50 } }).model('Samsung Galaxy A52').services.sim.opts[0].work, 50, 'свой минимум меняется в настройках');
+  assert.equal(settingsWithDefaults({ min_svc: { cg: 30 } }).min_svc.sim, 15, 'остальные минимумы остаются');
   assert.equal(a52.services.fp.opts.length, 0);
   assert.deepEqual(pr.glueTypes('Samsung Galaxy A52', 'cr'), ['gc']);
   assert.deepEqual(pr.glueTypes('iPhone 11', 'es'), ['gd']);

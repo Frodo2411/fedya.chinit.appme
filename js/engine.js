@@ -29,8 +29,11 @@ const SF_KEY = {
 };
 
 export const DEFAULTS = {
-  base: { b: 50, d: 60, p: 45, c: 35, cr: 40, cf: 40, ls: 35, es: 35, fp: 40, bt: 40, fx: 40, fo: 40, hs: 80, cg: 30, sim: 10, tc: 45, gl: 80 },
+  // Новые ремонты — по прайсам сервисов Минска (октябрь 2026), в той же шкале, что аккумулятор и дисплей
+  base: { b: 50, d: 60, p: 45, c: 35, cr: 45, cf: 40, ls: 35, es: 35, fp: 40, bt: 45, fx: 45, fo: 45, hs: 70, cg: 30, sim: 10, tc: 50, gl: 75 },
   min_work: 50,
+  // Свой минимум за работу у лёгких ремонтов: с общим минимумом они выходят дороже рынка
+  min_svc: { sim: 15, cg: 25, ls: 35, es: 35 },
   tax: 0.10,
   round: 5,
   sf_offset: 5,
@@ -58,7 +61,7 @@ export function settingsWithDefaults(s) {
   if (!s) return out;
   for (const k of Object.keys(DEFAULTS)) {
     if (s[k] === undefined || s[k] === null) continue;
-    out[k] = k === 'base' ? { ...out.base, ...s.base } : JSON.parse(JSON.stringify(s[k]));
+    out[k] = k === 'base' || k === 'min_svc' ? { ...out[k], ...s[k] } : JSON.parse(JSON.stringify(s[k]));
   }
   return out;
 }
@@ -106,8 +109,13 @@ export function noveltyCoef(S, model) {
   return model.year ? stepLookup(S.novelty, currentYear(S) - model.year) : S.novelty[S.novelty.length - 1][1];
 }
 
+export function minWork(S, svc) {
+  const m = S.min_svc && S.min_svc[svc];
+  return m === undefined || m === null ? S.min_work : m;
+}
+
 export function workFee(S, svc, model) {
-  return Math.max(S.min_work, ceilTo(S.base[svc] * diffCoef(S, model) * noveltyCoef(S, model), S.round));
+  return Math.max(minWork(S, svc), ceilTo(S.base[svc] * diffCoef(S, model) * noveltyCoef(S, model), S.round));
 }
 
 // Цена клиенту: по формуле и со сверкой с SmartFix
