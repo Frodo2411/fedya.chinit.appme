@@ -277,18 +277,23 @@ export class Pricer {
   }
 }
 
-// Файл цен для сайта: только цены клиенту, тот же формат, что prices-models.js. Моделей только для приложения там нет.
+// Файл цен для сайта: только цены клиенту, тот же формат, что prices-models.js.
+// Модели сайта — все, модели только для приложения — если есть хоть одна цена.
 export function siteFile(pricer, monthTitle) {
-  const lines = pricer.all().filter((e) => !APP_ONLY.has(e.model)).map((e) => {
+  const lines = [];
+  for (const e of pricer.all()) {
     const prices = {};
-    for (const svc of SITE_SERVICES) {
+    for (const svc of SERVICES) {
       const shown = e.services[svc].opts.filter((o) => !o.hidden).map((o) => [o.tier, o.price]);
       if (shown.length) prices[svc] = shown;
     }
-    return JSON.stringify([e.brand, e.model, prices]);
-  });
+    if (APP_ONLY.has(e.model) && !Object.keys(prices).length) continue;
+    lines.push(JSON.stringify([e.brand, e.model, prices]));
+  }
   const head = '// Цены под ключ (деталь + работа) по моделям телефонов. ' + monthTitle + '.\n'
-    + '// Для каждой модели: b — аккумулятор, d — дисплей, p — разъём зарядки, c — задняя крышка.\n'
+    + '// Для каждой модели: b — аккумулятор, d — дисплей, p — разъём зарядки, c — задняя крышка; cr — задняя камера,\n'
+    + '// cf — фронтальная камера, ls — громкий динамик, es — слуховой динамик, fp — сканер отпечатка, bt — шлейф кнопок,\n'
+    + '// fx — межплатный шлейф, fo — другой шлейф, hs — корпус, cg — стекло камеры, sim — SIM-лоток, tc — тачскрин, gl — стекло экрана.\n'
     + '// В каждом ремонте список вариантов детали [код, цена] от дешёвого к дорогому. Нет ремонта — цена уточняется отдельно.\n'
     + '// Коды вариантов и их названия — в index.html (variants). Файл собирается в приложении мастера.\n';
   return head + 'window.MODEL_PRICES = [' + lines.join(',\n') + '];\n';

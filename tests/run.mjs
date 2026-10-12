@@ -212,9 +212,9 @@ await test('Google Pixel: модели приложения, поиск, раз�
   assert.deepEqual(pr.glueTypes('Google Pixel 4', 'b'), ['gb', 'gc']);
   assert.deepEqual(pr.glueTypes('Google Pixel 10 Pro', 'p'), ['gc']);
   assert.deepEqual(pr.glueTypes('Samsung Galaxy A52', 'b'), ['gb', 'gc']);
-  // в файл для сайта модели только для приложения не попадают
+  // в файл для сайта модель только для приложения попадает, если у неё есть цены
   const text = siteFile(pr, 'Ноябрь 2026');
-  assert.ok(!text.includes('Pixel'));
+  assert.ok(text.includes('"Google Pixel 6"') && !text.includes('"Google Pixel 8"'));
   assert.ok(APP_ONLY.has('Google Pixel 6'));
 });
 
@@ -286,8 +286,8 @@ await test('ремонты по любой детали: вид, вариант,
   assert.deepEqual(pr.glueTypes('iPhone 14', 'hs'), ['gd', 'gb', 'gc']);
   assert.deepEqual(pr.glueTypes('iPhone 14', 'sim'), []);
   const text = siteFile(pr, 'Ноябрь 2026');
-  assert.ok(!/"(cr|sim)"/.test(text), 'в файле для сайта только аккумулятор, дисплей, разъём и крышка');
-  assert.equal(text, siteFile(new Pricer(DATA, { year: 2026 }), 'Ноябрь 2026'));
+  const a52site = JSON.parse(text.split('\n').find((l) => l.includes('"Samsung Galaxy A52"')).replace(/,$/, ''));
+  assert.deepEqual(Object.keys(a52site[2]), ['b', 'cr', 'sim'], 'новые ремонты — и на сайте');
 });
 
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {
