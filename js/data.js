@@ -2,13 +2,13 @@
 // models: [brand, model, year, ifixit, smartfix{}, smartfixUrl]
 // parts:  [supplier, name, cost, stock, svc, tier, [model indexes], line (0 — как name)]
 
-import { APP_MODELS } from './models-app.js';
+import { APP_MODELS, SITE_ALIASES } from './models-app.js';
 
 // Модели только для приложения: на сайте их нет, а детали у поставщиков есть (js/models-app.js).
 // Детали к ним размечаются при загрузке прайса поставщика, в файл для сайта они не попадают.
 export const APP_ONLY = new Set(APP_MODELS.map((m) => m[1]));
-// Другие названия моделей у поставщиков: название → модель
-export const APP_ALIASES = new Map(APP_MODELS.flatMap((m) => (m[3] || []).map((a) => [a, m[1]])));
+// Другие названия моделей у поставщиков: название → модель (приложения и сайта)
+export const APP_ALIASES = new Map([...APP_MODELS.flatMap((m) => (m[3] || []).map((a) => [a, m[1]])), ...SITE_ALIASES]);
 
 export function decode(b) {
   const models = b.models.map(([brand, model, year, ifixit, sf, sfUrl]) => ({

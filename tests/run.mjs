@@ -294,6 +294,31 @@ await test('ремонты по любой детали: вид, вариант,
   assert.deepEqual(Object.keys(a52site[2]), ['b', 'cr', 'sim'], 'новые ремонты — и на сайте');
 });
 
+await test('особенности записи у поставщиков: цвет, тире без пробела, код модели, другие названия', async () => {
+  const { APP_ALIASES } = await imp('js/data.js');
+  const models = [
+    { brand: 'iPhone', model: 'iPhone 6' }, { brand: 'iPhone', model: 'iPhone 12' }, { brand: 'iPhone', model: 'iPhone 12 Pro' },
+    { brand: 'iPhone', model: 'iPhone 15 Pro Max' }, { brand: 'iPhone', model: 'iPhone SE 2020' }, { brand: 'Huawei', model: 'Huawei P20' },
+    { brand: 'Poco', model: 'Poco F1' }, { brand: 'Samsung', model: 'Samsung Galaxy A35' }, { brand: 'Samsung', model: 'Samsung Galaxy A34' },
+    { brand: 'Samsung', model: 'Samsung Galaxy Z Flip5' }, { brand: 'Xiaomi', model: 'Xiaomi Mi 8 Lite' },
+  ];
+  const idx = siteIndex(models.map((m) => m.model), APP_ALIASES);
+  const fam = new Map(models.map((m) => [m.model, BRAND_FAM[m.brand]]));
+  const map = (n) => mapRow(n, kindOf(n), idx, fam).models;
+  assert.deepEqual(map('Дисплей iPhone 6 белый - Премиум'), ['iPhone 6'], 'цвет без тире');
+  assert.deepEqual(map('Аккумулятор iPhone 15 Pro Max- DEJI (с верификацией, усиленная)'), ['iPhone 15 Pro Max'], 'тире без пробела');
+  assert.deepEqual(map('Дисплей iPhone 12/ 12 Pro- JCID (LTPS, HD, 60Гц)'), ['iPhone 12', 'iPhone 12 Pro']);
+  assert.deepEqual(map('Плата зарядки шлейф Huawei P20 - премиум'), ['Huawei P20'], 'русское слово перед моделью');
+  assert.deepEqual(map('Плата зарядки Xiaomi Mi 8 Lite с разъемом зарядки и микрофоном'), ['Xiaomi Mi 8 Lite']);
+  assert.deepEqual(map('Дисплей Samsung A34 5G (A346B) In-Cell (черная рама)'), ['Samsung Galaxy A34'], 'вариант детали в названии модели');
+  assert.deepEqual(map('Аккумулятор Xiaomi Pocophone F1 (BM4E) - JCID'), ['Poco F1'], 'другое название модели сайта');
+  assert.deepEqual(map('Аккумулятор iPhone SE 2 2020 - JCID (усиленная)'), ['iPhone SE 2020']);
+  assert.deepEqual(map('Плата зарядки Samsung A356B - Премиум'), ['Samsung Galaxy A35'], 'код Samsung');
+  assert.deepEqual(map('Дисплей Samsung Z Flip5 (F731B) внешний 3.4" - OR (SP) (черная рама)'), [], 'внешний экран раскладушки — не дисплей');
+  assert.equal(kindOf('Шлейф Xiaomi Poco F3/Mi 11i - разъем SIM'), 'fo', 'шлейф SIM — не разъём зарядки');
+  assert.equal(kindOf('Шлейф зарядки iPhone 17 Pro - системный разъем/ микрофон - черный (e sim)'), 'p');
+});
+
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {
   const salt = randomBytes(16);
   const key = await deriveKeyBytes(' Abcd-Efgh ', salt, 1000);

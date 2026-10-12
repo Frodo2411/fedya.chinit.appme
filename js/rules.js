@@ -42,10 +42,15 @@ export function siteIndex(modelNames, aliases) {
   return idx;
 }
 
-const SEG_SPLIT = pyRe(String.raw`\s+-\s+|\s+–\s+`);
+// « - » отделяет модель от описания; бывает и без пробела перед тире: «iPhone 15 Pro Max- DEJI»
+const SEG_SPLIT = pyRe(String.raw`\s+-\s+|\s+–\s+|(?<=\S)-\s+`);
 const SEG_YEAR = pyRe(String.raw`\(\s*(20\d\d)\s*\)`, 'g');
 const SEG_PAREN = pyRe(String.raw`\([^)]*\)`, 'g');
 const SEG_TAIL = pyRe(String.raw`\b(на системный разъем|системный разъем|на зарядку|премиум|в раме|с рамкой)\b.*$`, 'i');
+// Вариант детали прямо в названии модели: «Samsung A34 5G In-Cell»
+const SEG_QUALITY = pyRe(String.raw`\s+(?:In-?Cell|Incell|OLED|AMOLED|TFT|LCD)\b.*$`, 'i');
+// eSIM в названии корпуса: «iPhone 17 Pro e sim + sim»
+const SEG_ESIM = /\s+(?:e\s?sim|\d\s?sim)(?:\s*\+\s*sim)?(?=\s|$)/gi;
 
 export function modelSegment(name) {
   let s = name.trim().replace(KIND_PREFIX, '');
@@ -53,6 +58,9 @@ export function modelSegment(name) {
   s = s.replace(SEG_YEAR, ' $1');
   s = s.replace(SEG_PAREN, ' ');
   s = s.replace(SEG_TAIL, '');
+  s = s.replace(SEG_QUALITY, '').replace(SEG_ESIM, '');
+  // русские слова перед моделью: «Плата зарядки шлейф Huawei P20»
+  s = s.trim().replace(/^(?:[а-яё]+\s+)+(?=[A-Za-z])/i, '');
   return pyStrip(s.replace(/\s+/g, ' '), ' ,');
 }
 
@@ -79,7 +87,8 @@ function leadWords(words) {
 // 'Xiaomi 13T/Redmi Note 13 Pro 4G/14S' -> [['Xiaomi 13T'], ['Redmi Note 13 Pro 4G'], ['Redmi Note 14S', 'Xiaomi 14S', ...]]
 export function items(name) {
   const seg = modelSegment(name);
-  const parts = seg.split(/\s*\/\s*/).map((p) => p.trim()).filter(Boolean);
+  // русские слова после модели — цвет и пояснения: «iPhone 6 белый», «Mi 8 Lite с разъемом зарядки»
+  const parts = seg.split(/\s*\/\s*/).map((p) => p.replace(/\s+[а-яё].*$/i, '').trim()).filter(Boolean);
   const out = [];
   const prefixes = [];
   for (const p of parts) {
@@ -185,7 +194,8 @@ const T = {
   bUsed: R('разбор|снят'),
   bOrig: R(String.raw`\bOR\b(?!100)|original|оригинал|\borig\b`),
   bBoost: R('усилен'),
-  dSkip: R(String.raw`стекл|тачскрин|подсветк|защитн|\bOCA\b|рамка дисплея`),
+  // внешний (маленький) экран раскладушки — не основной дисплей
+  dSkip: R(String.raw`стекл|тачскрин|подсветк|защитн|\bOCA\b|рамка дисплея|внешн|маленьк`),
   dSkipNot: R('заменено.*стекл'),
   dReglass: R(String.raw`переклей|\bRef\b|refurb|заменено`),
   dUsed: R('снят|разбор|б/у'),
@@ -291,7 +301,8 @@ export function kindOf(name) {
   if (/^Задняя крышка/i.test(n)) return 'c';
   if (/^Плата для/i.test(n)) return null;
   if (/^(Плата зарядки|Шлейф зарядки|Шлейф\s*\/\s*плата зарядки|Нижняя плата)/i.test(n)) return 'p';
-  if (/^Шлейф/i.test(n) && /системн|разъ[её]м/i.test(n)) return 'p';
+  // шлейф на разъём SIM — не зарядка, а SIM-ридер (другой шлейф)
+  if (/^Шлейф/i.test(n) && /системн|разъ[её]м/i.test(n) && !(/\b(SIM|MMC)\b/i.test(n) && !/системн|заряд/i.test(n))) return 'p';
   return moreKind(n);
 }
 
@@ -311,7 +322,7 @@ function partWords(n) {
 function moreKind(n) {
   if (NOT_REPAIR.test(n)) return null;
   if (/^[СC]текло камер/i.test(n)) return 'cg';
-  if (/^[СC]текло\s/i.test(n) && /переклей/i.test(n)) return 'gl';
+  if (/^[СC]текло\s/i.test(n) && /переклей/i.test(n)) return /маленьк|внешн/i.test(n) ? null : 'gl';
   if (/^Тачскрин/i.test(n)) return 'tc';
   if (/^(Сим|SIM)[\s-]*лоток/i.test(n)) return 'sim';
   if (/^(Корпус|Средняя часть)/i.test(n)) return 'hs';
@@ -325,7 +336,7 @@ function moreKind(n) {
     if (/сканер|отпечат/i.test(w)) return 'fp';
     if (/кноп|включени|громкост|блокировк/i.test(w)) return 'bt';
     if (/межплат|на дисплей|экрана/i.test(w)) return 'fx';
-    if (/сенсор|микрофон|вспышк|беспровод|nfc|антенн|датчик/i.test(w)) return 'fo';
+    if (/сенсор|микрофон|вспышк|беспровод|nfc|антенн|датчик|\bsim\b|mmc/i.test(w)) return 'fo';
   }
   return null;
 }
@@ -340,7 +351,7 @@ function moreModels(name) {
   const head = (dash < 0 ? tail : tail.slice(0, dash))
     .replace(/\(\s*(20\d\d)\s*\)/g, ' $1')
     .replace(/\([^)]*\)/g, ' ')
-    .replace(/\s+(?:e\s?sim|\d\s?sim)(?:\s*\+\s*sim)?(?=\s|$)/gi, '')
+    .replace(SEG_ESIM, '')
     .replace(/\s+[а-яё].*$/i, '');
   return 'Дисплей ' + head + (dash < 0 ? '' : tail.slice(dash));
 }
