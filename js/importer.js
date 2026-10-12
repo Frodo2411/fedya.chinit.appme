@@ -1,9 +1,12 @@
 // Обновление прайса поставщика из его файла.
 // Знакомые позиции (то же точное название) берут прошлую разметку, новые размечаются правилами из rules.js.
+// Знакомая позиция без модели размечается заново: вдруг её модель появилась в приложении (js/models-app.js).
+// К знакомой позиции с моделями дописываются подходящие модели приложения, модели сайта остаются как были.
 // Столбцы с названием, ценой и наличием ищутся сами; цену узнаём по совпадению с прошлыми ценами.
 
 import { kindOf, families, mapRow, siteIndex, BRAND_FAM } from './rules.js';
 import { Pricer, SERVICES } from './engine.js';
+import { APP_ONLY, APP_ALIASES } from './data.js';
 
 export const IN_STOCK = 'В наличии';
 export const OUT_OF_STOCK = 'Нет в наличии';
@@ -113,7 +116,7 @@ function knownCosts(data, supKey) {
 export function buildImport(data, supKey, sheets, cols, today) {
   const rows = sheets[cols.sheet].rows;
   const siteNames = data.models.map((m) => m.model);
-  const idx = siteIndex(siteNames);
+  const idx = siteIndex(siteNames, APP_ALIASES);
   const famOfModel = new Map(data.models.map((m) => [m.model, BRAND_FAM[m.brand]]));
   // Одинаковые названия бывают у поставщика дважды: сопоставляем их по порядку
   const known = new Map();
@@ -126,7 +129,7 @@ export function buildImport(data, supKey, sheets, cols, today) {
   const used = new Map();
   const seen = new Set();
   const parts = [];
-  const report = { file: { rows: rows.length, parts: 0, otherBrands: 0, noPrice: 0 }, known: 0, priceUp: [], priceDown: [], fresh: [], unmapped: [], gone: [] };
+  const report = { file: { rows: rows.length, parts: 0, otherBrands: 0, noPrice: 0 }, known: 0, extended: 0, priceUp: [], priceDown: [], fresh: [], unmapped: [], gone: [] };
   for (const r of rows) {
     const raw = r[cols.nameCol];
     if (typeof raw !== 'string') continue;
@@ -140,15 +143,19 @@ export function buildImport(data, supKey, sheets, cols, today) {
     const stock = cols.stockCol === null || cols.stockCol === undefined ? null : normStock(r[cols.stockCol]);
     const olds = known.get(key);
     const n = used.get(key) || 0;
-    const old = olds ? olds[Math.min(n, olds.length - 1)] : null;
+    let old = olds ? olds[Math.min(n, olds.length - 1)] : null;
     used.set(key, n + 1);
+    if (old && !old.models.length && families(name).size && mapRow(name, svc, idx, famOfModel).models.length) old = null;
     if (old) {
       seen.add(key);
       report.known++;
       if (old.cost && cost && Math.abs(cost - old.cost) >= 0.01 && old.tier !== 'skip' && old.models.length) {
         (cost > old.cost ? report.priceUp : report.priceDown).push({ name, old: old.cost, cost });
       }
-      parts.push({ ...old, name, cost, stock });
+      const extra = old.models.length && families(name).size
+        ? mapRow(name, svc, idx, famOfModel).models.filter((m) => APP_ONLY.has(m) && !old.models.includes(m)) : [];
+      if (extra.length) report.extended++;
+      parts.push({ ...old, name, cost, stock, models: extra.length ? [...old.models, ...extra] : old.models });
       continue;
     }
     if (!families(name).size) { report.file.otherBrands++; continue; }

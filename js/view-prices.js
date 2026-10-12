@@ -85,7 +85,7 @@ export function createPricesView(app) {
         h('div', { class: 'card flat', style: 'margin-top:16px' },
           h('div', { class: 'small muted' }, 'В прайсе ', app.data.models.length, ' моделей. Прайсы: ',
             Object.values(sup).map((s) => s.name + ' от ' + fmt(s.date || app.data.priceDate)).join(', '), '.'),
-          h('div', { class: 'small faint', style: 'margin-top:6px' }, 'Ищи по-русски и с ошибками: «айфон 14 про», «самсунг а52», «поко х6».')),
+          h('div', { class: 'small faint', style: 'margin-top:6px' }, 'Ищи по-русски и с ошибками: «айфон 14 про», «самсунг а52», «поко х6», «пиксель 6».')),
       );
       return;
     }
@@ -257,6 +257,7 @@ export function createPricesView(app) {
     const svcData = e.services[st.svc];
     const visible = svcData.opts.filter((o) => !o.hidden);
     const hidden = svcData.opts.filter((o) => o.hidden);
+    const noParts = SERVICES.every((svc) => !e.services[svc].opts.length);
     const coefs = 'сложность ×' + String(diffCoef(S, e)).replace('.', ',') + ', новизна ×' + String(noveltyCoef(S, e)).replace('.', ',');
     fill(modelScreen, 
       h('div', { class: 'topbar' }, h('button', { class: 'back', onclick: closeModel }, icon('back'), 'Поиск')),
@@ -271,7 +272,8 @@ export function createPricesView(app) {
         }, h('span', { class: 'name', text: SVC[svc] }), h('span', { class: 'from', text: from ? 'от ' + from + ' р.' : 'нет деталей' }));
       })),
       visible.length ? visible.map((o) => variantCard(e, st.svc, o))
-        : h('div', { class: 'empty' }, 'У поставщиков нет деталей для этого ремонта.', h('br'), 'Цена уточняется отдельно.'),
+        : noParts ? h('div', { class: 'empty' }, 'Деталей для этой модели в прайсе пока нет.', h('br'), 'Если они есть у поставщика — загрузи его свежий прайс: «Ещё» → «Прайсы поставщиков».')
+          : h('div', { class: 'empty' }, 'У поставщиков нет деталей для этого ремонта.', h('br'), 'Цена уточняется отдельно.'),
       hidden.length ? h('button', { class: 'link', style: 'margin-top:8px', onclick: () => { st.showHidden = !st.showHidden; draw(); } },
         st.showHidden ? 'Не показывать скрытые варианты' : 'Скрытые варианты: ' + hidden.length + ' (не дешевле варианта получше)') : null,
       st.showHidden ? hidden.map((o) => variantCard(e, st.svc, o)) : null,

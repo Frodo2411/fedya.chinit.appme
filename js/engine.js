@@ -2,6 +2,7 @@
 // Повторяет build_prices.py из prais-tools: те же правила, то же округление, тот же выбор детали.
 
 import { pyRe } from './pyre.js';
+import { APP_ONLY } from './data.js';
 
 export const SERVICES = ['b', 'd', 'p', 'c'];
 
@@ -43,6 +44,8 @@ export const DEFAULTS = {
 // Брак, б/у с повреждениями, ячейки и подобное не берём
 const DEFECT = pyRe(String.raw`битк|б/у|\bБУ\b|царап|пятн|выгор|дефект|трещ|точк|полос|засвет|Diagnosable|\b9[0-4]%`, 'i');
 const WIDE_CUT = pyRe('широкий вырез', 'i');
+// Pixel вскрываются через дисплей, кроме стеклянных 3 и 4 и линейки 10: у них батарея сзади
+const PIXEL_BACK = /^Google Pixel (3|3 XL|4|4 XL|10|10 Pro|10 Pro XL)$/;
 
 export function settingsWithDefaults(s) {
   const out = JSON.parse(JSON.stringify(DEFAULTS));
@@ -179,10 +182,11 @@ export class Pricer {
     return index;
   }
 
-  // Какие проклейки нужны ремонту. Айфоны из списка «без лазера» и все Android вскрываются сзади, остальные айфоны — через дисплей.
+  // Какие проклейки нужны ремонту. Через дисплей вскрываются айфоны с лазером и почти все Pixel, остальные — сзади.
   glueTypes(model, svc) {
     if (!this.S.glue) return [];
-    const open = !model.startsWith('iPhone') || this.noLaser.has(model) ? 'gc' : 'gd';
+    const front = model.startsWith('iPhone') ? !this.noLaser.has(model) : model.startsWith('Google Pixel') && !PIXEL_BACK.test(model);
+    const open = front ? 'gd' : 'gc';
     return [...new Set({ d: ['gd'], c: ['gc'], b: ['gb', open], p: [open] }[svc] || [])];
   }
 
@@ -264,9 +268,9 @@ export class Pricer {
   }
 }
 
-// Файл цен для сайта: только цены клиенту, тот же формат, что prices-models.js
+// Файл цен для сайта: только цены клиенту, тот же формат, что prices-models.js. Моделей только для приложения там нет.
 export function siteFile(pricer, monthTitle) {
-  const lines = pricer.all().map((e) => {
+  const lines = pricer.all().filter((e) => !APP_ONLY.has(e.model)).map((e) => {
     const prices = {};
     for (const svc of SERVICES) {
       const shown = e.services[svc].opts.filter((o) => !o.hidden).map((o) => [o.tier, o.price]);

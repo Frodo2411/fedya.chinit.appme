@@ -2,6 +2,14 @@
 // models: [brand, model, year, ifixit, smartfix{}, smartfixUrl]
 // parts:  [supplier, name, cost, stock, svc, tier, [model indexes], line (0 — как name)]
 
+import { APP_MODELS } from './models-app.js';
+
+// Модели только для приложения: на сайте их нет, а детали у поставщиков есть (js/models-app.js).
+// Детали к ним размечаются при загрузке прайса поставщика, в файл для сайта они не попадают.
+export const APP_ONLY = new Set(APP_MODELS.map((m) => m[1]));
+// Другие названия моделей у поставщиков: название → модель
+export const APP_ALIASES = new Map(APP_MODELS.flatMap((m) => (m[3] || []).map((a) => [a, m[1]])));
+
 export function decode(b) {
   const models = b.models.map(([brand, model, year, ifixit, sf, sfUrl]) => ({
     brand, model, year: year || null, ifixit: ifixit === undefined ? null : ifixit, sf: sf || null, sfUrl: sfUrl || null,
@@ -10,6 +18,10 @@ export function decode(b) {
   const parts = b.parts.map(([sup, name, cost, stock, svc, tier, ms, line]) => ({
     sup, name, cost, stock: stock || null, svc, tier, models: ms.map((i) => names[i]), line: line === 0 ? name : line,
   }));
+  const have = new Set(names);
+  for (const [brand, model, year] of APP_MODELS) {
+    if (!have.has(model)) models.push({ brand, model, year, ifixit: null, sf: null, sfUrl: null });
+  }
   return {
     v: b.v, priceDate: b.priceDate, sfDate: b.sfDate, suppliers: b.suppliers, models, parts,
     history: b.history || [],

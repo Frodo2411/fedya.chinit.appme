@@ -106,10 +106,11 @@ export async function openImport(app, supKey, file) {
           h('div', { class: 'grow' }, h('div', { class: 'small break', text: p.name }),
             h('div', { class: 'tiny muted', text: SVC[p.svc] + ' · ' + VAR_APP[p._tier] + ' · ' + money(p.cost) + ' → ' + p.models.join(', ') })));
       }),
-      list('Не распознаны (не на сайте или непонятное название)', r.unmapped, (n) => h('div', { class: 'tiny muted break', style: 'padding:4px 0', text: n })),
+      list('Не распознаны (нет такой модели в приложении или непонятное название)', r.unmapped, (n) => h('div', { class: 'tiny muted break', style: 'padding:4px 0', text: n })),
       list('Пропали из прайса', r.gone, (n) => h('div', { class: 'tiny muted break', style: 'padding:4px 0', text: n })),
       list('Подорожали у поставщика', r.priceUp, (x) => h('div', { class: 'tiny muted break', style: 'padding:4px 0', text: x.name + ': ' + x.old + ' → ' + x.cost })),
       list('Подешевели у поставщика', r.priceDown, (x) => h('div', { class: 'tiny muted break', style: 'padding:4px 0', text: x.name + ': ' + x.old + ' → ' + x.cost })),
+      r.extended ? h('div', { class: 'tiny faint', style: 'margin-top:10px', text: 'Знакомые позиции, к которым добавились модели только для приложения: ' + r.extended }) : null,
       r.file.noPrice ? h('div', { class: 'tiny faint', style: 'margin-top:10px', text: 'Без цены в файле: ' + r.file.noPrice + ' поз.' }) : null,
     );
     if (scroller) scroller.scrollTop = scrollTop;

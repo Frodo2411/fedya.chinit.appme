@@ -159,6 +159,95 @@ await test('поиск модели по-русски и с ошибками', (
   assert.equal(top('samsng a52'), 'Samsung Galaxy A52');
 });
 
+await test('Google Pixel: модели приложения, поиск, разбор названий, загрузка прайса, проклейка, не на сайт', async () => {
+  const { APP_ONLY } = await imp('js/data.js');
+  const data = decode(encode(DATA));
+  assert.ok(data.models.some((m) => m.model === 'Google Pixel 6' && m.brand === 'Google' && m.year === 2021), 'Pixel есть среди моделей');
+  assert.equal(decode(encode(data)).models.length, data.models.length, 'второй раз не добавляются');
+  const s = new ModelSearch(data.models);
+  const top = (q) => (s.find(q)[0] || {}).model;
+  assert.equal(top('pixel 6'), 'Google Pixel 6');
+  assert.equal(top('пиксель 6'), 'Google Pixel 6');
+  assert.equal(top('гугл пиксель 6 про'), 'Google Pixel 6 Pro');
+  assert.equal(top('пиксель 6а'), 'Google Pixel 6a');
+  assert.equal(top('pixel 9 pro xl'), 'Google Pixel 9 Pro XL');
+  const names = data.models.map((m) => m.model);
+  const idx = siteIndex(names);
+  const fam = new Map(data.models.map((m) => [m.model, BRAND_FAM[m.brand]]));
+  const map = (n, k) => mapRow(n, k, idx, fam);
+  assert.deepEqual(map('Аккумулятор Google Pixel 6 (GMSB3)', 'b').models, ['Google Pixel 6']);
+  assert.deepEqual(map('Аккумулятор для Pixel 6 Pro - G63QN', 'b').models, ['Google Pixel 6 Pro']);
+  assert.deepEqual(map('Дисплей Google Pixel 6 (в рамке) - OLED', 'd'), { models: ['Google Pixel 6'], tier: 'copy_oled', line: 'Дисплей Google Pixel 6 (в рамке) - OLED' });
+  assert.equal(map('Дисплей Google Pixel 6 (в рамке, со сканером) - Original', 'd').tier, 'orig_new');
+  assert.deepEqual(map('Дисплей Google Pixel 7/7 Pro - стекло', 'd').models, []);
+  assert.deepEqual(map('Задняя крышка Google Pixel 7/8 - черная', 'c').models, ['Google Pixel 7', 'Google Pixel 8']);
+  assert.deepEqual(map('Плата зарядки Pixel 4a/4a 5G', 'p').models, ['Google Pixel 4a', 'Google Pixel 4a 5G']);
+  assert.deepEqual(map('Дисплей Google Pixel 4a 5G - OLED', 'd').models, ['Google Pixel 4a 5G']);
+  assert.deepEqual(map('Проклейка дисплея Google Pixel 6', 'g').models, ['Google Pixel 6']);
+  // загрузка прайса: новые строки Pixel и знакомая строка без модели размечаются
+  const sheets = [{ name: 'Прайс', rows: [
+    ['Наименование', 'Цена', 'Наличие'],
+    ['Дисплей iPhone 11 - Incell JK', 38, 'В наличии'],
+    ['Аккумулятор Google Pixel 6 (GMSB3)', 31.5, 'В наличии'],
+    ['Дисплей Google Pixel 6 (в рамке) - OLED', 104, 'В наличии'],
+    ['Дисплей Google Pixel 6 (в рамке, со сканером) - Original', 240, 'В наличии'],
+  ] }];
+  const before = { ...data, parts: [...data.parts, P('P', 'Аккумулятор Google Pixel 6 (GMSB3)', 30, 'В наличии', 'b', 'skip', [])] };
+  const cols = detect(sheets, 'P', before);
+  const { next, report } = buildImport(before, 'P', sheets, cols, '2026-11-05');
+  assert.equal(report.file.otherBrands, 0);
+  assert.deepEqual(report.fresh.map((p) => [p.name, p.tier, p.models.join()]), [
+    ['Аккумулятор Google Pixel 6 (GMSB3)', 'copy', 'Google Pixel 6'],
+    ['Дисплей Google Pixel 6 (в рамке) - OLED', 'copy_oled', 'Google Pixel 6'],
+    ['Дисплей Google Pixel 6 (в рамке, со сканером) - Original', 'orig_new', 'Google Pixel 6'],
+  ]);
+  assert.equal(next.parts.filter((p) => p.name === 'Аккумулятор Google Pixel 6 (GMSB3)').length, 1, 'без дублей');
+  const pr = new Pricer(decode(encode(next)), { year: 2026 });
+  const px = pr.model('Google Pixel 6');
+  assert.deepEqual(px.services.b.opts.map((o) => [o.tier, o.cost]), [['copy', 31.5]]);
+  assert.deepEqual(px.services.d.opts.map((o) => [o.tier, o.cost]), [['copy_oled', 104], ['orig_new', 240]]);
+  assert.ok(clientChanges(before, next, { year: 2026 }).some((c) => c.model === 'Google Pixel 6' && c.old === null));
+  // проклейка: Pixel 6 вскрывается через дисплей, Pixel 4 и 10 — сзади
+  assert.deepEqual(pr.glueTypes('Google Pixel 6', 'b'), ['gb', 'gd']);
+  assert.deepEqual(pr.glueTypes('Google Pixel 4', 'b'), ['gb', 'gc']);
+  assert.deepEqual(pr.glueTypes('Google Pixel 10 Pro', 'p'), ['gc']);
+  assert.deepEqual(pr.glueTypes('Samsung Galaxy A52', 'b'), ['gb', 'gc']);
+  // в файл для сайта модели только для приложения не попадают
+  const text = siteFile(pr, 'Ноябрь 2026');
+  assert.ok(!text.includes('Pixel'));
+  assert.ok(APP_ONLY.has('Google Pixel 6'));
+});
+
+await test('другие бренды: семьи, другие названия, поиск, знакомая позиция получает модель приложения', async () => {
+  const { families: fams } = RULES;
+  assert.deepEqual([...fams('Дисплей TECNO Spark 10 Pro - OLED')], ['tecno']);
+  assert.deepEqual([...fams('Аккумулятор OnePlus Nord CE 3 Lite')], ['oneplus']);
+  assert.deepEqual([...fams('Дисплей ZTE Nubia Neo 2')], ['zte']);
+  const models = [
+    { brand: 'Tecno', model: 'Tecno Spark 10' }, { brand: 'Tecno', model: 'Tecno Spark 10 Pro' }, { brand: 'Tecno', model: 'Tecno Spark 20' },
+    { brand: 'Infinix', model: 'Infinix Hot 30i' }, { brand: 'Nothing', model: 'Nothing CMF Phone 1' }, { brand: 'OnePlus', model: 'OnePlus Nord CE 3 Lite' },
+  ];
+  const idx = siteIndex(models.map((m) => m.model), new Map([['Nothing Phone 1 CMF', 'Nothing CMF Phone 1']]));
+  const fam = new Map(models.map((m) => [m.model, BRAND_FAM[m.brand]]));
+  assert.deepEqual(mapRow('Аккумулятор Tecno Spark 10 4G/10 Pro/20 (BL-49ST)', 'b', idx, fam).models, ['Tecno Spark 10', 'Tecno Spark 10 Pro', 'Tecno Spark 20']);
+  assert.deepEqual(mapRow('Дисплей Nothing Phone 1 CMF', 'd', idx, fam).models, ['Nothing CMF Phone 1'], 'другое название поставщика');
+  assert.deepEqual(mapRow('Дисплей OnePlus Nord CE3 Lite 5G - OR', 'd', idx, fam).models, ['OnePlus Nord CE 3 Lite']);
+  const s = new ModelSearch(models);
+  const top = (q) => (s.find(q)[0] || {}).model;
+  assert.equal(top('техно спарк 10 про'), 'Tecno Spark 10 Pro');
+  assert.equal(top('инфиникс хот 30и'), 'Infinix Hot 30i');
+  assert.equal(top('ванплас норд се 3 лайт'), 'OnePlus Nord CE 3 Lite');
+  // знакомая позиция с моделью сайта получает и модель приложения, модель сайта остаётся
+  const data = decode(encode(DATA));
+  const row = 'Проклейка дисплея iPhone 11/Pixel 6 - премиум';
+  const before = { ...data, parts: [...data.parts, { sup: 'E', name: row, cost: 3, stock: null, svc: 'g', tier: 'gd', models: ['iPhone 11'], line: row }] };
+  const sheets = [{ name: 'Прайс', rows: [['Наименование', 'Цена'], ...DATA.parts.filter((p) => p.sup === 'E').map((p) => [p.name, p.cost]), [row, 3]] }];
+  const { next, report } = buildImport(before, 'E', sheets, detect(sheets, 'E', before), '2026-11-05');
+  assert.equal(report.extended, 1);
+  assert.deepEqual(next.parts.find((p) => p.name === row).models, ['iPhone 11', 'Google Pixel 6']);
+  assert.equal(report.fresh.length, 0, 'знакомая позиция не попадает в новые');
+});
+
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {
   const salt = randomBytes(16);
   const key = await deriveKeyBytes(' Abcd-Efgh ', salt, 1000);
@@ -176,7 +265,8 @@ await test('xlsx: чтение и обновление прайса', async () =
   assert.equal(cols.priceCol, 2, 'опт, а не розница');
   assert.equal(cols.stockCol, 4);
   const { next, report } = buildImport(DATA, 'P', sheets, cols, '2026-11-05');
-  assert.equal(report.file.otherBrands, 1, 'Tecno не наш бренд');
+  assert.equal(report.file.otherBrands, 0);
+  assert.ok(report.unmapped.includes('Дисплей Tecno Spark 20 - In-Cell'), 'Tecno знаком, но модели нет в данных');
   assert.ok(report.fresh.some((p) => p.name.startsWith('Аккумулятор iPhone 11 - усиленная') && p.tier === 'copy_boost'));
   assert.ok(report.gone.includes('Дисплей iPhone 11 - Incell JK'));
   assert.equal(next.priceDate, '2026-11-05');

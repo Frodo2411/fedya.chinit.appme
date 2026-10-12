@@ -7,7 +7,7 @@ import { pyRe, pySplit, pyStrip, beforeFirst } from './pyre.js';
 const KIND_PREFIX = pyRe(String.raw`^(Аккумулятор|Дисплей|Задняя крышка|Плата зарядки|Нижняя плата|Шлейф зарядки|Шлейф|Разъем|Разъём)\s+(для\s+)?`, 'i');
 
 const NM = [
-  [pyRe(String.raw`\bgalaxy\b|\bsamsung\b|\bapple\b|\bhuawei\b(?=\s+(honor|nova|mate|p\d|pura|p smart))`, 'g'), ' '],
+  [pyRe(String.raw`\bgalaxy\b|\bsamsung\b|\bapple\b|\bgoogle\b|\bhuawei\b(?=\s+(honor|nova|mate|p\d|pura|p smart))`, 'g'), ' '],
   [pyRe(String.raw`\bxiaomi\b(?=\s+(redmi|poco|mi)\b)`, 'g'), ' '],
   [pyRe(String.raw`\bxiaomi\s+mi\b|\bmi\b`, 'g'), ' xiaomi '],
   [pyRe(String.raw`\bpro\s*plus\b`, 'g'), 'pro+'],
@@ -27,12 +27,17 @@ export function normModel(s) {
   return t;
 }
 
-export function siteIndex(modelNames) {
+// aliases: другое название модели у поставщика → модель (Map), только для моделей из списка
+export function siteIndex(modelNames, aliases) {
   const idx = new Map();
-  for (const m of modelNames) {
-    const k = normModel(m);
+  const add = (k, m) => {
     if (!idx.has(k)) idx.set(k, []);
-    idx.get(k).push(m);
+    if (!idx.get(k).includes(m)) idx.get(k).push(m);
+  };
+  for (const m of modelNames) add(normModel(m), m);
+  if (aliases) {
+    const have = new Set(modelNames);
+    for (const [a, m] of aliases) if (have.has(m)) add(normModel(a), m);
   }
   return idx;
 }
@@ -51,8 +56,16 @@ export function modelSegment(name) {
   return pyStrip(s.replace(/\s+/g, ' '), ' ,');
 }
 
-const BRAND_WORDS = ['Xiaomi', 'Redmi', 'Poco', 'Mi', 'Huawei', 'Honor', 'Samsung', 'Galaxy', 'Realme', 'iPhone'];
-const FAMILY_LEADS = ['Xiaomi', 'Redmi', 'Poco', 'Huawei', 'Honor', 'Samsung', 'Realme', 'iPhone'];
+const BRAND_WORDS = ['Xiaomi', 'Redmi', 'Poco', 'Mi', 'Huawei', 'Honor', 'Samsung', 'Galaxy', 'Realme', 'iPhone', 'Google', 'Pixel'];
+const FAMILY_LEADS = ['Xiaomi', 'Redmi', 'Poco', 'Huawei', 'Honor', 'Samsung', 'Realme', 'iPhone', 'Google', 'Pixel'];
+// Бренды, которых нет на сайте (их модели только в приложении): слово в названии → семья. Регистр любой: TECNO, Oppo.
+const MORE_FAM = {
+  tecno: 'tecno', itel: 'itel', infinix: 'infinix', vivo: 'vivo', iqoo: 'vivo', oppo: 'oppo', oneplus: 'oneplus', nothing: 'nothing', cmf: 'nothing',
+  oukitel: 'oukitel', blackview: 'blackview', doogee: 'doogee', ulefone: 'ulefone', tcl: 'tcl', zte: 'zte', nubia: 'zte', lenovo: 'lenovo',
+  motorola: 'motorola', nokia: 'nokia', sony: 'sony', wiko: 'wiko',
+};
+const isBrand = (w) => BRAND_WORDS.includes(w) || w.toLowerCase() in MORE_FAM;
+const isFamilyLead = (w) => FAMILY_LEADS.includes(w) || w.toLowerCase() in MORE_FAM;
 
 function leadWords(words) {
   const lead = [];
@@ -76,7 +89,7 @@ export function items(name) {
     }
     const lead = leadWords(pySplit(p));
     let alts;
-    if (lead.length && BRAND_WORDS.includes(lead[0])) {
+    if (lead.length && isBrand(lead[0])) {
       alts = [p];
     } else {
       const order = [];
@@ -93,7 +106,7 @@ export function items(name) {
       const at = prefixes.indexOf(pre);
       if (at !== -1) prefixes.splice(at, 1);
       prefixes.push(pre);
-      if (FAMILY_LEADS.includes(fullLead[0]) && !prefixes.includes(fullLead[0])) prefixes.unshift(fullLead[0]);
+      if (isFamilyLead(fullLead[0]) && !prefixes.includes(fullLead[0])) prefixes.unshift(fullLead[0]);
     }
   }
   return out;
@@ -104,7 +117,7 @@ const SAMSUNG_5G_ONLY = new Set(['a52s', 'a33', 'a53', 'a73', 'a34', 'a54', 'a35
 const POCO_5G_ONLY = new Set(['f3', 'f4', 'f5', 'f6', 'f7', 'x5 pro', 'x6', 'x6 pro', 'x7', 'x7 pro', 'x8 pro']);
 const HONOR_5G_ONLY = new Set(['x9a', 'x9b', 'x9c', 'x9d', '50']);
 const REALME_5G_ONLY = new Set(['12+']);
-const PREFIX = ['Samsung Galaxy ', 'Redmi ', 'Poco ', 'Xiaomi ', 'Honor ', 'Huawei ', 'Realme ', 'iPhone '];
+const PREFIX = ['Samsung Galaxy ', 'Redmi ', 'Poco ', 'Xiaomi ', 'Honor ', 'Huawei ', 'Realme ', 'iPhone ', 'Google Pixel '];
 
 function core(model) {
   for (const p of PREFIX) if (model.startsWith(p)) return model.slice(p.length);
@@ -234,9 +247,13 @@ export function lineKey(name) {
 }
 
 // --- Для новых строк прайса: что за деталь и для какого бренда
-const FAM = { iphone: 'apple', samsung: 'samsung', galaxy: 'samsung', xiaomi: 'xiaomi', redmi: 'xiaomi', poco: 'xiaomi', mi: 'xiaomi', huawei: 'huawei', honor: 'huawei', realme: 'realme' };
-const BRAND_RE = /iPhone|Samsung|Galaxy|Xiaomi|Redmi|Poco|Huawei|Honor|Realme|\bMi\b/gi;
-export const BRAND_FAM = { iPhone: 'apple', Samsung: 'samsung', Xiaomi: 'xiaomi', Redmi: 'xiaomi', Poco: 'xiaomi', Huawei: 'huawei', Honor: 'huawei', Realme: 'realme' };
+const FAM = { iphone: 'apple', samsung: 'samsung', galaxy: 'samsung', xiaomi: 'xiaomi', redmi: 'xiaomi', poco: 'xiaomi', mi: 'xiaomi', huawei: 'huawei', honor: 'huawei', realme: 'realme', google: 'google', pixel: 'google', ...MORE_FAM };
+const BRAND_RE = new RegExp(String.raw`iPhone|Samsung|Galaxy|Xiaomi|Redmi|Poco|Huawei|Honor|Realme|Google|Pixel|\bMi\b|\b(?:` + Object.keys(MORE_FAM).join('|') + String.raw`)\b`, 'gi');
+export const BRAND_FAM = {
+  iPhone: 'apple', Samsung: 'samsung', Xiaomi: 'xiaomi', Redmi: 'xiaomi', Poco: 'xiaomi', Huawei: 'huawei', Honor: 'huawei', Realme: 'realme', Google: 'google',
+  Tecno: 'tecno', Itel: 'itel', Infinix: 'infinix', Vivo: 'vivo', OPPO: 'oppo', OnePlus: 'oneplus', Nothing: 'nothing', Oukitel: 'oukitel', Blackview: 'blackview',
+  Doogee: 'doogee', Ulefone: 'ulefone', TCL: 'tcl', ZTE: 'zte', Lenovo: 'lenovo', Motorola: 'motorola', Nokia: 'nokia', Sony: 'sony', Wiko: 'wiko',
+};
 
 export function families(name) {
   const out = new Set();
