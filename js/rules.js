@@ -200,6 +200,8 @@ const T = {
   pSkip: R('беспровод|вспышк|громкост|включени|кнопк|сканер|отпечат|антенн|динамик|вибро|межплат|на дисплей|lcd'),
   pUsed: R('снят|разбор'),
   pOrig: R(String.raw`\bOR\b|original|сервис|\borig\b`),
+  oUsed: R('снят|разбор'),
+  oOrig: R(String.raw`\bOR\b|original|\borig\b|оригинал|сервис`),
 };
 
 export function tier(kind, n) {
@@ -232,6 +234,12 @@ export function tier(kind, n) {
     if (T.pOrig.test(n)) return 'orig_new';
     return 'copy';
   }
+  if (MORE_KINDS.has(kind)) {
+    if (T.oUsed.test(n)) return 'orig_used';
+    // стекло под переклейку и тачскрин оригинальными не бывают: «OR» у них — про качество плёнки
+    if (kind !== 'gl' && kind !== 'tc' && T.oOrig.test(n)) return 'orig_new';
+    return 'copy';
+  }
   return 'skip';
 }
 
@@ -254,6 +262,8 @@ export const BRAND_FAM = {
   Tecno: 'tecno', Itel: 'itel', Infinix: 'infinix', Vivo: 'vivo', OPPO: 'oppo', OnePlus: 'oneplus', Nothing: 'nothing', Oukitel: 'oukitel', Blackview: 'blackview',
   Doogee: 'doogee', Ulefone: 'ulefone', TCL: 'tcl', ZTE: 'zte', Lenovo: 'lenovo', Motorola: 'motorola', Nokia: 'nokia', Sony: 'sony', Wiko: 'wiko',
 };
+
+const BRAND_ONE = new RegExp(BRAND_RE.source, 'i');
 
 export function families(name) {
   const out = new Set();
@@ -282,14 +292,64 @@ export function kindOf(name) {
   if (/^Плата для/i.test(n)) return null;
   if (/^(Плата зарядки|Шлейф зарядки|Шлейф\s*\/\s*плата зарядки|Нижняя плата)/i.test(n)) return 'p';
   if (/^Шлейф/i.test(n) && /системн|разъ[её]м/i.test(n)) return 'p';
+  return moreKind(n);
+}
+
+// Остальные детали: ремонты только для приложения (на сайте их нет).
+// Расходники и инструмент (наборы, формы, шлейфы JCID для восстановления, защитные стёкла, рамки дисплея) — не ремонт.
+export const MORE_KINDS = new Set(['cr', 'cf', 'ls', 'es', 'fp', 'bt', 'fx', 'fo', 'hs', 'cg', 'sim', 'tc', 'gl']);
+const NOT_REPAIR = /JCID|для ремонта аккумулятора|tag-?on|без пайки|для теста|микроскоп/i;
+
+// Слова названия вне модели: до бренда и после « - » («Шлейф iPhone 11 - кнопки громкости», «Шлейф на вспышку iPhone 11»)
+function partWords(n) {
+  const at = n.search(BRAND_ONE);
+  if (at < 0) return n;
+  const dash = n.indexOf(' - ', at);
+  return n.slice(0, at) + ' ' + (dash < 0 ? '' : n.slice(dash));
+}
+
+function moreKind(n) {
+  if (NOT_REPAIR.test(n)) return null;
+  if (/^[СC]текло камер/i.test(n)) return 'cg';
+  if (/^[СC]текло\s/i.test(n) && /переклей/i.test(n)) return 'gl';
+  if (/^Тачскрин/i.test(n)) return 'tc';
+  if (/^(Сим|SIM)[\s-]*лоток/i.test(n)) return 'sim';
+  if (/^(Корпус|Средняя часть)/i.test(n)) return 'hs';
+  if (/^(Динамик слуховой|Слуховой динамик)/i.test(n)) return 'es';
+  if (/^(Динамик|Полифонический динамик)/i.test(n)) return 'ls';
+  if (/^(Передняя камера|Фронтальная камера|Передняя сборка)/i.test(n)) return 'cf';
+  if (/^Задняя камера/i.test(n)) return 'cr';
+  if (/^Камера\s/i.test(n)) return /передн|фронтал/i.test(partWords(n)) ? 'cf' : 'cr';
+  if (/^Шлейф/i.test(n)) {
+    const w = partWords(n);
+    if (/сканер|отпечат/i.test(w)) return 'fp';
+    if (/кноп|включени|громкост|блокировк/i.test(w)) return 'bt';
+    if (/межплат|на дисплей|экрана/i.test(w)) return 'fx';
+    if (/сенсор|микрофон|вспышк|беспровод|nfc|антенн|датчик/i.test(w)) return 'fo';
+  }
   return null;
+}
+
+// У остальных деталей модель — с бренда до первого русского слова: «Шлейф на вспышку iPhone 11 - Orig»,
+// «Стекло переклей Honor 50 Lite/Nova 8i с OCA пленкой - OR», «Корпус iPhone 15 e sim Черный + сим-лоток - ПРЕМИУМ»
+function moreModels(name) {
+  const at = name.search(BRAND_ONE);
+  if (at < 0) return name;
+  const tail = name.slice(at);
+  const dash = tail.indexOf(' - ');
+  const head = (dash < 0 ? tail : tail.slice(0, dash))
+    .replace(/\(\s*(20\d\d)\s*\)/g, ' $1')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\s+(?:e\s?sim|\d\s?sim)(?:\s*\+\s*sim)?(?=\s|$)/gi, '')
+    .replace(/\s+[а-яё].*$/i, '');
+  return 'Дисплей ' + head + (dash < 0 ? '' : tail.slice(dash));
 }
 
 // Разметка новой строки: модели, вариант, линия. Как map_row() из rules.py плюс поправки из merge_mapping.py.
 export function mapRow(name, kind, idx, famOfModel) {
   const fams = families(name);
   // у проклейки та же запись модели, что у дисплея: «Проклейка дисплея iPhone 15 - Orig» → «Дисплей iPhone 15 - Orig»
-  const forModels = kind === 'g' ? name.trim().replace(GLUE_PREFIX, 'Дисплей ') : name;
+  const forModels = kind === 'g' ? name.trim().replace(GLUE_PREFIX, 'Дисплей ') : MORE_KINDS.has(kind) ? moreModels(name) : name;
   let models = [];
   for (const m of matchModels(forModels, idx)) if (fams.has(famOfModel.get(m)) && !models.includes(m)) models.push(m);
   let t = kind === 'g' ? glueType(name) : tier(kind, name);

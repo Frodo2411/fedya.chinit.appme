@@ -1,7 +1,8 @@
 // Экран «Ещё»: прайсы, расчёт цены, текст для клиента, поставщики, Google Таблица, приложение.
 
 import { h, fill, toast, openSheet, field, parseNum, fmtDate, shareFile, copyText } from './ui.js';
-import { DEFAULTS, settingsWithDefaults, siteFile } from './engine.js';
+import { DEFAULTS, SERVICES, settingsWithDefaults, siteFile } from './engine.js';
+import { SVC } from './view-prices.js';
 import { openImport } from './import-flow.js';
 import { monthTitle } from './ui.js';
 
@@ -95,9 +96,8 @@ function openFormula(app) {
     num(r[0], i ? '' : labelA, (n) => { r[0] = n; }), num(r[1], i ? '' : labelB, (n) => { r[1] = n; })));
   const body = h('div', {},
     h('h3', { style: 'margin-top:8px', text: 'Работа (база), р.' }),
-    h('div', { class: 'grid2' },
-      num(S.base.b, 'Аккумулятор', (n) => { S.base.b = n; }), num(S.base.d, 'Дисплей', (n) => { S.base.d = n; }),
-      num(S.base.p, 'Разъём зарядки', (n) => { S.base.p = n; }), num(S.base.c, 'Задняя крышка', (n) => { S.base.c = n; })),
+    h('div', { class: 'grid2' }, SERVICES.map((svc) => num(S.base[svc], SVC[svc], (n) => { S.base[svc] = n; }))),
+    h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Первые четыре ремонта — как на сайте. Остальные есть только в приложении: их цену стоит проверить и подправить под себя.' }),
     h('div', { class: 'grid2' },
       num(S.min_work, 'Минимум за работу, р.', (n) => { S.min_work = n; }),
       num(S.round, 'Округлять до, р.', (n) => { S.round = n; })),
@@ -118,7 +118,7 @@ function openFormula(app) {
     h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: S.glue, onchange: (e) => { S.glue = e.target.checked; } }),
       'Учитывать проклейку в заработке и в заказе'),
     num(S.glue_default, 'Если своей проклейки нет в прайсе, р.', (n) => { S.glue_default = n; }),
-    h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'На цену клиенту не влияет. Дисплей — проклейка дисплея, крышка — задней крышки, аккумулятор — батареи и стороны вскрытия, разъём — стороны вскрытия. Айфоны из списка ниже и все Android вскрываются сзади, остальные айфоны — через дисплей. Берётся самая дешёвая в наличии, набор «(5шт)» — за штуку.' }),
+    h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'На цену клиенту не влияет. Дисплей, стекло экрана и тачскрин — проклейка дисплея, крышка — задней крышки, аккумулятор — батареи и стороны вскрытия, корпус — дисплея, батареи и стороны вскрытия, стекло камеры и SIM-лоток — без проклейки, остальное — стороны вскрытия. Айфоны из списка ниже и почти все Android вскрываются сзади, остальные айфоны и большинство Pixel — через дисплей. Берётся самая дешёвая в наличии, набор «(5шт)» — за штуку.' }),
     h('h3', { style: 'margin-top:20px', text: 'Задняя крышка iPhone' }),
     field('Модели без лазера, по одной в строке', h('textarea', { class: 'input', style: 'min-height:160px', value: S.no_laser.join('\n'), oninput: (e) => { S.no_laser = e.target.value.split('\n').map((x) => x.trim()).filter(Boolean); } })),
   );

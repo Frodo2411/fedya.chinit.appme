@@ -4,7 +4,10 @@
 import { pyRe } from './pyre.js';
 import { APP_ONLY } from './data.js';
 
-export const SERVICES = ['b', 'd', 'p', 'c'];
+// Ремонты сайта и ремонты только для приложения: по любой детали из прайса (камеры, динамики, шлейфы, корпус…)
+export const SITE_SERVICES = ['b', 'd', 'p', 'c'];
+export const MORE_SERVICES = ['cr', 'cf', 'ls', 'es', 'fp', 'bt', 'fx', 'fo', 'hs', 'cg', 'sim', 'tc', 'gl'];
+export const SERVICES = [...SITE_SERVICES, ...MORE_SERVICES];
 
 // Варианты от слабого к лучшему. Слабый вариант, который не дешевле лучшего, прячем.
 export const ORDER = {
@@ -13,6 +16,9 @@ export const ORDER = {
   p: ['copy', 'orig_used', 'orig_new'],
   c: ['copy', 'orig_used', 'orig_new'],
 };
+for (const svc of MORE_SERVICES) ORDER[svc] = ['copy', 'orig_used', 'orig_new'];
+// Задняя камера: у телефона несколько модулей (основной, широкий, макро), по умолчанию берём самый дорогой — основной
+const MOST_EXPENSIVE = new Set(['cr']);
 
 // С какой ценой SmartFix сравниваем вариант
 const SF_KEY = {
@@ -23,7 +29,7 @@ const SF_KEY = {
 };
 
 export const DEFAULTS = {
-  base: { b: 50, d: 60, p: 45, c: 35 },
+  base: { b: 50, d: 60, p: 45, c: 35, cr: 40, cf: 40, ls: 35, es: 35, fp: 40, bt: 40, fx: 40, fo: 40, hs: 80, cg: 30, sim: 10, tc: 45, gl: 80 },
   min_work: 50,
   tax: 0.10,
   round: 5,
@@ -183,11 +189,13 @@ export class Pricer {
   }
 
   // Какие проклейки нужны ремонту. Через дисплей вскрываются айфоны с лазером и почти все Pixel, остальные — сзади.
+  // Корпус — дисплей, батарея и сторона вскрытия; стекло экрана и тачскрин — дисплей; стекло камеры и SIM-лоток — без проклейки.
   glueTypes(model, svc) {
     if (!this.S.glue) return [];
     const front = model.startsWith('iPhone') ? !this.noLaser.has(model) : model.startsWith('Google Pixel') && !PIXEL_BACK.test(model);
     const open = front ? 'gd' : 'gc';
-    return [...new Set({ d: ['gd'], c: ['gc'], b: ['gb', open], p: [open] }[svc] || [])];
+    const need = { d: ['gd'], c: ['gc'], b: ['gb', open], hs: ['gd', 'gb', open], tc: ['gd'], gl: ['gd'], cg: [], sim: [] }[svc];
+    return [...new Set(need || (ORDER[svc] ? [open] : []))];
   }
 
   // Проклейки для ремонта: самая дешёвая из тех, что в наличии; нет в прайсе — не считаем
@@ -233,8 +241,9 @@ export class Pricer {
         cand.push({ cost: worst.cost, sup: worst.sup, row: worst, colours: pool.length, inStock: stock.length > 0 });
       }
       if (!cand.length) continue;
-      // сначала в наличии, потом дешевле; при равенстве основной поставщик
-      cand.sort((a, b) => (Number(!a.inStock) - Number(!b.inStock)) || (a.cost - b.cost) || (this.rank(a.sup) - this.rank(b.sup)));
+      // сначала в наличии, потом дешевле (задняя камера — дороже); при равенстве основной поставщик
+      const dir = MOST_EXPENSIVE.has(svc) ? -1 : 1;
+      cand.sort((a, b) => (Number(!a.inStock) - Number(!b.inStock)) || dir * (a.cost - b.cost) || (this.rank(a.sup) - this.rank(b.sup)));
       const best = cand[0];
       const alt = cand.find((c) => c.sup !== best.sup) || null;
       const key = sfKey(svc, tier);
@@ -272,7 +281,7 @@ export class Pricer {
 export function siteFile(pricer, monthTitle) {
   const lines = pricer.all().filter((e) => !APP_ONLY.has(e.model)).map((e) => {
     const prices = {};
-    for (const svc of SERVICES) {
+    for (const svc of SITE_SERVICES) {
       const shown = e.services[svc].opts.filter((o) => !o.hidden).map((o) => [o.tier, o.price]);
       if (shown.length) prices[svc] = shown;
     }

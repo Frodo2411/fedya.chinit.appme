@@ -1,7 +1,7 @@
 // Экран «Цены»: поиск модели, ремонты, варианты деталей с ценой клиенту, поставщиком и заработком.
 
 import { h, fill, icon, money, toast, copyText } from './ui.js';
-import { SERVICES, clientPrice, diffCoef, noveltyCoef, GLUE_NAME } from './engine.js';
+import { SERVICES, SITE_SERVICES, clientPrice, diffCoef, noveltyCoef, GLUE_NAME } from './engine.js';
 import { store } from './store.js';
 import { telHref } from './view-orders.js';
 
@@ -21,7 +21,12 @@ export function linkify(text) {
   return out;
 }
 
-export const SVC = { b: 'Аккумулятор', d: 'Дисплей', p: 'Разъём зарядки', c: 'Задняя крышка', g: 'Проклейка' };
+export const SVC = {
+  b: 'Аккумулятор', d: 'Дисплей', p: 'Разъём зарядки', c: 'Задняя крышка', g: 'Проклейка',
+  cr: 'Задняя камера', cf: 'Фронтальная камера', ls: 'Громкий динамик', es: 'Слуховой динамик', fp: 'Сканер отпечатка',
+  bt: 'Шлейф кнопок', fx: 'Межплатный шлейф', fo: 'Другой шлейф', hs: 'Корпус', cg: 'Стекло камеры', sim: 'SIM-лоток',
+  tc: 'Тачскрин', gl: 'Стекло экрана',
+};
 export const VAR_APP = {
   copy: 'Копия', copy_boost: 'Копия усиленная', verified: 'Копия без ошибки', copy_lcd: 'Копия ЖК (In-Cell, TFT)', copy_oled: 'Копия OLED',
   orig_reglass: 'Оригинал, переклей', orig_used: 'Оригинал, снятый', orig_new: 'Оригинал новый',
@@ -32,7 +37,12 @@ export const VAR_CLIENT = {
   copy: 'Копия', copy_boost: 'Копия усиленная', verified: 'Копия без ошибки', copy_lcd: 'Копия', copy_oled: 'Копия OLED',
   orig_reglass: 'Оригинал, переклей', orig_used: 'Оригинал, снятый', orig_new: 'Оригинал',
 };
-export const REPAIR = { b: 'Замена аккумулятора', d: 'Замена дисплея', p: 'Замена разъёма зарядки', c: 'Замена задней крышки' };
+export const REPAIR = {
+  b: 'Замена аккумулятора', d: 'Замена дисплея', p: 'Замена разъёма зарядки', c: 'Замена задней крышки',
+  cr: 'Замена задней камеры', cf: 'Замена фронтальной камеры', ls: 'Замена громкого динамика', es: 'Замена слухового динамика',
+  fp: 'Замена сканера отпечатка', bt: 'Замена шлейфа кнопок', fx: 'Замена межплатного шлейфа', fo: 'Замена шлейфа (вспышка, микрофон, датчики)',
+  hs: 'Замена корпуса', cg: 'Замена стекла камеры', sim: 'Замена SIM-лотка', tc: 'Замена тачскрина', gl: 'Замена стекла экрана (переклейка)',
+};
 
 // Пояснения для клиента, по тексту с сайта
 function clientHint(svc, tier, model) {
@@ -263,7 +273,8 @@ export function createPricesView(app) {
       h('div', { class: 'topbar' }, h('button', { class: 'back', onclick: closeModel }, icon('back'), 'Поиск')),
       h('h1', { text: e.model }),
       h('div', { class: 'small muted', text: [e.year ? e.year + ' г.' : null, 'iFixit ' + (e.ifixit ?? 'нет оценки'), coefs].filter(Boolean).join(' · ') }),
-      h('div', { class: 'repairs' }, SERVICES.map((svc) => {
+      // ремонты сайта — всегда, остальные — только если есть детали
+      h('div', { class: 'repairs' }, SERVICES.filter((svc) => SITE_SERVICES.includes(svc) || e.services[svc].opts.length).map((svc) => {
         const vis = e.services[svc].opts.filter((o) => !o.hidden);
         const from = vis.length ? Math.min(...vis.map((o) => priceOf(e, svc, o).price)) : null;
         return h('button', {

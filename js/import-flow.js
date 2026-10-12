@@ -5,6 +5,7 @@ import { readTable } from './xlsx.js';
 import { detect, buildImport, clientChanges, colName } from './importer.js';
 import { today } from './store.js';
 import { SVC, VAR_APP } from './view-prices.js';
+import { SERVICES } from './engine.js';
 
 export async function openImport(app, supKey, file) {
   const sup = app.data.suppliers[supKey];
@@ -98,14 +99,7 @@ export async function openImport(app, supKey, file) {
       list('Исчезнут варианты', vanished, changeRow),
       r.fresh.length ? h('h2', { text: 'Новые позиции: проверь' }) : null,
       r.fresh.length ? h('div', { class: 'small muted', text: 'Разметил по правилам. Сними галочку, если позиция не подходит: она не попадёт в расчёт, и в следующий раз приложение это запомнит.' }) : null,
-      r.fresh.map((p) => {
-        p._tier = p._tier || p.tier;
-        return h('label', { class: 'other', style: 'align-items:flex-start' },
-          h('input', { type: 'checkbox', checked: p.tier !== 'skip', style: 'width:22px;height:22px;margin-top:2px;accent-color:var(--accent)',
-            onchange: (e) => { p.tier = e.target.checked ? p._tier : 'skip'; draw(); } }),
-          h('div', { class: 'grow' }, h('div', { class: 'small break', text: p.name }),
-            h('div', { class: 'tiny muted', text: SVC[p.svc] + ' · ' + VAR_APP[p._tier] + ' · ' + money(p.cost) + ' → ' + p.models.join(', ') })));
-      }),
+      freshGroups(r.fresh),
       list('Не распознаны (нет такой модели в приложении или непонятное название)', r.unmapped, (n) => h('div', { class: 'tiny muted break', style: 'padding:4px 0', text: n })),
       list('Пропали из прайса', r.gone, (n) => h('div', { class: 'tiny muted break', style: 'padding:4px 0', text: n })),
       list('Подорожали у поставщика', r.priceUp, (x) => h('div', { class: 'tiny muted break', style: 'padding:4px 0', text: x.name + ': ' + x.old + ' → ' + x.cost })),
@@ -114,6 +108,37 @@ export async function openImport(app, supKey, file) {
       r.file.noPrice ? h('div', { class: 'tiny faint', style: 'margin-top:10px', text: 'Без цены в файле: ' + r.file.noPrice + ' поз.' }) : null,
     );
     if (scroller) scroller.scrollTop = scrollTop;
+  }
+
+  // Новые позиции по ремонтам; список рисуем, только когда его раскрыли: позиций бывают тысячи
+  function freshGroups(fresh) {
+    const by = new Map();
+    for (const p of fresh) {
+      p._tier = p._tier || p.tier;
+      if (!by.has(p.svc)) by.set(p.svc, []);
+      by.get(p.svc).push(p);
+    }
+    const setAll = (items, on) => { for (const p of items) p.tier = on ? p._tier : 'skip'; draw(); };
+    return [...SERVICES, 'g'].filter((svc) => by.has(svc)).map((svc) => {
+      const items = by.get(svc);
+      const key = 'fresh:' + svc;
+      const off = items.filter((p) => p.tier === 'skip').length;
+      return h('details', { open: opened.has(key), ontoggle: (e) => {
+        if (e.target.open === opened.has(key)) return;
+        if (e.target.open) opened.add(key); else opened.delete(key);
+        draw();
+      } },
+      h('summary', { text: SVC[svc] + ': ' + items.length + (off ? ' · снято ' + off : '') }),
+      opened.has(key) ? h('div', {},
+        h('div', { class: 'row wrap', style: 'margin:6px 0' },
+          h('button', { class: 'btn small', text: 'Снять все', onclick: () => setAll(items, false) }),
+          h('button', { class: 'btn small', text: 'Отметить все', onclick: () => setAll(items, true) })),
+        items.map((p) => h('label', { class: 'other', style: 'align-items:flex-start' },
+          h('input', { type: 'checkbox', checked: p.tier !== 'skip', style: 'width:22px;height:22px;margin-top:2px;accent-color:var(--accent)',
+            onchange: (e) => { p.tier = e.target.checked ? p._tier : 'skip'; draw(); } }),
+          h('div', { class: 'grow' }, h('div', { class: 'small break', text: p.name }),
+            h('div', { class: 'tiny muted', text: SVC[p.svc] + ' · ' + VAR_APP[p._tier] + ' · ' + money(p.cost) + ' → ' + p.models.join(', ') }))))) : null);
+    });
   }
 
   function tile(label, v) {

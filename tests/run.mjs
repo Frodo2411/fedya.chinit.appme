@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (f) => import(path.join(ROOT, f));
-const { Pricer, clientPrice, workFee, pyRound2, settingsWithDefaults, siteFile } = await imp('js/engine.js');
+const { Pricer, clientPrice, workFee, pyRound2, settingsWithDefaults, siteFile, ceilTo } = await imp('js/engine.js');
 const RULES = await imp('js/rules.js');
 const { mapRow, siteIndex, items, tier, lineKey, kindOf, networkOk, BRAND_FAM } = RULES;
 const { ModelSearch } = await imp('js/search.js');
@@ -246,6 +246,48 @@ await test('другие бренды: семьи, другие названия
   assert.equal(report.extended, 1);
   assert.deepEqual(next.parts.find((p) => p.name === row).models, ['iPhone 11', 'Google Pixel 6']);
   assert.equal(report.fresh.length, 0, 'знакомая позиция не попадает в новые');
+});
+
+await test('ремонты по любой детали: вид, вариант, модель, цена, проклейка, не на сайт', async () => {
+  const kinds = {
+    'Камера Huawei Honor 10 Lite (13 MP) - задняя': 'cr', 'Камера iPhone 11 - передняя (премиум)': 'cf', 'Задняя камера iPhone 11 - Orig': 'cr',
+    'Передняя сборка/ фронтальная камера iPhone 14 - Orig (снятая с iCloud)': 'cf', 'Динамик полифонический iPhone 11 - (buzzer)': 'ls',
+    'Динамик слуховой iPhone 11 - (speaker)': 'es', 'Шлейф iPhone 11 - сканер отпечатка (черный)': 'fp', 'Шлейф Infinix Hot 12 Play NFC - кнопки громкости/включения': 'bt',
+    'Шлейф Samsung A52 - межплатный': 'fx', 'Шлейф на вспышку iPhone 11 - Премиум': 'fo', 'Корпус iPhone 11 (1 Sim) - белый (премиум)': 'hs',
+    'Средняя часть Samsung A52 - черная': 'hs', 'Стекло камеры iPhone 11 - черное': 'cg', 'Сим лоток iPhone 11 - белый': 'sim', 'Тачскрин Samsung A52': 'tc',
+    'Стекло для переклейки + OCA iPhone 11 - G-oca pro': 'gl', 'Шлейф зарядки iPhone 11': 'p', 'Нижняя плата Samsung A52': 'p',
+    'Шлейф JCID для восстановления Face iD (iPhone 11)': null, 'Защитное стекло iPhone 11': null, 'Рамка дисплея iPhone 11': null,
+  };
+  for (const [n, k] of Object.entries(kinds)) assert.equal(kindOf(n), k, n);
+  assert.equal(tier('cf', 'Передняя сборка/ фронтальная камера iPhone 14 - Orig (снятая с iCloud)'), 'orig_used');
+  assert.equal(tier('cr', 'Задняя камера iPhone 11 - Orig'), 'orig_new');
+  assert.equal(tier('gl', 'Стекло переклей Samsung A52 с OCA пленкой - OR'), 'copy', 'стекло под переклейку не бывает оригиналом');
+  const names = MODELS.map((m) => m.model);
+  const idx = siteIndex(names);
+  const fam = new Map(MODELS.map((m) => [m.model, BRAND_FAM[m.brand]]));
+  assert.deepEqual(mapRow('Шлейф на вспышку iPhone 11 - Премиум', 'fo', idx, fam).models, ['iPhone 11']);
+  assert.deepEqual(mapRow('Сим лоток Samsung A52/A52s - черный', 'sim', idx, fam).models, ['Samsung Galaxy A52', 'Samsung Galaxy A52s']);
+  assert.deepEqual(mapRow('Корпус iPhone 14 e sim + sim - черный (премиум)', 'hs', idx, fam).models, ['iPhone 14']);
+  // цена: две задние камеры — основная (дороже) по умолчанию; ремонт без детали не появляется
+  const X = (sup, name, cost, svc, t, models) => ({ sup, name, cost, stock: null, svc, tier: t, models, line: name });
+  const data = { ...DATA, parts: [...DATA.parts,
+    X('E', 'Камера Samsung A52 (64 MP) - задняя', 30, 'cr', 'copy', ['Samsung Galaxy A52']),
+    X('E', 'Камера Samsung A52 (5 MP) - задняя', 8, 'cr', 'copy', ['Samsung Galaxy A52']),
+    X('E', 'Сим лоток Samsung A52 - черный', 4, 'sim', 'copy', ['Samsung Galaxy A52']),
+  ] };
+  const pr = new Pricer(data, { year: 2026 });
+  const a52 = pr.model('Samsung Galaxy A52');
+  assert.equal(a52.services.cr.opts[0].cost, 30, 'основная камера, а не самая дешёвая');
+  assert.equal(a52.services.cr.opts[0].price, ceilTo((ceilTo(40 * 1.3, 5) + 30) / 0.9, 5));
+  assert.equal(a52.services.sim.opts[0].price, ceilTo((50 + 4) / 0.9, 5), 'минимальная работа');
+  assert.equal(a52.services.fp.opts.length, 0);
+  assert.deepEqual(pr.glueTypes('Samsung Galaxy A52', 'cr'), ['gc']);
+  assert.deepEqual(pr.glueTypes('iPhone 11', 'es'), ['gd']);
+  assert.deepEqual(pr.glueTypes('iPhone 14', 'hs'), ['gd', 'gb', 'gc']);
+  assert.deepEqual(pr.glueTypes('iPhone 14', 'sim'), []);
+  const text = siteFile(pr, 'Ноябрь 2026');
+  assert.ok(!/"(cr|sim)"/.test(text), 'в файле для сайта только аккумулятор, дисплей, разъём и крышка');
+  assert.equal(text, siteFile(new Pricer(DATA, { year: 2026 }), 'Ноябрь 2026'));
 });
 
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {
