@@ -4,7 +4,7 @@ import { h, fill, toast, openSheet, field, parseNum, fmtDate, shareFile, copyTex
 import { DEFAULTS, SERVICES, MORE_SERVICES, settingsWithDefaults, siteFile } from './engine.js';
 import { SVC } from './view-prices.js';
 import { openImport } from './import-flow.js';
-import { withRate } from './importer.js';
+import { withRate, oddRate } from './importer.js';
 import { monthTitle } from './ui.js';
 
 export const APP_VERSION = '1.0.0';
@@ -97,7 +97,7 @@ function openSupplier(app, key) {
   const s = { name: cur ? cur.name : '', currency: cur && cur.currency === 'USD' ? 'USD' : 'BYN', rate: cur && cur.rate ? cur.rate : null, stock: cur ? !!cur.stock : true, site: cur && cur.site ? cur.site : '' };
   const count = key ? app.data.parts.filter((p) => p.sup === key).length : 0;
   const rateField = field('Курс, р. за $', h('input', { class: 'input num', inputmode: 'decimal', placeholder: 'например 3,05', value: s.rate ? String(s.rate).replace('.', ',') : '', oninput: (e) => { s.rate = parseNum(e.target.value); } }),
-    key ? 'Закупочные цены этого поставщика пересчитаются по новому курсу сразу.' : null);
+    cur && cur.currency === 'USD' && count ? 'Закупочные цены этого поставщика пересчитаются по новому курсу сразу.' : null);
   rateField.hidden = s.currency !== 'USD';
   const body = h('div', {},
     field('Название', h('input', { class: 'input', value: s.name, placeholder: 'Как назвать поставщика', oninput: (e) => { s.name = e.target.value; } })),
@@ -111,19 +111,33 @@ function openSupplier(app, key) {
     const name = s.name.trim();
     if (!name) { toast('Напиши название'); return; }
     if (s.currency === 'USD' && !(s.rate > 0)) { toast('Укажи курс доллара'); return; }
+    const wasUsd = cur && cur.currency === 'USD';
+    if (s.currency === 'USD' && !(wasUsd && cur.rate === s.rate)) {
+      const odd = oddRate(s.rate, wasUsd ? cur.rate : 0);
+      if (odd && !confirm(odd)) return;
+    }
+    // был «в рублях», а прайс уже загружен: если в нём были доллары, пересчитать их по курсу
+    const convert = cur && !wasUsd && s.currency === 'USD' && count
+      && confirm('Уже загруженные цены этого поставщика (' + count + ') были в долларах? «ОК» — пересчитаю по курсу ' + String(s.rate).replace('.', ',') + '. «Отмена» — оставлю как есть, тогда загрузи его прайс заново.');
     let data = app.data;
     const next = { ...(cur || {}), name, stock: s.stock };
     if (s.currency === 'USD') { next.currency = 'USD'; next.rate = s.rate; } else { delete next.currency; delete next.rate; }
-    if (s.site) next.site = s.site; else delete next.site;
+    // «iparts.by» без https:// стал бы ссылкой внутрь приложения
+    const site = s.site && !/^[a-z][a-z0-9+.-]*:/i.test(s.site) ? 'https://' + s.site.replace(/^\/+/, '') : s.site;
+    if (site) next.site = site; else delete next.site;
     let k = key;
     if (!k) {
+      // ключ удалённого поставщика не берём: к нему привязаны заметка «Как заказать» и история обновлений
+      const used = new Set([...Object.keys(data.suppliers), ...Object.keys(app.settings.supplierNotes || {}),
+        ...(data.history || []).map((x) => x.sup), ...Object.keys((app.repoData && app.repoData.suppliers) || {})]);
       let i = 1;
-      while (data.suppliers['S' + i]) i++;
+      while (used.has('S' + i)) i++;
       k = 'S' + i;
       next.rank = Math.max(0, ...Object.values(data.suppliers).map((x) => (x.rank ?? 0))) + 1;
     }
     // новый курс: закупка этого поставщика пересчитывается сразу (withRate), остальное — как ввели
-    if (cur && cur.currency === 'USD' && next.currency === 'USD') data = withRate(data, k, next.rate);
+    if (wasUsd && next.currency === 'USD') data = withRate(data, k, next.rate);
+    else if (convert) data = withRate(data, k, next.rate, 1);
     data = { ...data, suppliers: { ...data.suppliers, [k]: next } };
     try {
       await app.applyData(data);

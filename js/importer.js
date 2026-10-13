@@ -18,17 +18,25 @@ export function supplierRate(s) {
 
 const round2 = (x) => Math.round(x * 100) / 100;
 
-// Новый курс поставщика в долларах: его закупочные цены пересчитываются сразу
-export function withRate(data, supKey, rate) {
+// Новый курс поставщика в долларах: его закупочные цены пересчитываются сразу.
+// old — курс, по которому они посчитаны (1 — лежат как есть, в долларах). Сначала обратно в доллары с точностью
+// до цента, потом по новому курсу: так выходит то же, что при загрузке прайса по новому курсу, без лишних копеек.
+export function withRate(data, supKey, rate, old = supplierRate(data.suppliers[supKey])) {
   const s = data.suppliers[supKey];
-  const old = supplierRate(s);
   const next = { ...s, currency: 'USD', rate };
-  const k = s.currency === 'USD' && old !== rate ? rate / old : 1;
   return {
     ...data,
     suppliers: { ...data.suppliers, [supKey]: next },
-    parts: k === 1 ? data.parts : data.parts.map((p) => (p.sup === supKey && p.cost ? { ...p, cost: round2(p.cost * k) } : p)),
+    parts: old === rate ? data.parts : data.parts.map((p) => (p.sup === supKey && p.cost ? { ...p, cost: round2(round2(p.cost / old) * rate) } : p)),
   };
+}
+
+// Курс, похожий на опечатку (305 вместо 3,05) или на резкий скачок: спросить, прежде чем пересчитать все цены
+export function oddRate(rate, prev) {
+  const t = (x) => String(x).replace('.', ',');
+  if (!(rate >= 1.5 && rate <= 10)) return 'Курс ' + t(rate) + ' р. за $ — точно? Обычно он около 3.';
+  if (prev > 0 && Math.abs(Math.log(rate / prev)) > Math.log(1.2)) return 'Курс меняется с ' + t(prev) + ' на ' + t(rate) + ' р. за $ — сразу на ' + Math.round(Math.abs(rate / prev - 1) * 100) + '%. Точно?';
+  return null;
 }
 
 export function keyOf(name) {
@@ -97,13 +105,17 @@ export function detect(sheets, supKey, data) {
     priceCols.push({ col: ci, nums, hits, known: logs.length, median: logs.length ? logs[Math.floor(logs.length / 2)] : null, head: header ? String(header[ci] ?? '') : '' });
   }
   if (!priceCols.length) throw new Error('Не нашёл столбец с ценами.');
-  const byHead = (c) => (/byn|руб|бел|\bbr\b|р\.|цена/i.test(c.head) ? 1 : 0) - (/usd|\$|долл|eur|€/i.test(c.head) ? 2 : 0);
+  // при равенстве — по заголовку: «Цена, BYN» лучше «Цена, $» (у поставщика в долларах — наоборот), артикул и код — не цена
+  const notPrice = (c) => (/артикул|арт\.|^\s*код|код\s+товар|штрих/i.test(c.head) ? 3 : 0);
+  const byHead = rate === 1
+    ? (c) => (/byn|руб|бел|\bbr\b|р\.|цена/i.test(c.head) ? 1 : 0) - (/usd|\$|долл|eur|€/i.test(c.head) ? 2 : 0) - notPrice(c)
+    : (c) => (/usd|\$|долл|у\.\s?е\.|цена|price/i.test(c.head) ? 1 : 0) - (/byn|руб|бел|\bbr\b|р\.|eur|€/i.test(c.head) ? 2 : 0) - notPrice(c);
   priceCols.sort((a, b) => (b.hits - a.hits) || ((a.median ?? 9) - (b.median ?? 9)) || (byHead(b) - byHead(a)) || (a.col - b.col));
   let stockCol = null;
   let stockCols = null;
+  // наличие отметками «+»/«-» по складу и магазинам: в наличии, если «+» хоть где-то, кроме других городов
+  const plus = [];
   if (data.suppliers[supKey] && data.suppliers[supKey].stock) {
-    // наличие отметками «+»/«-» по складу и магазинам: в наличии, если «+» хоть где-то, кроме других городов
-    const plus = [];
     for (let ci = 0; ci < width; ci++) {
       if (ci === best.name) continue;
       let n = 0;
@@ -125,6 +137,8 @@ export function detect(sheets, supKey, data) {
       const hi = header.findIndex((h, ci) => ci !== best.name && typeof h === 'string' && /налич|остат|кол-?во|склад|qty/i.test(h));
       if (hi >= 0) stockCol = hi;
     }
+    // один магазин с «+»/«-» без слова «наличие» в заголовке
+    if (stockCol === null && plus.length === 1) stockCol = plus[0];
   }
   return {
     sheet: best.sheet, sheetName: sheets[best.sheet].name, nameCol: best.name, priceCol: priceCols[0].col, stockCol, stockCols,

@@ -428,6 +428,35 @@ await test('новый поставщик: .xls, цены в долларах, �
   assert.deepEqual(r.parts.filter((p) => p.sup === 'S1').map((p) => p.cost), [33, 39.6, 4.95]);
   assert.equal(r.suppliers.S1.rate, 3.3);
   assert.deepEqual(r.parts.filter((p) => p.sup !== 'S1').map((p) => p.cost), next.parts.filter((p) => p.sup !== 'S1').map((p) => p.cost));
+  // смена курса и повторная загрузка того же файла по новому курсу: те же цены, без «подорожало на копейку»
+  const odd = [[...sheets[0].rows[0]], [...sheets[0].rows[1]], ...[1.37, 2.21, 0.83, 4.07, 1.19].map((usd, i) => [null, 'Buzzer для iPhone1' + (i ? i + 1 : ''), 6000 + i, usd, '+', '-', '-', '-'])];
+  const odd1 = buildImport(data, 'S1', [{ name: 'Прайс', rows: odd }], detect([{ name: 'Прайс', rows: odd }], 'S1', data), '2026-11-05').next;
+  for (const rate of [3.1, 3.07, 3.21]) {
+    const moved = withRate(odd1, 'S1', rate);
+    const again = buildImport(moved, 'S1', [{ name: 'Прайс', rows: odd }], detect([{ name: 'Прайс', rows: odd }], 'S1', moved), '2026-11-06');
+    assert.deepEqual([again.report.priceUp.length, again.report.priceDown.length, again.report.known], [0, 0, 5], 'курс ' + rate);
+  }
+  // поставщик был «в рублях», а прайс у него в долларах: пересчёт из курса 1
+  const was = { ...next, suppliers: { ...next.suppliers, S1: { name: 'Третий', stock: true, rank: 2 } } };
+  assert.deepEqual(withRate(was, 'S1', 3.05, 1).parts.filter((p) => p.sup === 'S1').map((p) => p.cost), [91.5, 109.8, 13.73]);
+  // опечатка в курсе
+  const { oddRate } = await imp('js/importer.js');
+  assert.ok(oddRate(305, 3.05));
+  assert.ok(oddRate(3.9, 3.05), 'скачок больше 20%');
+  assert.equal(oddRate(3.1, 3.05), null);
+  assert.equal(oddRate(3.05, 0), null);
+  // первая загрузка: столбец «Цена, $» у поставщика в долларах, а не артикул перед ним; один магазин с «+»/«-»
+  const usd = [
+    ['Наименование', 'Артикул', 'Цена, $', 'ТД Ждановичи', 'г.Гомель ТЦ'],
+    ['Аккумулятор для iPhone11 1:1 TI', 5001, 10, '+', '-'],
+    ['Аккумулятор для iPhone14 1:1 TI', 5002, 12, '-', '+'],
+    ['Buzzer для iPhone11', 5003, 1.5, '+', '+'],
+  ];
+  const fresh = { ...DATA, suppliers: { ...DATA.suppliers, S1: { name: 'Третий', stock: true, rank: 2, currency: 'USD', rate: 3.05 } } };
+  const uc = detect([{ name: 'Прайс', rows: usd }], 'S1', fresh);
+  assert.deepEqual([uc.priceCol, uc.stockCol], [2, 3]);
+  const un = buildImport(fresh, 'S1', [{ name: 'Прайс', rows: usd }], uc, '2026-11-05').next;
+  assert.deepEqual(un.parts.filter((p) => p.sup === 'S1').map((p) => [p.cost, p.stock]), [[30.5, 'В наличии'], [36.6, 'Нет в наличии'], [4.57, 'В наличии']]);
 });
 
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {

@@ -2,7 +2,7 @@
 
 import { h, fill, money, toast, openSheet, field, parseNum } from './ui.js';
 import { readTable } from './xlsx.js';
-import { detect, buildImport, clientChanges, colName } from './importer.js';
+import { detect, buildImport, clientChanges, colName, oddRate } from './importer.js';
 import { today } from './store.js';
 import { SVC, VAR_APP } from './view-prices.js';
 import { SERVICES } from './engine.js';
@@ -60,7 +60,11 @@ export async function openImport(app, supKey, file) {
     if (sup.currency !== 'USD') return null;
     return field('Цены в файле в долларах. Курс, р. за $', h('input', {
       class: 'input num', inputmode: 'decimal', value: String(cols.rate).replace('.', ','),
-      onchange: (e) => { const n = parseNum(e.target.value); if (n > 0) { cols.rate = n; rebuild(); } },
+      onchange: (e) => {
+        const n = parseNum(e.target.value);
+        const odd = n > 0 && n !== cols.rate ? oddRate(n, cols.rate) : null;
+        if (n > 0 && (!odd || confirm(odd))) { cols.rate = n; rebuild(); } else e.target.value = String(cols.rate).replace('.', ',');
+      },
     }));
   }
 
@@ -73,7 +77,7 @@ export async function openImport(app, supKey, file) {
       cols.stockCols && cols.stockCols.length ? h('div', { class: 'small muted', text: 'В наличии, если «+» хоть в одном из столбцов ' + cols.stockCols.map(colName).join(', ') + '. Другие города не учитываю.' }) : null,
       pc && pc.known ? h('div', { class: 'small muted', text: 'Цена в этом столбце совпала с прошлой у ' + pc.hits + ' из ' + pc.known + ' знакомых позиций.' }) : null,
       field('Название детали', h('select', { class: 'input', onchange: (e) => { cols.nameCol = Number(e.target.value); rebuild(); } }, colOptions(cols.nameCol))),
-      field('Цена, BYN', h('select', { class: 'input', onchange: (e) => { cols.priceCol = Number(e.target.value); rebuild(); } }, colOptions(cols.priceCol))),
+      field(sup.currency === 'USD' ? 'Цена, $' : 'Цена, BYN', h('select', { class: 'input', onchange: (e) => { cols.priceCol = Number(e.target.value); rebuild(); } }, colOptions(cols.priceCol))),
       sup.stock ? field('Наличие', h('select', { class: 'input', onchange: (e) => { const v = Number(e.target.value); cols.stockCol = v < 0 ? null : v; cols.stockCols = null; rebuild(); } }, colOptions(cols.stockCol, true))) : null);
   }
 
