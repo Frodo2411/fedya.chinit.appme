@@ -249,11 +249,18 @@ export class Pricer {
         cand.push({ cost: worst.cost, sup: worst.sup, row: worst, colours: pool.length, inStock: stock.length > 0 });
       }
       if (!cand.length) continue;
-      // сначала в наличии, потом дешевле (задняя камера — дороже); при равенстве основной поставщик
-      const dir = MOST_EXPENSIVE.has(svc) ? -1 : 1;
-      cand.sort((a, b) => (Number(!a.inStock) - Number(!b.inStock)) || dir * (a.cost - b.cost) || (this.rank(a.sup) - this.rank(b.sup)));
-      const best = cand[0];
-      const alt = cand.find((c) => c.sup !== best.sup) || null;
+      // задняя камера: у каждого поставщика берём самый дорогой модуль (основной), даже если его нет в наличии,
+      // а между поставщиками выбираем как обычно
+      let pool = cand;
+      if (MOST_EXPENSIVE.has(svc)) {
+        const bySup = new Map();
+        for (const c of cand) if (!bySup.has(c.sup) || c.cost > bySup.get(c.sup).cost) bySup.set(c.sup, c);
+        pool = [...bySup.values()];
+      }
+      // сначала в наличии, потом дешевле; при равенстве основной поставщик
+      pool.sort((a, b) => (Number(!a.inStock) - Number(!b.inStock)) || (a.cost - b.cost) || (this.rank(a.sup) - this.rank(b.sup)));
+      const best = pool[0];
+      const alt = pool.find((c) => c.sup !== best.sup) || null;
       const key = sfKey(svc, tier);
       const sfv = key && m.sf ? m.sf[key] : null;
       const cp = clientPrice(S, work, best.cost, sfv);

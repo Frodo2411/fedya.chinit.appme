@@ -104,8 +104,9 @@ function openFormula(app) {
     h('h3', { style: 'margin-top:20px', text: 'Свой минимум за работу' }),
     h('div', { class: 'tiny faint', style: 'margin-bottom:6px', text: 'Для лёгких ремонтов (SIM-лоток, стекло камеры, динамики) общий минимум делает цену выше рынка. Пусто — общий минимум.' }),
     h('div', { class: 'grid2' }, MORE_SERVICES.map((svc) => field(SVC[svc], h('input', {
-      class: 'input num', inputmode: 'decimal', placeholder: String(S.min_work), value: S.min_svc[svc] === undefined ? '' : String(S.min_svc[svc]).replace('.', ','),
-      oninput: (e) => { const n = parseNum(e.target.value); if (n === null) delete S.min_svc[svc]; else S.min_svc[svc] = n; },
+      class: 'input num', inputmode: 'decimal', placeholder: String(S.min_work), value: S.min_svc[svc] == null ? '' : String(S.min_svc[svc]).replace('.', ','),
+      // пусто — общий минимум: храним null, иначе при чтении настроек вернётся значение по умолчанию
+      oninput: (e) => { S.min_svc[svc] = parseNum(e.target.value); },
     })))),
     h('div', { class: 'grid2' },
       num(Math.round(S.tax * 1000) / 10, 'Налог в цене, %', (n) => { S.tax = n; }, { pct: true }),

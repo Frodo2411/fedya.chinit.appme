@@ -284,6 +284,14 @@ await test('ремонты по любой детали: вид, вариант,
   assert.equal(a52.services.sim.opts[0].price, 25);
   assert.equal(new Pricer(data, { year: 2026, min_svc: { sim: 50 } }).model('Samsung Galaxy A52').services.sim.opts[0].work, 50, 'свой минимум меняется в настройках');
   assert.equal(settingsWithDefaults({ min_svc: { cg: 30 } }).min_svc.sim, 15, 'остальные минимумы остаются');
+  assert.equal(new Pricer(data, { year: 2026, min_svc: { sim: null } }).model('Samsung Galaxy A52').services.sim.opts[0].work, 50, 'очищенный минимум — общий');
+  // задняя камера: основной модуль каждого поставщика, между поставщиками — дешевле и в наличии
+  const cam = (rows) => new Pricer({ ...DATA, parts: [...DATA.parts, ...rows] }, { year: 2026 }).model('Samsung Galaxy A52').services.cr.opts[0];
+  const Y = (sup, name, cost, stock) => ({ sup, name, cost, stock, svc: 'cr', tier: 'copy', models: ['Samsung Galaxy A52'], line: name });
+  const same = cam([Y('P', 'Камера Samsung A52 (64 MP) - задняя', 40, 'В наличии'), Y('E', 'Камера Samsung A52 (64 MP) - задняя', 30, null)]);
+  assert.deepEqual([same.sup, same.cost, same.alt.sup], ['E', 30, 'P'], 'тот же модуль — у того, кто дешевле');
+  const stock = cam([Y('P', 'Камера Samsung A52 (64 MP) - задняя', 40, 'Нет в наличии'), Y('P', 'Камера Samsung A52 (5 MP) - задняя', 8, 'В наличии')]);
+  assert.equal(stock.cost, 40, 'основной модуль, даже если его нет в наличии, а не макро в наличии');
   assert.equal(a52.services.fp.opts.length, 0);
   assert.deepEqual(pr.glueTypes('Samsung Galaxy A52', 'cr'), ['gc']);
   assert.deepEqual(pr.glueTypes('iPhone 11', 'es'), ['gd']);
