@@ -273,9 +273,11 @@ export class Pricer {
         hidden: false,
       });
     }
-    // прячем слабый вариант, если он не дешевле варианта получше
+    // прячем слабый вариант, если он не дешевле варианта получше.
+    // Переклей при равной цене оставляем: деталь дешевле — заработок больше, клиенту предложим оба
     for (let i = 0; i < opts.length; i++) {
-      if (opts.slice(i + 1).some((b) => b.price <= opts[i].price)) opts[i].hidden = true;
+      const o = opts[i];
+      if (opts.slice(i + 1).some((b) => (o.tier === 'orig_reglass' ? b.price < o.price : b.price <= o.price))) o.hidden = true;
     }
     return { work, opts };
   }

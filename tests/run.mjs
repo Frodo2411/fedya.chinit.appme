@@ -87,6 +87,13 @@ await test('выбор детали: наличие, брак, самый дор
   assert.equal(d[1].cost, 90, 'деталь с царапиной не берём');
   const b = m.services.b.opts;
   assert.equal(b[0].hidden, true, 'обычная копия не дешевле усиленной — прячем');
+  // переклей по той же цене, что снятый оригинал, не прячем: деталь дешевле — заработок больше
+  const used = pr.partsFor('iPhone 11', 'd', 'orig_used')[0];
+  const rg = new Pricer({ ...DATA, parts: [...DATA.parts, { ...used, name: 'Дисплей iPhone 11 - Original (переклей)', tier: 'orig_reglass', line: 'переклей' }] }, { year: 2026 });
+  const ro = rg.model('iPhone 11').services.d.opts;
+  const reg = ro.find((o) => o.tier === 'orig_reglass');
+  assert.equal(reg.price, ro.find((o) => o.tier === 'orig_used').price);
+  assert.equal(reg.hidden, false);
   assert.equal(m.services.c.opts.length, 0, 'iPhone 11: крышка только с лазером');
   const c14 = pr.model('iPhone 14').services.c.opts[0];
   assert.equal(c14.cost, 41);
