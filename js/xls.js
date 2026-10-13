@@ -57,19 +57,27 @@ function cfbStream(buf) {
     }
     return out;
   };
-  // поток из обычных секторов; size байт должны найтись целиком
-  const readChain = (start, size) => {
+  // поток из обычных секторов; size байт должны найтись целиком.
+  // tail — можно без хвоста за концом файла (последний сектор не дополнен): сколько есть, отдаём в .avail
+  const readChain = (start, size, tail = false) => {
     if (size > buf.length) throw broken();
     const out = new Uint8Array(size);
     let pos = 0;
     for (const s of chain(start, fat)) {
       if (pos >= size) break;
       const n = Math.min(ss, size - pos);
-      if (sector(s) + n > buf.length) throw broken();
+      if (sector(s) + n > buf.length) {
+        if (!tail) throw broken();
+        const have = Math.max(0, buf.length - sector(s));
+        out.set(buf.subarray(sector(s), sector(s) + have), pos);
+        out.avail = pos + have;
+        return out;
+      }
       out.set(buf.subarray(sector(s), sector(s) + n), pos);
       pos += n;
     }
     if (pos < size) throw broken();
+    out.avail = size;
     return out;
   };
   const dirStart = u32(buf, 0x30);
@@ -87,7 +95,8 @@ function cfbStream(buf) {
   // маленький поток лежит в «мини-потоке» корневой записи
   const root = entries.find((e) => e.type === 5);
   if (!root || want.size > buf.length) throw broken();
-  const mini = readChain(root.start, root.size);
+  // мини-поток в конце файла бывает без нулей-добивки: нужные байты книги проверяются ниже
+  const mini = readChain(root.start, root.size, true);
   const minifat = [];
   const mfCount = u32(buf, 0x40);
   if (mfCount > count) throw broken();
@@ -98,7 +107,7 @@ function cfbStream(buf) {
   for (const s of chain(want.start, minifat)) {
     if (pos >= want.size) break;
     const n = Math.min(mss, want.size - pos);
-    if (s * mss + n > mini.length) throw broken();
+    if (s * mss + n > mini.avail) throw broken();
     out.set(mini.subarray(s * mss, s * mss + n), pos);
     pos += n;
   }
@@ -185,7 +194,7 @@ function parse(buf) {
   const sheets = [];
   for (let k = 0; k < recs.length; k++) {
     const r = recs[k];
-    if (r.type === 0x000a) break; // конец общей части книги, дальше листы
+    if (r.type === 0x000a) { if (r.data.length) throw broken(); break; } // конец общей части книги, дальше листы
     if (r.type === 0x002f) throw new XlsError('Файл .xls защищён паролем. Открой его в Excel или Numbers и сохрани как .xlsx без пароля.');
     if (r.type === 0x0085) {
       const d = r.data;
@@ -199,8 +208,10 @@ function parse(buf) {
       for (let j = k + 1; j < recs.length && recs[j].type === 0x003c; j++) parts.push(recs[j].data);
       const rd = new Reader(parts);
       const total = u32(r.data, 4);
-      // счётчик строк иногда больше, чем их есть: обрыв ровно на границе строки — просто конец таблицы
-      for (let i = 0; i < total && !rd.atEnd(); i++) sst.push(rd.string());
+      // счётчик строк бывает неверным: читаем до конца таблицы, а хвост после нужного числа строк не обязателен
+      for (let i = 0; !rd.atEnd(); i++) {
+        try { sst.push(rd.string()); } catch (e) { if (i >= total) break; throw e; }
+      }
     }
   }
   const byOffset = new Map(recs.map((r, i) => [r.at, i]));
@@ -208,6 +219,7 @@ function parse(buf) {
   for (const sh of sheets) {
     const rows = [];
     const put = (row, col, v) => {
+      if (col > 255) throw broken(); // в .xls не больше 256 столбцов: иначе это сбой разбора
       if (v === null || v === undefined || v === '') return;
       while (rows.length <= row) rows.push([]);
       rows[row][col] = v;
@@ -216,13 +228,29 @@ function parse(buf) {
     if (k === undefined || recs[k].type !== 0x0809) throw broken();
     let pending = null; // формула со строковым результатом: строка в следующей записи STRING
     let ended = false;
+    let depth = 0; // вложенный блок (диаграмма на листе) со своими BOF…EOF — пропускаем, как xlrd
+    // Запись короче положенного, конец листа (EOF) с данными, нулевая запись — разбор сбился (файл испорчен):
+    // лучше отказ, чем пол-листа без ошибки. Длиннее положенного бывает у некоторых программ — это можно.
+    const size = (d, n) => { if (d.length < n) throw broken(); };
     for (k++; k < recs.length; k++) {
       const { type, data: d } = recs[k];
-      if (type === 0x000a) { ended = true; break; }
-      if (type === 0x00fd) put(u16(d, 0), u16(d, 2), sst[u32(d, 6)]);
-      else if (type === 0x0203) put(u16(d, 0), u16(d, 2), f64(d, 6));
-      else if (type === 0x027e) put(u16(d, 0), u16(d, 2), rk(u32(d, 6)));
+      if (type === 0x000a) {
+        if (d.length) throw broken();
+        if (depth-- > 0) continue;
+        ended = true;
+        // за концом листа — следующий блок (BOF) или нули до конца потока
+        const nx = recs[k + 1];
+        if (nx && nx.type !== 0x0809 && !recs.slice(k + 1).every((r) => r.type === 0 && r.data.every((x) => x === 0))) throw broken();
+        break;
+      }
+      if (type === 0x0809) { depth++; continue; }
+      if (type === 0x0000) throw broken();
+      if (depth) continue;
+      if (type === 0x00fd) { size(d, 10); if (u32(d, 6) >= sst.length) throw broken(); put(u16(d, 0), u16(d, 2), sst[u32(d, 6)]); }
+      else if (type === 0x0203) { size(d, 14); put(u16(d, 0), u16(d, 2), f64(d, 6)); }
+      else if (type === 0x027e) { size(d, 10); put(u16(d, 0), u16(d, 2), rk(u32(d, 6))); }
       else if (type === 0x00bd) {
+        size(d, 12);
         const row = u16(d, 0);
         const first = u16(d, 2);
         for (let i = 0; 4 + i * 6 + 6 <= d.length - 2; i++) put(row, first + i, rk(u32(d, 4 + i * 6 + 2)));
@@ -233,6 +261,7 @@ function parse(buf) {
         const cch = rd.u16();
         put(u16(d, 0), u16(d, 2), rd.chars(cch, (rd.u8() & 1) === 1));
       } else if (type === 0x0006) {
+        size(d, 20);
         const row = u16(d, 0);
         const col = u16(d, 2);
         if (u16(d, 12) === 0xffff) {
@@ -246,7 +275,7 @@ function parse(buf) {
         const cch = rd.u16();
         put(pending.row, pending.col, rd.chars(cch, (rd.u8() & 1) === 1));
         pending = null;
-      } else if (type === 0x0205 && d[7] === 0) put(u16(d, 0), u16(d, 2), d[6] === 1);
+      } else if (type === 0x0205) { size(d, 8); if (d[7] === 0) put(u16(d, 0), u16(d, 2), d[6] === 1); }
     }
     if (!ended) throw broken();
     out.push({ name: sh.name, rows });

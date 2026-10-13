@@ -57,9 +57,9 @@ const SEG_ESIM = /\s+(?:e\s?sim|\d\s?sim)(?:\s*\+\s*sim)?(?=\s|$)/gi;
 const LATIN_MIX = /(?<=[A-Za-z])[аеорсхук]|[аеорсх](?=[A-Za-z])/g;
 const LOOKALIKE = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', Х: 'X', а: 'a', е: 'e', о: 'o', р: 'p', с: 'c', х: 'x', у: 'y', к: 'k' };
 
-// «iPhone7 (4,7")/7 (5,5")»: 5,5 дюйма — это Plus
-const INCH55 = /(?<=\d)\s*\(5[,.]5\s*["'”″]*\s*\)/g;
-const applePlus = (s) => (/iPhone/i.test(s) ? s.replace(INCH55, ' Plus') : s);
+// «iPhone7 (4,7")/7 (5,5")», «iPhone6/6S (5,5")»: 5,5 дюйма — это Plus, у всех номеров перед скобкой
+const INCH55 = /((?:\d+[sS]?\s*\/\s*)*\d+[sS]?)\s*\(5[,.]5\s*["'”″]*\s*\)/g;
+const applePlus = (s) => (/iPhone/i.test(s) ? s.replace(INCH55, (_, g) => g.split(/\s*\/\s*/).map((x) => x + ' Plus').join('/')) : s);
 
 export function modelSegment(name) {
   let s = name.trim().replace(KIND_PREFIX, '');
@@ -231,7 +231,7 @@ const T = {
   dSkipNot: R('заменено.*стекл|полирован'),
   dReglass: R(String.raw`переклей|\bRef\b|refurb|заменено`),
   dUsed: R('снят|разбор|б/у|полирован|заменена рамк'),
-  dCopy: R('orig tech|под оригинал|high quality|копия'),
+  dCopy: R('orig tech|под ориг|не ориг|high quality|копия'),
   oled: R(String.raw`oled|amoled|fog`),
   dOrig: R(String.raw`\bOR\b|\(SP\)|service pack|сервис|\boriginal\b|\borig\b|оригинал|\bориг\b`),
   dOrigNot: R(String.raw`\b(gx|jk|mems|dd|jcid|wode|rj|fog|zy|hex|tft|lcd|aaa)\b|in-?cell|soft oled|hard oled`),
@@ -241,7 +241,7 @@ const T = {
   cOrig: R(String.raw`\bOR\b|сервис`),
   pSkip: R('беспровод|вспышк|громкост|включени|кнопк|сканер|отпечат|антенн|динамик|вибро|межплат|на дисплей|lcd'),
   pUsed: R('снят|разбор'),
-  pOrig: R(String.raw`\bOR\b|original|сервис|\borig\b|\bориг\b`),
+  pOrig: R(String.raw`\bOR\b|original|сервис|\borig\b|(?<!под\s|не\s)\bориг\b`),
   oUsed: R('снят|разбор'),
   oOrig: R(String.raw`\bOR\b|original|\borig\b|оригинал|сервис`),
 };
@@ -291,17 +291,20 @@ export function tier(kind, n) {
   return 'skip';
 }
 
-const COLOURS = String.raw`(ч[её]рн\w*|бел\w*|син\w*|голуб\w*|зел[её]н\w*|красн\w*|розов\w*|фиолет\w*|сиренев\w*|[сc]еребр\w*|сер\w*|золот\w*|зол|ж[её]лт\w*|оранж\w*|коричн\w*|бирюз\w*|бежев\w*|мятн\w*|графит\w*|титан\w*|натурал\w*|пустын\w*|ультрамарин\w*|корал\w*|полуночн\w*|лаванд\w*|Black|White|Blue|Green|Red|Pink|Purple|Silver|Gold|Yellow|Midnight|Starlight|Graphite|Gray|Grey|Natural|Desert|Ultramarine|Titanium|Teal|Lavender)`;
+// [сc]: в названиях бывает латинская «c» вместо русской («cерый», «cильвер»); «сервис» и «серия» — не цвет
+const COLOURS = String.raw`(ч[её]рн\w*|бел\w*|[сc]ин\w*|голуб\w*|зел[её]н\w*|красн\w*|розов\w*|фиолет\w*|сиренев\w*|[сc]еребр\w*|[сc]ер(?!вис|и[яиюей]|ийн)\w*|золот\w*|зол|ж[её]лт\w*|оранж\w*|оринж\w*|коричн\w*|бирюз\w*|бежев\w*|мятн\w*|графит\w*|титан\w*|натурал\w*|пустын\w*|ультрамарин\w*|корал\w*|полуночн\w*|лаванд\w*|бордов\w*|персик\w*|бронз\w*|кремов\w*|[сc]ильвер\w*|глубок\w*|космическ\w*|небесн\w*|туманн\w*|шалфейн\w*|альпийск\w*|дезерт\w*|сияющ\w*\s+звезд\w*|т[её]мн\w*\s+ноч\w*|Light\s+(?:Gold|Blue|Pink|Green|Purple|Yellow)|Black|White|Blue|Green|Red|Pink|Purple|Silver|Gold|Yellow|Orange|Midnight|Starlight|Graphite|Gray|Grey|Natural|Desert|Ultramarine|Titanium|Teal|Lavender|Deep|Space|Sky|Mist|Sage|Cosmic|Sierra|Alpine|Pacific)`;
+// несколько цветов через «/» или «.» («БЕЛЫЙ/ЗОЛОТО», «БЕЛ/КРАСН.ЗОЛ», «бежевая/ белая») — тоже цвет
+const COLOUR_LIST = COLOURS + String.raw`(?:\s*[/.]\s*` + COLOURS + ')*';
 const LINE_SHADE = pyRe(String.raw`\b(?:т[её]мно|светло)-?`, 'gi');
-const LINE_FRAME = pyRe(String.raw`\((?:` + COLOURS + String.raw`)\s*рама\)`, 'gi');
-const LINE_COLOUR = pyRe(String.raw`\b` + COLOURS + String.raw`\b,?`, 'gi');
+const LINE_FRAME = pyRe(String.raw`\((?:` + COLOUR_LIST + String.raw`)\s*рама\)`, 'gi');
+const LINE_COLOUR = pyRe(String.raw`\b` + COLOUR_LIST + String.raw`\b,?`, 'gi');
 
 // Название без цвета: цвета одной позиции считаем одной деталью.
 // «темно-серый», «№1…№5» (номер цвета у поставщика) — тоже цвет.
 export function lineKey(name) {
   let t = name.replace(LINE_SHADE, '').replace(/№\s*\d+/g, '');
   t = t.replace(LINE_FRAME, '');
-  t = t.replace(LINE_COLOUR, '');
+  t = t.replace(LINE_COLOUR, '').replace(/\(\s*\)/g, ''); // «(белый)» → пустые скобки
   return pyStrip(t.replace(/\s+/g, ' ').replace(/ ,/g, ','), ' -,');
 }
 
