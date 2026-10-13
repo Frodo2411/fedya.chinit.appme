@@ -387,6 +387,17 @@ await test('новый поставщик: .xls, цены в долларах, �
   const a = await readTable(file('tests/fixtures/price.xls'));
   const b = await readTable(file('tests/fixtures/price.xlsx'));
   assert.deepEqual(a[0].rows.map((r) => [...r].map((v) => v ?? null)), b[0].rows.map((r) => [...r].map((v) => v ?? null)));
+  // обрезанный, с паролем, Excel 95 — понятный отказ, а не полпрайса и не «Cannot read properties»
+  const xls = fs.readFileSync(path.join(ROOT, 'tests/fixtures/price.xls'));
+  const read = (buf) => readTable({ arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) });
+  for (const n of [600, Math.floor(xls.length / 2), xls.length - 100]) await assert.rejects(read(xls.subarray(0, n)), /повреждён или скачан не полностью/);
+  const bof = xls.indexOf(Buffer.from([0x09, 0x08, 0x10, 0x00, 0x00, 0x06]));
+  const pw = Buffer.from(xls);
+  pw[bof + 20] = 0x2f; pw[bof + 21] = 0; // запись после BOF становится FILEPASS
+  await assert.rejects(read(pw), /защищён паролем/);
+  const x95 = Buffer.from(xls);
+  x95[bof + 5] = 0x05; // версия BOF 0x0500
+  await assert.rejects(read(x95), /Excel 5\.0\/95/);
   // названия в стиле нового поставщика
   const models = ['iPhone 5', 'iPhone 5c', 'iPhone 5s', 'iPhone 6', 'iPhone 6 Plus', 'iPhone 6s', 'iPhone 6s Plus', 'iPhone 7', 'iPhone 7 Plus', 'iPhone 8', 'iPhone 8 Plus',
     'iPhone 11', 'iPhone 11 Pro', 'iPhone 12', 'iPhone 12 mini', 'iPhone 12 Pro', 'iPhone XS', 'iPhone SE 2020', 'iPhone 14'].map((m) => ({ brand: 'iPhone', model: m }));
