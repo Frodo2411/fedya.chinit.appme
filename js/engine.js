@@ -38,6 +38,9 @@ export const DEFAULTS = {
   round: 5,
   sf_offset: 5,
   sf_floor_share: 0.5,
+  // Запас на брак, % от цены детали: на случай, если деталь сломается при ремонте. Добавляется к цене по формуле,
+  // выше SmartFix цену не поднимает. d — дисплеи, c — задние стёкла и крышки, other — остальное
+  risk: { d: 0, c: 0, other: 0 },
   diff: [[0, 1.5], [3, 1.3], [5, 1.15], [7, 1.0]],
   diff_default: 1.0,
   novelty: [[0, 1.3], [2, 1.15], [4, 1.0]],
@@ -62,7 +65,7 @@ export function settingsWithDefaults(s) {
   if (!s) return out;
   for (const k of Object.keys(DEFAULTS)) {
     if (s[k] === undefined || s[k] === null) continue;
-    out[k] = k === 'base' || k === 'min_svc' ? { ...out[k], ...s[k] } : JSON.parse(JSON.stringify(s[k]));
+    out[k] = k === 'base' || k === 'min_svc' || k === 'risk' ? { ...out[k], ...s[k] } : JSON.parse(JSON.stringify(s[k]));
   }
   return out;
 }
@@ -119,11 +122,18 @@ export function workFee(S, svc, model) {
   return Math.max(minWork(S, svc), ceilTo(S.base[svc] * diffCoef(S, model) * noveltyCoef(S, model), S.round));
 }
 
-// Цена клиенту: по формуле и со сверкой с SmartFix
-export function clientPrice(S, work, part, sf) {
+// Запас на брак для детали этой цены, р.
+export function riskReserve(S, svc, part) {
+  const r = S.risk || {};
+  const pct = svc === 'd' ? r.d : svc === 'c' ? r.c : r.other;
+  return pct > 0 && part > 0 ? part * pct / 100 : 0;
+}
+
+// Цена клиенту: по формуле (работа + деталь + запас на брак) и со сверкой с SmartFix
+export function clientPrice(S, work, part, sf, reserve = 0) {
   const t = S.tax;
   const r = S.round;
-  const formula = ceilTo((work + part) / (1 - t), r);
+  const formula = ceilTo((work + part + reserve) / (1 - t), r);
   if (!sf) return { price: formula, formula, smartfix: null };
   const floorMin = ceilTo((S.min_work + part) / (1 - t), r);
   const price = Math.max(floorMin, Math.min(floorTo(sf - S.sf_offset, r), Math.max(formula, ceilTo(S.sf_floor_share * sf, r))));
@@ -264,7 +274,7 @@ export class Pricer {
       const alt = pool.find((c) => c.sup !== best.sup) || null;
       const key = sfKey(svc, tier);
       const sfv = key && m.sf ? m.sf[key] : null;
-      const cp = clientPrice(S, work, best.cost, sfv);
+      const cp = clientPrice(S, work, best.cost, sfv, riskReserve(S, svc, best.cost));
       opts.push({
         tier, svc, work, cost: best.cost, sup: best.sup, part: best.row.name, stock: best.row.stock,
         colours: best.colours, inStock: best.inStock, sfKey: key, sf: sfv || null,

@@ -1,7 +1,7 @@
 // Экран «Цены»: поиск модели, ремонты, варианты деталей с ценой клиенту, поставщиком и заработком.
 
 import { h, fill, icon, money, toast, copyText } from './ui.js';
-import { SERVICES, SITE_SERVICES, clientPrice, diffCoef, noveltyCoef, GLUE_NAME } from './engine.js';
+import { SERVICES, SITE_SERVICES, clientPrice, riskReserve, diffCoef, noveltyCoef, GLUE_NAME } from './engine.js';
 import { store } from './store.js';
 import { telHref } from './view-orders.js';
 
@@ -134,7 +134,7 @@ export function createPricesView(app) {
   function priceOf(entry, svc, o) {
     const ov = st.overrides.get(entry.model + '|' + svc + '|' + o.tier);
     if (!ov) return { price: o.price, formula: o.formula, smartfix: o.smartfix, cost: o.cost, sup: o.sup, part: o.part, stock: o.stock, inStock: o.inStock, override: false };
-    const cp = clientPrice(app.pricer.S, o.work, ov.cost, o.sf);
+    const cp = clientPrice(app.pricer.S, o.work, ov.cost, o.sf, riskReserve(app.pricer.S, svc, ov.cost));
     return { ...cp, cost: ov.cost, sup: ov.sup, part: ov.name, stock: ov.stock, inStock: app.pricer.inStock(ov), override: true };
   }
 
@@ -201,6 +201,7 @@ export function createPricesView(app) {
       h('div', { class: 'head' }, h('div', { class: 'vname', text: VAR_APP[o.tier] }), h('div', { class: 'price', text: p.price + ' р.' })),
       h('div', { class: 'earn' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), ' · деталь ', money(p.cost),
         glue.total ? ' · проклейка ' + money(glue.total) : '', ' · работа ', o.work, ' р.',
+        riskReserve(S, svc, p.cost) ? ' · запас на брак ' + money(Math.round(riskReserve(S, svc, p.cost) * 100) / 100) : '',
         h('span', { class: 'faint', text: ' · налог ' + Math.round(p.price * S.tax) + ' р.' })),
       h('button', {
         class: 'part', 'aria-label': 'Скопировать название детали',

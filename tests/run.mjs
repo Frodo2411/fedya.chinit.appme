@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (f) => import(path.join(ROOT, f));
-const { Pricer, clientPrice, workFee, pyRound2, settingsWithDefaults, siteFile, ceilTo } = await imp('js/engine.js');
+const { Pricer, clientPrice, riskReserve, workFee, pyRound2, settingsWithDefaults, siteFile, ceilTo } = await imp('js/engine.js');
 const RULES = await imp('js/rules.js');
 const { mapRow, siteIndex, items, tier, lineKey, kindOf, networkOk, BRAND_FAM } = RULES;
 const { ModelSearch } = await imp('js/search.js');
@@ -74,6 +74,14 @@ await test('цена клиенту и сверка со SmartFix', () => {
   assert.equal(clientPrice(S, 70, 40, 120).price, 115); // ниже SmartFix: floor5(120 − 5)
   assert.equal(clientPrice(S, 70, 40, 400).price, 200); // поднято до половины SmartFix
   assert.equal(clientPrice(S, 70, 100, 120).price, 170); // не ниже детали + минимальной работы с налогом
+  // запас на брак: по умолчанию 0; 10% от детали добавляется к цене по формуле, выше SmartFix не поднимает
+  assert.deepEqual(S.risk, { d: 0, c: 0, other: 0 });
+  const R = settingsWithDefaults({ year: 2026, risk: { d: 10 } });
+  assert.deepEqual(R.risk, { d: 10, c: 0, other: 0 });
+  assert.equal(riskReserve(R, 'd', 300), 30);
+  assert.equal(riskReserve(R, 'b', 300), 0);
+  assert.equal(clientPrice(R, 85, 300, null, riskReserve(R, 'd', 300)).price, 465); // (85+300+30)/0,9 = 461,1 → 465
+  assert.equal(clientPrice(R, 85, 300, 400, riskReserve(R, 'd', 300)).price, 395); // не выше SmartFix − 5
 });
 
 await test('выбор детали: наличие, брак, самый дорогой цвет, скрытие слабого варианта, крышка без лазера', () => {
