@@ -398,6 +398,17 @@ await test('новый поставщик: .xls, цены в долларах, �
   const x95 = Buffer.from(xls);
   x95[bof + 5] = 0x05; // версия BOF 0x0500
   await assert.rejects(read(x95), /Excel 5\.0\/95/);
+  // сбой разбора внутри листа (ссылка за таблицу строк) — отказ, а не лист без названий деталей
+  const lsst = xls.indexOf(Buffer.from([0xfd, 0x00, 0x0a, 0x00]), bof);
+  const badIdx = Buffer.from(xls);
+  badIdx.fill(0xff, lsst + 10, lsst + 14);
+  await assert.rejects(read(badIdx), /повреждён/);
+  // .xlsx с испорченным байтом в сжатом листе — тоже отказ (сверка CRC-32)
+  const xlsx = fs.readFileSync(path.join(ROOT, 'tests/fixtures/price.xlsx'));
+  const sheetAt = xlsx.indexOf(Buffer.from('xl/worksheets/sheet1.xml')) + 40;
+  const flip = Buffer.from(xlsx);
+  flip[sheetAt] ^= 0x10;
+  await assert.rejects(read(flip), /повреждён/);
   // названия в стиле нового поставщика
   const models = ['iPhone 5', 'iPhone 5c', 'iPhone 5s', 'iPhone 6', 'iPhone 6 Plus', 'iPhone 6s', 'iPhone 6s Plus', 'iPhone 7', 'iPhone 7 Plus', 'iPhone 8', 'iPhone 8 Plus',
     'iPhone 11', 'iPhone 11 Pro', 'iPhone 12', 'iPhone 12 mini', 'iPhone 12 Pro', 'iPhone XS', 'iPhone SE 2020', 'iPhone 14'].map((m) => ({ brand: 'iPhone', model: m }));
@@ -456,6 +467,9 @@ await test('новый поставщик: .xls, цены в долларах, �
   // у знакомой позиции линия — по нынешним правилам (новые слова цвета сливают линии)
   const stale = { ...next, parts: next.parts.map((p) => (p.sup === 'S1' ? { ...p, line: 'старая линия' } : p)) };
   assert.deepEqual(buildImport(stale, 'S1', sheets, cols, '2026-11-06').next.parts.filter((p) => p.sup === 'S1').map((p) => p.line), s1.map(([n]) => lineKey(n)));
+  // после загрузки отметка «цены пересчитаны из долларов» снимается: цены теперь из файла
+  const marked = { ...next, suppliers: { ...next.suppliers, S1: { ...next.suppliers.S1, costRate: 3 } } };
+  assert.equal(buildImport(marked, 'S1', sheets, cols, '2026-11-06').next.suppliers.S1.costRate, undefined);
   // новый курс пересчитывает закупку этого поставщика и только его
   const r = withRate(next, 'S1', 3.3);
   assert.deepEqual(r.parts.filter((p) => p.sup === 'S1').map((p) => p.cost), [33, 39.6, 4.95]);

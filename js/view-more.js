@@ -57,7 +57,7 @@ export function createMoreView(app) {
         h('h3', { text: 'Как заказывать у поставщиков' }),
         h('div', { class: 'small muted', text: 'Сайт, бот, телефон, срок доставки. Покажу под деталью.' }),
         sups.map(([k, s]) => {
-          const site = s.site || ((app.repoData && app.repoData.suppliers[k]) || {}).site;
+          const site = s.site !== undefined ? s.site : ((app.repoData && app.repoData.suppliers[k]) || {}).site;
           return h('div', {},
             field(s.name, h('textarea', {
               class: 'input', value: (app.settings.supplierNotes || {})[k] || '', placeholder: 'Например: Telegram-бот @…, доставка завтра, от 50 р.',
@@ -94,7 +94,8 @@ export function createMoreView(app) {
 // Имя хранится только в зашифрованном прайсе на телефоне и в таблице.
 function openSupplier(app, key) {
   const cur = key ? app.data.suppliers[key] : null;
-  const s = { name: cur ? cur.name : '', currency: cur && cur.currency === 'USD' ? 'USD' : 'BYN', rate: cur && cur.rate ? cur.rate : null, stock: cur ? !!cur.stock : true, site: cur && cur.site ? cur.site : '' };
+  const repoSite = key ? ((app.repoData && app.repoData.suppliers[key]) || {}).site || '' : '';
+  const s = { name: cur ? cur.name : '', currency: cur && cur.currency === 'USD' ? 'USD' : 'BYN', rate: cur && cur.rate ? cur.rate : null, stock: cur ? !!cur.stock : true, site: cur && cur.site !== undefined ? cur.site : repoSite };
   const count = key ? app.data.parts.filter((p) => p.sup === key).length : 0;
   const rateField = field('Курс, р. за $', h('input', { class: 'input num', inputmode: 'decimal', placeholder: 'например 3,05', value: s.rate ? String(s.rate).replace('.', ',') : '', oninput: (e) => { s.rate = parseNum(e.target.value); } }),
     cur && cur.currency === 'USD' && count ? 'Закупочные цены этого поставщика пересчитаются по новому курсу сразу.' : null);
@@ -116,15 +117,21 @@ function openSupplier(app, key) {
       const odd = oddRate(s.rate, wasUsd ? cur.rate : 0);
       if (odd && !confirm(odd)) return;
     }
-    // был «в рублях», а прайс уже загружен: если в нём были доллары, пересчитать их по курсу
-    const convert = cur && !wasUsd && s.currency === 'USD' && count
+    // был «в рублях», а прайс уже загружен: если в нём были доллары, пересчитать их по курсу.
+    // costRate — цены уже пересчитаны из долларов по этому курсу (поставщика переключали на рубли): не спрашиваем
+    const back = cur && !wasUsd && s.currency === 'USD' && cur.costRate > 0;
+    const convert = cur && !wasUsd && !back && s.currency === 'USD' && count
       && confirm('Уже загруженные цены этого поставщика (' + count + ') были в долларах? «ОК» — пересчитаю по курсу ' + String(s.rate).replace('.', ',') + '. «Отмена» — оставлю как есть, тогда загрузи его прайс заново.');
     let data = app.data;
     const next = { ...(cur || {}), name, stock: s.stock };
-    if (s.currency === 'USD') { next.currency = 'USD'; next.rate = s.rate; } else { delete next.currency; delete next.rate; }
+    if (s.currency === 'USD') { next.currency = 'USD'; next.rate = s.rate; delete next.costRate; } else {
+      if (wasUsd && count) next.costRate = cur.rate;
+      delete next.currency; delete next.rate;
+    }
     // «iparts.by» без https:// стал бы ссылкой внутрь приложения
     const site = s.site && !/^[a-z][a-z0-9+.-]*:/i.test(s.site) ? 'https://' + s.site.replace(/^\/+/, '') : s.site;
-    if (site) next.site = site; else delete next.site;
+    // пустое поле при сайте из общего прайса — убрать и его: храним пустую строку
+    if (site) next.site = site; else if (repoSite) next.site = ''; else delete next.site;
     let k = key;
     if (!k) {
       // ключ удалённого поставщика не берём: к нему привязаны заметка «Как заказать» и история обновлений
@@ -137,6 +144,7 @@ function openSupplier(app, key) {
     }
     // новый курс: закупка этого поставщика пересчитывается сразу (withRate), остальное — как ввели
     if (wasUsd && next.currency === 'USD') data = withRate(data, k, next.rate);
+    else if (back) data = withRate(data, k, next.rate, cur.costRate);
     else if (convert) data = withRate(data, k, next.rate, 1);
     data = { ...data, suppliers: { ...data.suppliers, [k]: next } };
     try {

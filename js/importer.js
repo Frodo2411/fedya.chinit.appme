@@ -39,6 +39,13 @@ export function oddRate(rate, prev) {
   return null;
 }
 
+// Поставщик после загрузки: дата, курс; цены теперь из файла — отметка «пересчитаны из долларов» (costRate) не нужна
+function supAfter(s, today, rate) {
+  const next = { ...s, date: today, ...(s.currency === 'USD' ? { rate } : {}) };
+  delete next.costRate;
+  return next;
+}
+
 export function keyOf(name) {
   return String(name).replace(/\s+/g, ' ').trim();
 }
@@ -238,7 +245,7 @@ export function buildImport(data, supKey, sheets, cols, today) {
   const next = {
     ...data,
     priceDate: today,
-    suppliers: { ...data.suppliers, [supKey]: { ...data.suppliers[supKey], date: today, ...(data.suppliers[supKey].currency === 'USD' ? { rate: cols.rate } : {}) } },
+    suppliers: { ...data.suppliers, [supKey]: supAfter(data.suppliers[supKey], today, cols.rate) },
     parts: [...others, ...parts],
     history: [...(data.history || []), { date: today, sup: supKey, rows: report.file.parts, fresh: report.fresh.length, gone: report.gone.length }].slice(-24),
   };

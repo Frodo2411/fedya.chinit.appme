@@ -152,7 +152,7 @@ export function createPricesView(app) {
   function supSite(key) {
     const s = app.data.suppliers[key] || {};
     const r = (app.repoData && app.repoData.suppliers[key]) || {};
-    return s.site || r.site || null;
+    return (s.site !== undefined ? s.site : r.site) || null; // пустая строка — сайт убрали
   }
 
   // Одно нажатие: название детали в буфер и сайт поставщика в новой вкладке — останется вставить в поиск

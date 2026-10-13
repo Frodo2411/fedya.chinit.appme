@@ -43,9 +43,12 @@ export async function openImport(app, supKey, file) {
     return opts;
   }
 
+  // заново после смены столбцов или курса: снятые галочки у новых позиций остаются снятыми
   function rebuild() {
+    const off = new Set(result ? result.report.fresh.filter((p) => p.tier === 'skip').map((p) => p.name) : []);
     try {
       result = buildImport(app.data, supKey, sheets, cols, today());
+      for (const p of result.report.fresh) if (off.has(p.name)) { p._tier = p.tier; p.tier = 'skip'; }
     } catch (e) {
       fill(body, h('div', { class: 'banner bad', text: e.message }), rateBox(), columnsBox());
       applyBtn.disabled = true;
@@ -63,6 +66,7 @@ export async function openImport(app, supKey, file) {
       onchange: (e) => {
         const n = parseNum(e.target.value);
         const odd = n > 0 && n !== cols.rate ? oddRate(n, cols.rate) : null;
+        if (n === cols.rate) return;
         if (n > 0 && (!odd || confirm(odd))) { cols.rate = n; rebuild(); } else e.target.value = String(cols.rate).replace('.', ',');
       },
     }));

@@ -6,6 +6,21 @@ import { readXls } from './xls.js';
 function u16(b, o) { return b[o] | (b[o + 1] << 8); }
 function u32(b, o) { return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0; }
 
+// Испорченный или недокачанный архив: сжатые данные контрольной суммы не имеют, поэтому сверяем CRC-32 и размер
+// из оглавления архива — иначе одна ошибка в байте даёт пол-листа без всякого сообщения
+const BROKEN = 'Файл .xlsx повреждён или скачан не полностью. Скачай прайс заново или открой в Excel или Numbers и сохрани ещё раз.';
+const CRC = new Uint32Array(256);
+for (let n = 0; n < 256; n++) {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  CRC[n] = c >>> 0;
+}
+function crc32(b) {
+  let c = 0xffffffff;
+  for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
 async function inflate(bytes) {
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
@@ -25,7 +40,9 @@ export async function unzip(buffer, wanted) {
   for (let n = 0; n < count; n++) {
     if (u32(b, p) !== 0x02014b50) break;
     const method = u16(b, p + 10);
+    const crc = u32(b, p + 16);
     const size = u32(b, p + 20);
+    const usize = u32(b, p + 24);
     const nameLen = u16(b, p + 28);
     const extraLen = u16(b, p + 30);
     const commentLen = u16(b, p + 32);
@@ -34,8 +51,12 @@ export async function unzip(buffer, wanted) {
     p += 46 + nameLen + extraLen + commentLen;
     if (wanted && !wanted(name)) continue;
     const start = local + 30 + u16(b, local + 26) + u16(b, local + 28);
+    if (start + size > b.length) throw new Error(BROKEN);
     const raw = b.subarray(start, start + size);
-    files.set(name, method === 0 ? raw : await inflate(raw));
+    let data;
+    try { data = method === 0 ? raw : await inflate(raw); } catch { throw new Error(BROKEN); }
+    if ((usize !== 0xffffffff && data.length !== usize) || crc32(data) !== crc) throw new Error(BROKEN);
+    files.set(name, data);
   }
   return files;
 }
