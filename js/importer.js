@@ -4,7 +4,7 @@
 // К знакомой позиции с моделями дописываются подходящие модели приложения, модели сайта остаются как были.
 // Столбцы с названием, ценой и наличием ищутся сами; цену узнаём по совпадению с прошлыми ценами.
 
-import { kindOf, families, mapRow, siteIndex, BRAND_FAM } from './rules.js';
+import { kindOf, families, mapRow, siteIndex, lineKey, BRAND_FAM } from './rules.js';
 import { Pricer, SERVICES } from './engine.js';
 import { APP_ONLY, APP_ALIASES } from './data.js';
 
@@ -215,7 +215,8 @@ export function buildImport(data, supKey, sheets, cols, today) {
       const extra = old.models.length && families(name).size
         ? mapRow(name, svc, idx, famOfModel).models.filter((m) => APP_ONLY.has(m) && !old.models.includes(m)) : [];
       if (extra.length) report.extended++;
-      parts.push({ ...old, name, cost, stock, models: extra.length ? [...old.models, ...extra] : old.models });
+      // линия (название без цвета) — по нынешним правилам: новые цвета вроде «ПОЛУНОЧНЫЙ» сливаются с остальными
+      parts.push({ ...old, name, cost, stock, models: extra.length ? [...old.models, ...extra] : old.models, line: lineKey(name) });
       continue;
     }
     if (!families(name).size) { report.file.otherBrands++; continue; }

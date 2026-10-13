@@ -388,7 +388,8 @@ await test('новый поставщик: .xls, цены в долларах, �
   const b = await readTable(file('tests/fixtures/price.xlsx'));
   assert.deepEqual(a[0].rows.map((r) => [...r].map((v) => v ?? null)), b[0].rows.map((r) => [...r].map((v) => v ?? null)));
   // названия в стиле нового поставщика
-  const models = ['iPhone 8', 'iPhone 11', 'iPhone 11 Pro', 'iPhone 12', 'iPhone 12 mini', 'iPhone 12 Pro', 'iPhone XS', 'iPhone SE 2020', 'iPhone 14'].map((m) => ({ brand: 'iPhone', model: m }));
+  const models = ['iPhone 5', 'iPhone 5c', 'iPhone 5s', 'iPhone 6', 'iPhone 6 Plus', 'iPhone 6s', 'iPhone 6s Plus', 'iPhone 7', 'iPhone 7 Plus', 'iPhone 8', 'iPhone 8 Plus',
+    'iPhone 11', 'iPhone 11 Pro', 'iPhone 12', 'iPhone 12 mini', 'iPhone 12 Pro', 'iPhone XS', 'iPhone SE 2020', 'iPhone 14'].map((m) => ({ brand: 'iPhone', model: m }));
   const idx = siteIndex(models.map((m) => m.model));
   const fam = new Map(models.map((m) => [m.model, BRAND_FAM[m.brand]]));
   const map = (n) => { const k = kindOf(n); const r = mapRow(n, k, idx, fam); return [k, r.tier, r.models.join()]; };
@@ -408,6 +409,24 @@ await test('новый поставщик: .xls, цены в долларах, �
   assert.deepEqual(map('Аккумулятор для iPhone11 3500 mAh усиленный iParts (гарантия 1 год) ic orig (100%)'), ['b', 'copy_boost', 'iPhone 11']);
   assert.equal(kindOf('Шлейф для прибора JC Receiver FPC для iPhone11'), null, 'инструмент — не ремонт');
   assert.equal(kindOf('Кольцо камеры для iPhone11, БЕЛЫЙ'), null, 'кольцо без стекла — не ремонт');
+  assert.equal(kindOf('Кнопка Home для iPhone5 ЧЕРНЫЙ'), null, 'колпачок кнопки — не шлейф кнопок');
+  assert.deepEqual(map('Кольцо камеры со стеклом для iPhone6/6S Plus, ЗОЛОТО'), ['cg', 'copy', 'iPhone 6 Plus,iPhone 6s Plus'], '6/6S Plus — оба Plus');
+  assert.deepEqual(map('Кольцо камеры со стеклом для iPhone6/6S (4.7\')'), ['cg', 'copy', 'iPhone 6,iPhone 6s']);
+  assert.deepEqual(map('Шлейф для iPhone7 (4,7")/8 (4,7")/7 (5,5")/8 (5,5") кнопка Home (сенсорное нажатие) ЧЕРНЫЙ'), ['bt', 'copy', 'iPhone 7,iPhone 8,iPhone 7 Plus,iPhone 8 Plus'], '5,5" — Plus');
+  assert.deepEqual(map('Стекло двойной камеры для iPhone7 Plus'), ['cg', 'copy', 'iPhone 7 Plus']);
+  assert.deepEqual(map('LCD для iPhone5 (матрица ориг) БЕЛЫЙ'), ['d', 'orig_new', 'iPhone 5'], '«ориг» по-русски');
+  assert.deepEqual(map('Шлейф для iPhone5S CHARGE CONN оrig БЕЛЫЙ (821-1667-A)'), ['p', 'orig_new', 'iPhone 5s'], '«оrig» с русской «о»');
+  assert.deepEqual(map('Задняя крышка для iPhone11 Pro + стекло ориг ЗЕЛЕНЫЙ (СЕ) - ПРЕМИУМ'), ['hs', 'copy', 'iPhone 11 Pro'], 'ориг — про стекло, крышка — копия');
+  assert.deepEqual(map('Шлейф для iPhone5C for Sensor Backlight + камера (821-1613-A)'), ['cf', 'copy', 'iPhone 5c'], 'датчик с передней камерой');
+  // цвета одной детали — одна линия: «ПОЛУНОЧНЫЙ СИНИЙ», «ТЕМНО-СЕРЫЙ», номер цвета «№3», «ЧЁРНЫЙ»
+  const same = (a, b) => assert.equal(lineKey(a), lineKey(b), a + ' / ' + b);
+  same('Заднее стекло для iPhone14 + стекло камеры + магнит MagSafe внутрикорпусной, ПОЛУНОЧНЫЙ СИНИЙ', 'Заднее стекло для iPhone14 + стекло камеры + магнит MagSafe внутрикорпусной, ФИОЛЕТОВЫЙ');
+  same('Задняя крышка для iPhone16 Pro Max + стекло ЧЕРНЫЙ (СЕ) №1 - ПРЕМИУМ', 'Задняя крышка для iPhone16 Pro Max + стекло БЕЛЫЙ (СЕ) №3 - ПРЕМИУМ');
+  same('Задняя крышка для iPhone 6 (4,7") в сборе (со шлейфами) ТЕМНО-СЕРЫЙ hi-copy', 'Задняя крышка для iPhone 6 (4,7") в сборе (со шлейфами) ЗОЛОТО hi-copy');
+  same('Шлейф для iPhone15 Pro Max CHARGE CONN НАТУРАЛЬНЫЙ', 'Шлейф для iPhone15 Pro Max CHARGE CONN ЧЁРНЫЙ');
+  same('Дисплей Samsung A55 5G (A556E) - OR (SP) (лавандовая рама)', 'Дисплей Samsung A55 5G (A556E) - OR (SP) (черная рама)');
+  same('Задняя крышка iPhone 16 Pro - натуральный титан, серая, Natural Titanium (премиум)', 'Задняя крышка iPhone 16 Pro - черный титан (премиум)');
+  assert.notEqual(lineKey('Задняя крышка для iPhone 6 (4,7") в сборе (со шлейфами) ЗОЛОТО hi-copy'), lineKey('Задняя крышка для iPhone 6 (4,7") в сборе (со шлейфами) ЗОЛОТО'));
   // поставщик в долларах: курс, наличие «+» по складу и магазинам, другой город не считается
   const data = { ...DATA, suppliers: { ...DATA.suppliers, S1: { name: 'Третий', stock: true, rank: 2, currency: 'USD', rate: 3 } } };
   const sheets = [{ name: 'Прайс', rows: [
@@ -423,6 +442,9 @@ await test('новый поставщик: .xls, цены в долларах, �
   const { next } = buildImport(data, 'S1', sheets, cols, '2026-11-05');
   const s1 = next.parts.filter((p) => p.sup === 'S1').map((p) => [p.name, p.cost, p.stock]);
   assert.deepEqual(s1, [['Аккумулятор для iPhone11 1:1 TI', 30, 'В наличии'], ['Аккумулятор для iPhone14 1:1 TI', 36, 'Нет в наличии'], ['Buzzer для iPhone11', 4.5, 'В наличии']]);
+  // у знакомой позиции линия — по нынешним правилам (новые слова цвета сливают линии)
+  const stale = { ...next, parts: next.parts.map((p) => (p.sup === 'S1' ? { ...p, line: 'старая линия' } : p)) };
+  assert.deepEqual(buildImport(stale, 'S1', sheets, cols, '2026-11-06').next.parts.filter((p) => p.sup === 'S1').map((p) => p.line), s1.map(([n]) => lineKey(n)));
   // новый курс пересчитывает закупку этого поставщика и только его
   const r = withRate(next, 'S1', 3.3);
   assert.deepEqual(r.parts.filter((p) => p.sup === 'S1').map((p) => p.cost), [33, 39.6, 4.95]);

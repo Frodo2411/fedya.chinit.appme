@@ -54,12 +54,18 @@ const SEG_QUALITY = pyRe(String.raw`\s+(?:In-?Cell|Incell|OLED|AMOLED|TFT|LCD)\b
 // eSIM в названии корпуса: «iPhone 17 Pro e sim + sim»
 const SEG_ESIM = /\s+(?:e\s?sim|\d\s?sim)(?:\s*\+\s*sim)?(?=\s|$)/gi;
 
+const LATIN_MIX = /(?<=[A-Za-z])[аеорсхук]|[аеорсх](?=[A-Za-z])/g;
 const LOOKALIKE = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', Х: 'X', а: 'a', е: 'e', о: 'o', р: 'p', с: 'c', х: 'x', у: 'y', к: 'k' };
+
+// «iPhone7 (4,7")/7 (5,5")»: 5,5 дюйма — это Plus
+const INCH55 = /(?<=\d)\s*\(5[,.]5\s*["'”″]*\s*\)/g;
+const applePlus = (s) => (/iPhone/i.test(s) ? s.replace(INCH55, ' Plus') : s);
 
 export function modelSegment(name) {
   let s = name.trim().replace(KIND_PREFIX, '');
   // русская буква внутри модели, похожая на латинскую: «iPhoneХS», «Redmi 13С», «iPhone5С»
   s = s.replace(/(?<=[0-9A-Za-z])[АВЕКМНОРСТХаеорсхук]|[АВЕКМНОРСТХаеорсх](?=[0-9A-Za-z])/g, (ch) => LOOKALIKE[ch] || ch);
+  s = applePlus(s);
   s = s.replace(/\biPhone(?=[0-9A-Za-zА-Яа-яЁё])/gi, 'iPhone ').replace(/(\d)(Pro|Plus|Max|mini|Air)\b/gi, '$1 $2').replace(/\bSE(?=\d)/g, 'SE ');
   s = beforeFirst(s, SEG_SPLIT);
   s = s.replace(SEG_YEAR, ' $1');
@@ -107,6 +113,8 @@ export function items(name) {
   // русские слова после модели — цвет и пояснения: «iPhone 6 белый», «Mi 8 Lite с разъемом зарядки»
   const apple = /^iPhone\b/i.test(seg);
   const parts = seg.split(/\s*\/\s*/).map((p) => p.replace(/\s+[а-яё].*$/i, '').trim()).map((p) => (apple ? trimApple(p) : p)).filter(Boolean);
+  // «iPhone 6/6S Plus» — 6 Plus и 6s Plus, а не 6 и 6s Plus (маленький пишут «6/6S (4,7")»)
+  if (apple) parts.forEach((p, i) => { const m = /^(?:iPhone )?(\d+)$/i.exec(p); if (m && new RegExp('^' + m[1] + 's Plus$', 'i').test(parts[i + 1] || '')) parts[i] = p + ' Plus'; });
   const out = [];
   const prefixes = [];
   for (const p of parts) {
@@ -225,7 +233,7 @@ const T = {
   dUsed: R('снят|разбор|б/у|полирован|заменена рамк'),
   dCopy: R('orig tech|под оригинал|high quality|копия'),
   oled: R(String.raw`oled|amoled|fog`),
-  dOrig: R(String.raw`\bOR\b|\(SP\)|service pack|сервис|\boriginal\b|\borig\b|оригинал`),
+  dOrig: R(String.raw`\bOR\b|\(SP\)|service pack|сервис|\boriginal\b|\borig\b|оригинал|\bориг\b`),
   dOrigNot: R(String.raw`\b(gx|jk|mems|dd|jcid|wode|rj|fog|zy|hex|tft|lcd|aaa)\b|in-?cell|soft oled|hard oled`),
   dOled: R(String.raw`oled|amoled|\bfog\b|super amoled`),
   cSkip: R('стекло камер|накладк|корпус|рамк|средн|наклейк|скотч'),
@@ -233,13 +241,15 @@ const T = {
   cOrig: R(String.raw`\bOR\b|сервис`),
   pSkip: R('беспровод|вспышк|громкост|включени|кнопк|сканер|отпечат|антенн|динамик|вибро|межплат|на дисплей|lcd'),
   pUsed: R('снят|разбор'),
-  pOrig: R(String.raw`\bOR\b|original|сервис|\borig\b`),
+  pOrig: R(String.raw`\bOR\b|original|сервис|\borig\b|\bориг\b`),
   oUsed: R('снят|разбор'),
   oOrig: R(String.raw`\bOR\b|original|\borig\b|оригинал|сервис`),
 };
 
 export function tier(kind, n) {
   if (kind === 'd') n = n.replace(/^LCD\s+/i, 'Дисплей '); // «LCD для iPhone» — не признак копии ЖК
+  // русская буква в латинском слове: «оrig» с русской «о»
+  if (kind !== 'b') n = n.replace(LATIN_MIX, (ch) => LOOKALIKE[ch] || ch);
   if (kind === 'b') {
     if (T.bSkip.test(n)) return 'skip';
     if (T.bVer.test(n) && !T.bVerNot.test(n)) return 'verified';
@@ -281,13 +291,16 @@ export function tier(kind, n) {
   return 'skip';
 }
 
-const COLOURS = String.raw`(черн\w*|бел\w*|син\w*|голуб\w*|зелен\w*|красн\w*|розов\w*|фиолет\w*|сиренев\w*|серебр\w*|сер\w*|золот\w*|желт\w*|оранж\w*|коричн\w*|бирюз\w*|бежев\w*|мятн\w*|графит\w*|титан\w*|Black|White|Blue|Green|Red|Pink|Purple|Silver|Gold|Yellow|Midnight|Starlight|Graphite|Gray|Grey)`;
+const COLOURS = String.raw`(ч[её]рн\w*|бел\w*|син\w*|голуб\w*|зел[её]н\w*|красн\w*|розов\w*|фиолет\w*|сиренев\w*|[сc]еребр\w*|сер\w*|золот\w*|зол|ж[её]лт\w*|оранж\w*|коричн\w*|бирюз\w*|бежев\w*|мятн\w*|графит\w*|титан\w*|натурал\w*|пустын\w*|ультрамарин\w*|корал\w*|полуночн\w*|лаванд\w*|Black|White|Blue|Green|Red|Pink|Purple|Silver|Gold|Yellow|Midnight|Starlight|Graphite|Gray|Grey|Natural|Desert|Ultramarine|Titanium|Teal|Lavender)`;
+const LINE_SHADE = pyRe(String.raw`\b(?:т[её]мно|светло)-?`, 'gi');
 const LINE_FRAME = pyRe(String.raw`\((?:` + COLOURS + String.raw`)\s*рама\)`, 'gi');
 const LINE_COLOUR = pyRe(String.raw`\b` + COLOURS + String.raw`\b,?`, 'gi');
 
-// Название без цвета: цвета одной позиции считаем одной деталью
+// Название без цвета: цвета одной позиции считаем одной деталью.
+// «темно-серый», «№1…№5» (номер цвета у поставщика) — тоже цвет.
 export function lineKey(name) {
-  let t = name.replace(LINE_FRAME, '');
+  let t = name.replace(LINE_SHADE, '').replace(/№\s*\d+/g, '');
+  t = t.replace(LINE_FRAME, '');
   t = t.replace(LINE_COLOUR, '');
   return pyStrip(t.replace(/\s+/g, ' ').replace(/ ,/g, ','), ' -,');
 }
@@ -353,14 +366,13 @@ function partWords(n) {
 
 function moreKind(n) {
   if (NOT_REPAIR.test(n)) return null;
-  if (/^[СC]текло камер/i.test(n)) return 'cg';
+  if (/^[СC]текло (?:двойной |тройной )?камер/i.test(n)) return 'cg';
   if (/^[СC]текло[\s+]/i.test(n) && /переклей|для ремонта/i.test(n)) return /маленьк|внешн/i.test(n) ? null : 'gl';
   if (/^Тачскрин/i.test(n)) return 'tc';
   if (/^(Сим|SIM)[\s-]*лоток|^Лоток для сим/i.test(n)) return 'sim';
   if (/^Кольцо камеры со стеклом/i.test(n)) return 'cg';
   if (/^Buzzer\s/i.test(n)) return 'ls';
   if (/^Вибро/i.test(n)) return 'vb';
-  if (/^Кнопк[аи]\s/i.test(n)) return 'bt';
   if (/^Внутрикорпусная катушка/i.test(n)) return 'fo';
   if (/^(Корпус|Средняя часть)/i.test(n)) return 'hs';
   if (/^(Динамик слуховой|Слуховой динамик)/i.test(n)) return 'es';
@@ -379,7 +391,7 @@ function moreKind(n) {
 // Какой шлейф: по словам вне модели, а у названий без « - » — по всему названию
 function flexKind(w) {
   if (/lidar|лидар/i.test(w)) return 'fo';
-  if (/камера передн|передняя камер|фронтальн/i.test(w)) return 'cf';
+  if (/камера передн|передняя камер|фронтальн|(?:sensor|сенсор|датчик)[^/]*\+\s*камер/i.test(w)) return 'cf';
   if (/сканер|отпечат|touch\s*id/i.test(w)) return 'fp';
   if (/кноп|включени|громкост|блокировк|power|volume|on\/off|home\s*button/i.test(w)) return 'bt';
   if (/межплат|на дисплей|экрана/i.test(w)) return 'fx';
@@ -394,7 +406,7 @@ function moreModels(name) {
   if (at < 0) return name;
   const tail = name.slice(at);
   const dash = tail.indexOf(' - ');
-  const head = (dash < 0 ? tail : tail.slice(0, dash))
+  const head = applePlus(dash < 0 ? tail : tail.slice(0, dash))
     .replace(/\(\s*(20\d\d)\s*\)/g, ' $1')
     .replace(/\([^)]*\)/g, ' ')
     .replace(SEG_ESIM, '')
