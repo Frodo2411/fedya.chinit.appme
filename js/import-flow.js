@@ -1,6 +1,6 @@
 // Окно «Обновить прайс»: читаем файл поставщика, показываем, что изменится, и применяем.
 
-import { h, fill, money, toast, openSheet, field } from './ui.js';
+import { h, fill, money, toast, openSheet, field, parseNum } from './ui.js';
 import { readTable } from './xlsx.js';
 import { detect, buildImport, clientChanges, colName } from './importer.js';
 import { today } from './store.js';
@@ -11,6 +11,7 @@ export async function openImport(app, supKey, file) {
   const sup = app.data.suppliers[supKey];
   let sheets;
   let cols;
+  toast('Читаю прайс…', 3000);
   try {
     sheets = await readTable(file);
     cols = detect(sheets, supKey, app.data);
@@ -46,7 +47,7 @@ export async function openImport(app, supKey, file) {
     try {
       result = buildImport(app.data, supKey, sheets, cols, today());
     } catch (e) {
-      fill(body, h('div', { class: 'banner bad', text: e.message }), columnsBox());
+      fill(body, h('div', { class: 'banner bad', text: e.message }), rateBox(), columnsBox());
       applyBtn.disabled = true;
       return;
     }
@@ -54,14 +55,26 @@ export async function openImport(app, supKey, file) {
     draw();
   }
 
+  // Цены в долларах: курс виден и меняется прямо здесь, цены пересчитываются сразу
+  function rateBox() {
+    if (sup.currency !== 'USD') return null;
+    return field('Цены в файле в долларах. Курс, р. за $', h('input', {
+      class: 'input num', inputmode: 'decimal', value: String(cols.rate).replace('.', ','),
+      onchange: (e) => { const n = parseNum(e.target.value); if (n > 0) { cols.rate = n; rebuild(); } },
+    }));
+  }
+
   function columnsBox() {
     const pc = cols.priceCols.find((c) => c.col === cols.priceCol);
+    const stockText = cols.stockCols && cols.stockCols.length ? ', наличие ' + cols.stockCols.map(colName).join('+')
+      : cols.stockCol !== null ? ', наличие ' + colName(cols.stockCol) : '';
     return h('details', {},
-      h('summary', { text: 'Столбцы: название ' + colName(cols.nameCol) + ', цена ' + colName(cols.priceCol) + (cols.stockCol !== null ? ', наличие ' + colName(cols.stockCol) : '') }),
+      h('summary', { text: 'Столбцы: название ' + colName(cols.nameCol) + ', цена ' + colName(cols.priceCol) + stockText }),
+      cols.stockCols && cols.stockCols.length ? h('div', { class: 'small muted', text: 'В наличии, если «+» хоть в одном из столбцов ' + cols.stockCols.map(colName).join(', ') + '. Другие города не учитываю.' }) : null,
       pc && pc.known ? h('div', { class: 'small muted', text: 'Цена в этом столбце совпала с прошлой у ' + pc.hits + ' из ' + pc.known + ' знакомых позиций.' }) : null,
       field('Название детали', h('select', { class: 'input', onchange: (e) => { cols.nameCol = Number(e.target.value); rebuild(); } }, colOptions(cols.nameCol))),
       field('Цена, BYN', h('select', { class: 'input', onchange: (e) => { cols.priceCol = Number(e.target.value); rebuild(); } }, colOptions(cols.priceCol))),
-      sup.stock ? field('Наличие', h('select', { class: 'input', onchange: (e) => { const v = Number(e.target.value); cols.stockCol = v < 0 ? null : v; rebuild(); } }, colOptions(cols.stockCol, true))) : null);
+      sup.stock ? field('Наличие', h('select', { class: 'input', onchange: (e) => { const v = Number(e.target.value); cols.stockCol = v < 0 ? null : v; cols.stockCols = null; rebuild(); } }, colOptions(cols.stockCol, true))) : null);
   }
 
   function draw() {
@@ -90,6 +103,7 @@ export async function openImport(app, supKey, file) {
       h('div', { class: 'small muted', text: 'Файл: ' + file.name + ' · лист «' + sheets[cols.sheet].name + '»' }),
       warn ? h('div', { class: 'banner warn', style: 'margin-top:10px', text: 'Цены в выбранном столбце сильно отличаются от прошлых. Проверь столбец цены ниже: может быть, выбраны доллары или розница.' }) : null,
       strange ? h('div', { class: 'banner bad', style: 'margin-top:10px', text: 'Почти ни одна позиция не совпала с прошлым прайсом ' + sup.name + '. Это точно его файл? Если нет — нажми «Отмена».' }) : null,
+      rateBox(),
       columnsBox(),
       h('div', { class: 'tiles', style: 'margin-top:8px' },
         tile('Позиций в файле', r.file.parts), tile('Знакомых', r.known),
@@ -163,5 +177,9 @@ export async function openImport(app, supKey, file) {
     }
   };
   const sheet = openSheet('Прайс ' + sup.name, body, [h('button', { class: 'btn', text: 'Отмена', onclick: () => sheet.close() }), applyBtn]);
+  // сначала показать окно, потом считать: на телефоне разбор большого прайса занимает пару секунд
+  fill(body, h('div', { class: 'small muted', style: 'padding:16px 0' }, h('span', { class: 'spin' }), ' Сопоставляю позиции…'));
+  applyBtn.disabled = true;
+  await new Promise((r) => setTimeout(r, 30));
   rebuild();
 }

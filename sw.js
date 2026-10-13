@@ -2,12 +2,12 @@
 // Данные прайса и код скрипта сначала берём из сети (там могут быть свежие), без сети — из кэша.
 // При каждом выпуске меняется VERSION, телефон скачивает новую версию сам.
 
-const VERSION = '2026-10-12.3';
+const VERSION = '2026-10-13.1';
 const CACHE = 'master-' + VERSION;
 const FILES = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',
   'js/app.js', 'js/ui.js', 'js/engine.js', 'js/pyre.js', 'js/rules.js', 'js/search.js', 'js/crypto.js', 'js/data.js', 'js/models-app.js',
-  'js/store.js', 'js/sheet.js', 'js/orders.js', 'js/xlsx.js', 'js/importer.js', 'js/import-flow.js',
+  'js/store.js', 'js/sheet.js', 'js/orders.js', 'js/xlsx.js', 'js/xls.js', 'js/importer.js', 'js/import-flow.js',
   'js/view-prices.js', 'js/view-orders.js', 'js/view-summary.js', 'js/view-more.js',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
   'data/prices.enc', 'apps-script/Code.gs',

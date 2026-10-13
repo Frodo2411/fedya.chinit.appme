@@ -11,6 +11,26 @@ import { APP_ONLY, APP_ALIASES } from './data.js';
 export const IN_STOCK = 'В наличии';
 export const OUT_OF_STOCK = 'Нет в наличии';
 
+// Курс: поставщик с ценами в долларах — сколько рублей за доллар, иначе 1
+export function supplierRate(s) {
+  return s && s.currency === 'USD' && s.rate > 0 ? s.rate : 1;
+}
+
+const round2 = (x) => Math.round(x * 100) / 100;
+
+// Новый курс поставщика в долларах: его закупочные цены пересчитываются сразу
+export function withRate(data, supKey, rate) {
+  const s = data.suppliers[supKey];
+  const old = supplierRate(s);
+  const next = { ...s, currency: 'USD', rate };
+  const k = s.currency === 'USD' && old !== rate ? rate / old : 1;
+  return {
+    ...data,
+    suppliers: { ...data.suppliers, [supKey]: next },
+    parts: k === 1 ? data.parts : data.parts.map((p) => (p.sup === supKey && p.cost ? { ...p, cost: round2(p.cost * k) } : p)),
+  };
+}
+
 export function keyOf(name) {
   return String(name).replace(/\s+/g, ' ').trim();
 }
@@ -52,6 +72,7 @@ export function detect(sheets, supKey, data) {
   const partRows = rows.filter((r) => typeof r[best.name] === 'string' && kindOf(r[best.name]));
   const header = headerRow(rows, best.name);
   const known = knownCosts(data, supKey);
+  const rate = supplierRate(data.suppliers[supKey]);
   const width = Math.max(...partRows.map((r) => r.length));
   const priceCols = [];
   for (let ci = 0; ci < width; ci++) {
@@ -60,8 +81,9 @@ export function detect(sheets, supKey, data) {
     let hits = 0;
     const logs = [];
     for (const r of partRows) {
-      const p = parsePrice(r[ci]);
-      if (p === null) continue;
+      const p0 = parsePrice(r[ci]);
+      if (p0 === null) continue;
+      const p = p0 * rate;
       nums++;
       const old = known.get(keyOf(r[best.name]));
       if (old) {
@@ -78,7 +100,20 @@ export function detect(sheets, supKey, data) {
   const byHead = (c) => (/byn|руб|бел|\bbr\b|р\.|цена/i.test(c.head) ? 1 : 0) - (/usd|\$|долл|eur|€/i.test(c.head) ? 2 : 0);
   priceCols.sort((a, b) => (b.hits - a.hits) || ((a.median ?? 9) - (b.median ?? 9)) || (byHead(b) - byHead(a)) || (a.col - b.col));
   let stockCol = null;
+  let stockCols = null;
   if (data.suppliers[supKey] && data.suppliers[supKey].stock) {
+    // наличие отметками «+»/«-» по складу и магазинам: в наличии, если «+» хоть где-то, кроме других городов
+    const plus = [];
+    for (let ci = 0; ci < width; ci++) {
+      if (ci === best.name) continue;
+      let n = 0;
+      for (const r of partRows) if (typeof r[ci] === 'string' && /^[+-]$/.test(r[ci].trim())) n++;
+      if (n >= partRows.length * 0.5 && !(header && OTHER_CITY.test(String(header[ci] ?? '')))) plus.push(ci);
+    }
+    if (plus.length > 1) stockCols = plus;
+  }
+  if (stockCols) stockCol = stockCols[0];
+  else if (data.suppliers[supKey] && data.suppliers[supKey].stock) {
     let top = 0;
     for (let ci = 0; ci < width; ci++) {
       if (ci === best.name) continue;
@@ -92,19 +127,25 @@ export function detect(sheets, supKey, data) {
     }
   }
   return {
-    sheet: best.sheet, sheetName: sheets[best.sheet].name, nameCol: best.name, priceCol: priceCols[0].col, stockCol,
-    priceCols, partRows: partRows.length, header,
+    sheet: best.sheet, sheetName: sheets[best.sheet].name, nameCol: best.name, priceCol: priceCols[0].col, stockCol, stockCols,
+    priceCols, partRows: partRows.length, header, rate,
   };
 }
 
+// Заголовок таблицы: до первой детали строка, где больше всего коротких ячеек «Цена», «Наименование», «Склад»…
+// (длинная «Гарантия качества по лучшим ценам!» — не заголовок)
 function headerRow(rows, nameCol) {
+  let best = null;
+  let top = 0;
   for (const r of rows.slice(0, 40)) {
-    const texts = r.filter((v) => typeof v === 'string');
-    if (texts.length >= 2 && texts.some((t) => /цена|наимен|назван|товар|налич|byn|usd/i.test(t))) return r;
     if (typeof r[nameCol] === 'string' && kindOf(r[nameCol])) break;
+    const n = r.filter((v) => typeof v === 'string' && v.length <= 40 && /цена|наимен|назван|товар|налич|byn|usd|склад|артикул/i.test(v)).length;
+    if (n > top) { top = n; best = r; }
   }
-  return null;
+  return top ? best : null;
 }
+
+const OTHER_CITY = /гомел|брест|гродн|витеб|могил/i;
 
 function knownCosts(data, supKey) {
   const m = new Map();
@@ -138,9 +179,12 @@ export function buildImport(data, supKey, sheets, cols, today) {
     if (!svc) continue;
     report.file.parts++;
     const key = keyOf(name);
-    const cost = parsePrice(r[cols.priceCol]);
+    const price = parsePrice(r[cols.priceCol]);
+    const cost = price === null ? null : round2(price * (cols.rate || 1));
     if (cost === null) report.file.noPrice++;
-    const stock = cols.stockCol === null || cols.stockCol === undefined ? null : normStock(r[cols.stockCol]);
+    const stock = cols.stockCols && cols.stockCols.length
+      ? (cols.stockCols.some((ci) => typeof r[ci] === 'string' && r[ci].trim() === '+') ? IN_STOCK : OUT_OF_STOCK)
+      : cols.stockCol === null || cols.stockCol === undefined ? null : normStock(r[cols.stockCol]);
     const olds = known.get(key);
     const n = used.get(key) || 0;
     let old = olds ? olds[Math.min(n, olds.length - 1)] : null;
@@ -179,7 +223,7 @@ export function buildImport(data, supKey, sheets, cols, today) {
   const next = {
     ...data,
     priceDate: today,
-    suppliers: { ...data.suppliers, [supKey]: { ...data.suppliers[supKey], date: today } },
+    suppliers: { ...data.suppliers, [supKey]: { ...data.suppliers[supKey], date: today, ...(data.suppliers[supKey].currency === 'USD' ? { rate: cols.rate } : {}) } },
     parts: [...others, ...parts],
     history: [...(data.history || []), { date: today, sup: supKey, rows: report.file.parts, fresh: report.fresh.length, gone: report.gone.length }].slice(-24),
   };

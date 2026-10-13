@@ -4,6 +4,7 @@ import { h, fill, toast, openSheet, field, parseNum, fmtDate, shareFile, copyTex
 import { DEFAULTS, SERVICES, MORE_SERVICES, settingsWithDefaults, siteFile } from './engine.js';
 import { SVC } from './view-prices.js';
 import { openImport } from './import-flow.js';
+import { withRate } from './importer.js';
 import { monthTitle } from './ui.js';
 
 export const APP_VERSION = '1.0.0';
@@ -13,7 +14,7 @@ export function createMoreView(app) {
 
   function filePicker(supKey) {
     const input = h('input', {
-      type: 'file', accept: '.xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv', hidden: true,
+      type: 'file', accept: '.xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv', hidden: true,
       onchange: () => { const f = input.files[0]; input.value = ''; if (f) openImport(app, supKey, f); },
     });
     return input;
@@ -30,8 +31,11 @@ export function createMoreView(app) {
         h('h3', { text: 'Прайсы поставщиков' }),
         h('div', { class: 'small muted', text: 'Раз в месяц загрузи свежие файлы: приложение само сопоставит позиции и покажет, что изменится.' }),
         sups.map(([k, s]) => h('div', { class: 'row', style: 'margin-top:12px' },
-          h('div', { class: 'grow' }, h('b', { text: s.name }), h('div', { class: 'tiny muted', text: 'от ' + fmtDate(s.date || app.data.priceDate) + (s.stock ? '' : ' · без наличия') })),
-          pickers[k], h('button', { class: 'btn small', text: 'Загрузить', onclick: () => pickers[k].click() }))),
+          h('div', { class: 'grow' }, h('b', { text: s.name }), h('div', { class: 'tiny muted', text: 'от ' + fmtDate(s.date || app.data.priceDate) + (s.stock ? '' : ' · без наличия')
+            + (s.currency === 'USD' ? ' · в $, курс ' + String(s.rate || '?').replace('.', ',') : '') })),
+          pickers[k], h('button', { class: 'btn small', text: 'Загрузить', onclick: () => pickers[k].click() }),
+          h('button', { class: 'btn small', 'aria-label': 'Настроить поставщика ' + s.name, text: '⋯', onclick: () => openSupplier(app, k) }))),
+        h('button', { class: 'btn small', style: 'margin-top:12px', text: 'Добавить поставщика', onclick: () => openSupplier(app, null) }),
         hist.length ? h('div', { class: 'tiny faint', style: 'margin-top:12px' }, 'Обновления: ',
           hist.map((x) => fmtDate(x.date) + ' ' + ((app.data.suppliers[x.sup] || {}).name || x.sup) + ' (новых ' + x.fresh + ', пропало ' + x.gone + ')').join('; ')) : null,
         h('div', { class: 'row wrap', style: 'margin-top:14px' },
@@ -84,6 +88,63 @@ export function createMoreView(app) {
   }
 
   return { el: root, draw };
+}
+
+// Поставщик: название, валюта и курс, есть ли наличие в прайсе, сайт. Новый — с пустым прайсом, его загружают кнопкой «Загрузить».
+// Имя хранится только в зашифрованном прайсе на телефоне и в таблице.
+function openSupplier(app, key) {
+  const cur = key ? app.data.suppliers[key] : null;
+  const s = { name: cur ? cur.name : '', currency: cur && cur.currency === 'USD' ? 'USD' : 'BYN', rate: cur && cur.rate ? cur.rate : null, stock: cur ? !!cur.stock : true, site: cur && cur.site ? cur.site : '' };
+  const count = key ? app.data.parts.filter((p) => p.sup === key).length : 0;
+  const rateField = field('Курс, р. за $', h('input', { class: 'input num', inputmode: 'decimal', placeholder: 'например 3,05', value: s.rate ? String(s.rate).replace('.', ',') : '', oninput: (e) => { s.rate = parseNum(e.target.value); } }),
+    key ? 'Закупочные цены этого поставщика пересчитаются по новому курсу сразу.' : null);
+  rateField.hidden = s.currency !== 'USD';
+  const body = h('div', {},
+    field('Название', h('input', { class: 'input', value: s.name, placeholder: 'Как назвать поставщика', oninput: (e) => { s.name = e.target.value; } })),
+    field('Цены в прайсе', h('select', { class: 'input select', onchange: (e) => { s.currency = e.target.value; rateField.hidden = s.currency !== 'USD'; } },
+      h('option', { value: 'BYN', text: 'в рублях', selected: s.currency === 'BYN' }), h('option', { value: 'USD', text: 'в долларах', selected: s.currency === 'USD' }))),
+    rateField,
+    h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: s.stock, onchange: (e) => { s.stock = e.target.checked; } }), 'В прайсе есть наличие'),
+    field('Сайт (необязательно)', h('input', { class: 'input', type: 'url', value: s.site, placeholder: 'https://…', autocapitalize: 'off', oninput: (e) => { s.site = e.target.value.trim(); } })),
+    key ? h('div', { class: 'tiny faint', style: 'margin-top:8px', text: 'Позиций в прайсе: ' + count + '.' } ) : null);
+  const save = async () => {
+    const name = s.name.trim();
+    if (!name) { toast('Напиши название'); return; }
+    if (s.currency === 'USD' && !(s.rate > 0)) { toast('Укажи курс доллара'); return; }
+    let data = app.data;
+    const next = { ...(cur || {}), name, stock: s.stock };
+    if (s.currency === 'USD') { next.currency = 'USD'; next.rate = s.rate; } else { delete next.currency; delete next.rate; }
+    if (s.site) next.site = s.site; else delete next.site;
+    let k = key;
+    if (!k) {
+      let i = 1;
+      while (data.suppliers['S' + i]) i++;
+      k = 'S' + i;
+      next.rank = Math.max(0, ...Object.values(data.suppliers).map((x) => (x.rank ?? 0))) + 1;
+    }
+    // новый курс: закупка этого поставщика пересчитывается сразу (withRate), остальное — как ввели
+    if (cur && cur.currency === 'USD' && next.currency === 'USD') data = withRate(data, k, next.rate);
+    data = { ...data, suppliers: { ...data.suppliers, [k]: next } };
+    try {
+      await app.applyData(data);
+      sheet.close();
+      toast(key ? 'Сохранено' : 'Поставщик добавлен: загрузи его прайс');
+    } catch (e) { toast('Не получилось: ' + e.message, 5000); }
+  };
+  const remove = async () => {
+    if (!confirm('Удалить поставщика «' + cur.name + '» и все его позиции (' + count + ')? Вернуть можно кнопкой «Вернуть прошлые прайсы».')) return;
+    const suppliers = { ...app.data.suppliers };
+    delete suppliers[key];
+    try {
+      await app.applyData({ ...app.data, suppliers, parts: app.data.parts.filter((p) => p.sup !== key) });
+      sheet.close();
+      toast('Поставщик удалён');
+    } catch (e) { toast('Не получилось: ' + e.message, 5000); }
+  };
+  const sheet = openSheet(key ? 'Поставщик' : 'Новый поставщик', body, [
+    key && Object.keys(app.data.suppliers).length > 1 ? h('button', { class: 'btn danger', text: 'Удалить', onclick: remove }) : h('button', { class: 'btn', text: 'Отмена', onclick: () => sheet.close() }),
+    h('button', { class: 'btn primary', text: 'Сохранить', onclick: save }),
+  ]);
 }
 
 function openFormula(app) {

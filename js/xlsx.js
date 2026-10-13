@@ -1,5 +1,7 @@
-// Чтение .xlsx (и .csv) без сторонних библиотек: zip-архив + XML листов.
+// Чтение .xlsx (и .csv, и старого .xls через xls.js) без сторонних библиотек: zip-архив + XML листов.
 // Возвращает [{name, rows: [[значение ячейки, ...], ...]}]; значение — строка, число или null.
+
+import { readXls } from './xls.js';
 
 function u16(b, o) { return b[o] | (b[o + 1] << 8); }
 function u32(b, o) { return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0; }
@@ -163,6 +165,6 @@ export async function readTable(file) {
   const buf = await file.arrayBuffer();
   const head = new Uint8Array(buf.slice(0, 4));
   if (head[0] === 0x50 && head[1] === 0x4b) return readXlsx(buf);
-  if (head[0] === 0xd0 && head[1] === 0xcf) throw new Error('Это старый формат .xls. Открой файл в Excel или Numbers и сохрани как .xlsx');
+  if (head[0] === 0xd0 && head[1] === 0xcf) return readXls(buf);
   return readCsv(new TextDecoder().decode(buf));
 }

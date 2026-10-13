@@ -4,7 +4,7 @@
 
 import { pyRe, pySplit, pyStrip, beforeFirst } from './pyre.js';
 
-const KIND_PREFIX = pyRe(String.raw`^(Аккумулятор|Дисплей|Задняя крышка|Плата зарядки|Нижняя плата|Шлейф зарядки|Шлейф|Разъем|Разъём)\s+(для\s+)?`, 'i');
+const KIND_PREFIX = pyRe(String.raw`^(Аккумулятор|Дисплей|LCD|Задняя крышка|Заднее стекло|Плата зарядки|Нижняя плата|Шлейф зарядки|Шлейф|Разъем|Разъём)\s+(для\s+)?`, 'i');
 
 const NM = [
   [pyRe(String.raw`\bgalaxy\b|\bsamsung\b|\bapple\b|\bgoogle\b|\bhuawei\b(?=\s+(honor|nova|mate|p\d|pura|p smart))`, 'g'), ' '],
@@ -20,6 +20,8 @@ const NM = [
 
 export function normModel(s) {
   let t = s.toLowerCase().replace(/ё/g, 'е');
+  // слитно у поставщика: «iPhone11», «iPhoneXR», «13Pro», «16Plus»
+  t = t.replace(/\biphone(?=[0-9a-zа-я])/g, 'iphone ').replace(/(\d)(pro|plus|max|mini|air)\b/g, '$1 $2');
   t = t.replace(/\biphone 17 air\b/, 'iphone air'); // у поставщиков «iPhone 17 Air», на сайте «iPhone Air»
   for (const [re, rep] of NM) t = t.replace(re, rep);
   t = t.replace(/\s+/g, ' ').trim();
@@ -52,8 +54,13 @@ const SEG_QUALITY = pyRe(String.raw`\s+(?:In-?Cell|Incell|OLED|AMOLED|TFT|LCD)\b
 // eSIM в названии корпуса: «iPhone 17 Pro e sim + sim»
 const SEG_ESIM = /\s+(?:e\s?sim|\d\s?sim)(?:\s*\+\s*sim)?(?=\s|$)/gi;
 
+const LOOKALIKE = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', Х: 'X', а: 'a', е: 'e', о: 'o', р: 'p', с: 'c', х: 'x', у: 'y', к: 'k' };
+
 export function modelSegment(name) {
   let s = name.trim().replace(KIND_PREFIX, '');
+  // русская буква внутри модели, похожая на латинскую: «iPhoneХS», «Redmi 13С», «iPhone5С»
+  s = s.replace(/(?<=[0-9A-Za-z])[АВЕКМНОРСТХаеорсхук]|[АВЕКМНОРСТХаеорсх](?=[0-9A-Za-z])/g, (ch) => LOOKALIKE[ch] || ch);
+  s = s.replace(/\biPhone(?=[0-9A-Za-zА-Яа-яЁё])/gi, 'iPhone ').replace(/(\d)(Pro|Plus|Max|mini|Air)\b/gi, '$1 $2').replace(/\bSE(?=\d)/g, 'SE ');
   s = beforeFirst(s, SEG_SPLIT);
   s = s.replace(SEG_YEAR, ' $1');
   s = s.replace(SEG_PAREN, ' ');
@@ -84,11 +91,22 @@ function leadWords(words) {
   return lead;
 }
 
+// После модели айфона без « - » — описание детали: «iPhone 11 JK», «iPhone 12 CHARGE CONN». Оставляем только слова модели.
+// «60Гц», «120Hz», «128GB» — не модель
+const APPLE_WORD = /^(?!\d+(?:hz|гц|gb|tb|mp|mah|w)$)(?:iPhone|\d{1,2}[A-Za-z]{0,2}|[XХ][SRСРsrср]?|SE|Air|Pro|Max|Plus|mini|e|20\d\d)$/i;
+function trimApple(p) {
+  const w = pySplit(p);
+  let n = 0;
+  while (n < w.length && APPLE_WORD.test(w[n])) n++;
+  return n ? w.slice(0, n).join(' ') : p;
+}
+
 // 'Xiaomi 13T/Redmi Note 13 Pro 4G/14S' -> [['Xiaomi 13T'], ['Redmi Note 13 Pro 4G'], ['Redmi Note 14S', 'Xiaomi 14S', ...]]
 export function items(name) {
   const seg = modelSegment(name);
   // русские слова после модели — цвет и пояснения: «iPhone 6 белый», «Mi 8 Lite с разъемом зарядки»
-  const parts = seg.split(/\s*\/\s*/).map((p) => p.replace(/\s+[а-яё].*$/i, '').trim()).filter(Boolean);
+  const apple = /^iPhone\b/i.test(seg);
+  const parts = seg.split(/\s*\/\s*/).map((p) => p.replace(/\s+[а-яё].*$/i, '').trim()).map((p) => (apple ? trimApple(p) : p)).filter(Boolean);
   const out = [];
   const prefixes = [];
   for (const p of parts) {
@@ -202,9 +220,9 @@ const T = {
   bBoost: R('усилен'),
   // внешний (маленький) экран раскладушки — не основной дисплей
   dSkip: R(String.raw`стекл|тачскрин|подсветк|защитн|\bOCA\b|рамка дисплея|внешн|маленьк`),
-  dSkipNot: R('заменено.*стекл'),
+  dSkipNot: R('заменено.*стекл|полирован'),
   dReglass: R(String.raw`переклей|\bRef\b|refurb|заменено`),
-  dUsed: R('снят|разбор|б/у'),
+  dUsed: R('снят|разбор|б/у|полирован|заменена рамк'),
   dCopy: R('orig tech|под оригинал|high quality|копия'),
   oled: R(String.raw`oled|amoled|fog`),
   dOrig: R(String.raw`\bOR\b|\(SP\)|service pack|сервис|\boriginal\b|\borig\b|оригинал`),
@@ -221,10 +239,13 @@ const T = {
 };
 
 export function tier(kind, n) {
+  if (kind === 'd') n = n.replace(/^LCD\s+/i, 'Дисплей '); // «LCD для iPhone» — не признак копии ЖК
   if (kind === 'b') {
     if (T.bSkip.test(n)) return 'skip';
     if (T.bVer.test(n) && !T.bVerNot.test(n)) return 'verified';
     if (T.bUsed.test(n)) return 'orig_used';
+    // «усиленный … ic orig» — усиленная копия с родным контроллером, не оригинал
+    if (T.bBoost.test(n) && !/original|оригинал/i.test(n)) return 'copy_boost';
     if (T.bOrig.test(n)) return 'orig_new';
     if (T.bBoost.test(n)) return 'copy_boost';
     return 'copy';
@@ -234,12 +255,13 @@ export function tier(kind, n) {
     if (T.dReglass.test(n)) return 'orig_reglass';
     if (T.dUsed.test(n)) return 'orig_used';
     if (T.dCopy.test(n)) return T.oled.test(n) ? 'copy_oled' : 'copy_lcd';
+    if (/soft\s*touch|hard\s*touch/i.test(n)) return 'copy_oled';
     if (T.dOrig.test(n) && !T.dOrigNot.test(n)) return 'orig_new';
     if (T.dOled.test(n)) return 'copy_oled';
     return 'copy_lcd';
   }
   if (kind === 'c') {
-    if (T.cSkip.test(n)) return 'skip';
+    if (T.cSkip.test(n) && !/^Заднее стекло/i.test(n)) return 'skip';
     if (T.cUsed.test(n)) return 'orig_used';
     if (T.cOrig.test(n)) return 'orig_new';
     return 'copy';
@@ -304,18 +326,22 @@ export function kindOf(name) {
   if (glueType(n)) return 'g';
   if (/^Аккумулятор/i.test(n)) return 'b';
   if (/^Дисплей/i.test(n)) return 'd';
-  if (/^Задняя крышка/i.test(n)) return 'c';
+  // «Задняя крышка для iPhone… + стекло» — корпус в сборе (у старых айфонов задняя крышка и есть корпус);
+  // одно стекло называют «Заднее стекло»
+  if (/^Задняя крышка для iPhone/i.test(n)) return 'hs';
+  if (/^(Задняя крышка|Заднее стекло)/i.test(n)) return 'c';
+  if (/^LCD\s/i.test(n)) return 'd';
   if (/^Плата для/i.test(n)) return null;
   if (/^(Плата зарядки|Шлейф зарядки|Шлейф\s*\/\s*плата зарядки|Нижняя плата)/i.test(n)) return 'p';
   // шлейф на разъём SIM — не зарядка, а SIM-ридер (другой шлейф)
-  if (/^Шлейф/i.test(n) && /системн|разъ[её]м/i.test(n)) return /\b(SIM|MMC)\b/i.test(n) && !/системн|заряд/i.test(n) ? 'fo' : 'p';
+  if (/^Шлейф/i.test(n) && /системн|разъ[её]м|\bcharg(?:e|ing)\b/i.test(n) && !NOT_REPAIR.test(n)) return /\b(SIM|MMC)\b/i.test(n) && !/системн|заряд|charg/i.test(n) ? 'fo' : 'p';
   return moreKind(n);
 }
 
 // Остальные детали: ремонты только для приложения (на сайте их нет).
 // Расходники и инструмент (наборы, формы, шлейфы JCID для восстановления, защитные стёкла, рамки дисплея) — не ремонт.
-export const MORE_KINDS = new Set(['cr', 'cf', 'ls', 'es', 'fp', 'bt', 'fx', 'fo', 'hs', 'cg', 'sim', 'tc', 'gl']);
-const NOT_REPAIR = /JCID|для ремонта аккумулятора|tag-?on|без пайки|для теста|микроскоп/i;
+export const MORE_KINDS = new Set(['cr', 'cf', 'ls', 'es', 'fp', 'bt', 'fx', 'fo', 'hs', 'cg', 'sim', 'tc', 'gl', 'vb']);
+const NOT_REPAIR = /JCID|\(JC\)|\bJC\b|для ремонта аккумулятора|для ремонта АКБ|для ремонта Face|tag-?on|без пайки|для теста|для тестирования|для прибора|программирован|микроскоп/i;
 
 // Слова названия вне модели: до бренда и после « - » («Шлейф iPhone 11 - кнопки громкости», «Шлейф на вспышку iPhone 11»)
 function partWords(n) {
@@ -328,22 +354,36 @@ function partWords(n) {
 function moreKind(n) {
   if (NOT_REPAIR.test(n)) return null;
   if (/^[СC]текло камер/i.test(n)) return 'cg';
-  if (/^[СC]текло\s/i.test(n) && /переклей/i.test(n)) return /маленьк|внешн/i.test(n) ? null : 'gl';
+  if (/^[СC]текло[\s+]/i.test(n) && /переклей|для ремонта/i.test(n)) return /маленьк|внешн/i.test(n) ? null : 'gl';
   if (/^Тачскрин/i.test(n)) return 'tc';
-  if (/^(Сим|SIM)[\s-]*лоток/i.test(n)) return 'sim';
+  if (/^(Сим|SIM)[\s-]*лоток|^Лоток для сим/i.test(n)) return 'sim';
+  if (/^Кольцо камеры со стеклом/i.test(n)) return 'cg';
+  if (/^Buzzer\s/i.test(n)) return 'ls';
+  if (/^Вибро/i.test(n)) return 'vb';
+  if (/^Кнопк[аи]\s/i.test(n)) return 'bt';
+  if (/^Внутрикорпусная катушка/i.test(n)) return 'fo';
   if (/^(Корпус|Средняя часть)/i.test(n)) return 'hs';
   if (/^(Динамик слуховой|Слуховой динамик)/i.test(n)) return 'es';
   if (/^(Динамик|Полифонический динамик)/i.test(n)) return 'ls';
   if (/^(Передняя камера|Фронтальная камера|Передняя сборка)/i.test(n)) return 'cf';
   if (/^Задняя камера/i.test(n)) return 'cr';
-  if (/^Камера\s/i.test(n)) return /передн|фронтал/i.test(partWords(n)) ? 'cf' : 'cr';
-  if (/^Шлейф/i.test(n)) {
+  if (/^Камера\s/i.test(n)) {
+    // «Камера ... - передняя» или без тире: «Камера для iPhone4S передняя»
     const w = partWords(n);
-    if (/сканер|отпечат/i.test(w)) return 'fp';
-    if (/кноп|включени|громкост|блокировк/i.test(w)) return 'bt';
-    if (/межплат|на дисплей|экрана/i.test(w)) return 'fx';
-    if (/сенсор|микрофон|вспышк|беспровод|nfc|антенн|датчик|\bsim\b|mmc/i.test(w)) return 'fo';
+    return /передн|фронтал/i.test(w) || (!/задн/i.test(w) && /передн|фронтал/i.test(n)) ? 'cf' : 'cr';
   }
+  if (/^Шлейф/i.test(n)) return flexKind(partWords(n)) || flexKind(n);
+  return null;
+}
+
+// Какой шлейф: по словам вне модели, а у названий без « - » — по всему названию
+function flexKind(w) {
+  if (/lidar|лидар/i.test(w)) return 'fo';
+  if (/камера передн|передняя камер|фронтальн/i.test(w)) return 'cf';
+  if (/сканер|отпечат|touch\s*id/i.test(w)) return 'fp';
+  if (/кноп|включени|громкост|блокировк|power|volume|on\/off|home\s*button/i.test(w)) return 'bt';
+  if (/межплат|на дисплей|экрана/i.test(w)) return 'fx';
+  if (/сенсор|микрофон|вспышк|беспровод|nfc|антенн|antenna|датчик|sensor|\bmic\b|flash|wi-?fi|bluetooth|lidar|face\s*id|камер|динамик|hands?-?free|\bsim\b|mmc|\b5g\b/i.test(w)) return 'fo';
   return null;
 }
 

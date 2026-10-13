@@ -17,7 +17,7 @@ export const APP_MODELS = [
   // iPhone — 14
   ['iPhone', 'iPhone 4S', 2011], ['iPhone', 'iPhone 5', 2012], ['iPhone', 'iPhone 5c', 2013], ['iPhone', 'iPhone 5s', 2013],
   ['iPhone', 'iPhone 6', 2014], ['iPhone', 'iPhone 6 Plus', 2014], ['iPhone', 'iPhone 6s', 2015], ['iPhone', 'iPhone 6s Plus', 2015],
-  ['iPhone', 'iPhone 7', 2016], ['iPhone', 'iPhone 7 Plus', 2016], ['iPhone', 'iPhone SE 2016', 2016, ['iPhone SE']],
+  ['iPhone', 'iPhone 7', 2016], ['iPhone', 'iPhone 7 Plus', 2016], ['iPhone', 'iPhone SE 2016', 2016, ['iPhone SE', 'iPhone 5SE']],
   ['iPhone', 'iPhone 8', 2017], ['iPhone', 'iPhone 8 Plus', 2017], ['iPhone', 'iPhone X', 2017],
   // Samsung — 85
   ['Samsung', 'Samsung Galaxy A5 (2016)', 2015], ['Samsung', 'Samsung Galaxy A7 (2016)', 2015, ['Samsung A7 A710']],
@@ -300,7 +300,7 @@ export const APP_MODELS = [
 
 // Другие названия моделей сайта у поставщиков: [как пишет поставщик, модель сайта]
 export const SITE_ALIASES = [
-  ['iPhone SE 2 2020', 'iPhone SE 2020'], ['iPhone SE 3 2022', 'iPhone SE 2022'],
+  ['iPhone SE 2 2020', 'iPhone SE 2020'], ['iPhone SE 3 2022', 'iPhone SE 2022'], ['iPhone SE 2', 'iPhone SE 2020'], ['iPhone SE 3', 'iPhone SE 2022'],
   ['Xiaomi Pocophone F1', 'Poco F1'], ['Xiaomi Poco Pocophone F1', 'Poco F1'], ['Xiaomi Poco Redmi Note 12', 'Redmi Note 12'],
   ['Xiaomi Redmi 13С', 'Redmi 13C'], // «С» русская
   ['Realme GT Master Edition', 'Realme GT Master'],

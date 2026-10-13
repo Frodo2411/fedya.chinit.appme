@@ -379,6 +379,57 @@ await test('после проверки: шлейф SIM в старых данн
   assert.equal(decode(old).models.find((m) => m.model === 'Google Pixel 8a').year, 2024);
 });
 
+await test('новый поставщик: .xls, цены в долларах, наличие по магазинам, названия «LCD для iPhone11»', async () => {
+  const { readTable } = await imp('js/xlsx.js');
+  const { withRate } = await imp('js/importer.js');
+  // .xls читается так же, как .xlsx
+  const file = (f) => { const b = fs.readFileSync(path.join(ROOT, f)); return { arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) }; };
+  const a = await readTable(file('tests/fixtures/price.xls'));
+  const b = await readTable(file('tests/fixtures/price.xlsx'));
+  assert.deepEqual(a[0].rows.map((r) => [...r].map((v) => v ?? null)), b[0].rows.map((r) => [...r].map((v) => v ?? null)));
+  // названия в стиле нового поставщика
+  const models = ['iPhone 8', 'iPhone 11', 'iPhone 11 Pro', 'iPhone 12', 'iPhone 12 mini', 'iPhone 12 Pro', 'iPhone XS', 'iPhone SE 2020', 'iPhone 14'].map((m) => ({ brand: 'iPhone', model: m }));
+  const idx = siteIndex(models.map((m) => m.model));
+  const fam = new Map(models.map((m) => [m.model, BRAND_FAM[m.brand]]));
+  const map = (n) => { const k = kindOf(n); const r = mapRow(n, k, idx, fam); return [k, r.tier, r.models.join()]; };
+  assert.deepEqual(map('LCD для iPhone11 (in-cell) JK'), ['d', 'copy_lcd', 'iPhone 11']);
+  assert.deepEqual(map('LCD для iPhone11 Pro (матрица orig)'), ['d', 'orig_new', 'iPhone 11 Pro']);
+  assert.deepEqual(map('LCD для iPhone12 mini (матрица orig) 60Гц'), ['d', 'orig_new', 'iPhone 12 mini']);
+  assert.deepEqual(map('LCD для iPhone12/12 Pro (Hard Touch) DD 60Гц'), ['d', 'copy_oled', 'iPhone 12,iPhone 12 Pro']);
+  assert.deepEqual(map('Buzzer для iPhone11'), ['ls', 'copy', 'iPhone 11']);
+  assert.deepEqual(map('Вибро для iPhoneХS (610-00237)'), ['vb', 'copy', 'iPhone XS'], 'русская Х в модели');
+  assert.deepEqual(map('Лоток для сим-карты для iPhone12 ФИОЛЕТОВЫЙ'), ['sim', 'copy', 'iPhone 12']);
+  assert.deepEqual(map('Шлейф для iPhone11 CHARGE CONN БЕЛЫЙ (821-02037-A)'), ['p', 'copy', 'iPhone 11']);
+  assert.deepEqual(map('Шлейф для iPhoneSE2020 CHARGE CONN ЧЕРНЫЙ'), ['p', 'copy', 'iPhone SE 2020']);
+  assert.deepEqual(map('Шлейф для iPhone14 Power On/Off'), ['bt', 'copy', 'iPhone 14']);
+  assert.deepEqual(map('Шлейф для iPhone12 Pro на сканер лидар (Lidar) (821-02641-A)'), ['fo', 'copy', 'iPhone 12 Pro']);
+  assert.deepEqual(map('Заднее стекло для iPhone14 + стекло камеры + магнит MagSafe внутрикорпусной, ФИОЛЕТОВЫЙ'), ['c', 'copy', 'iPhone 14']);
+  assert.deepEqual(map('Задняя крышка для iPhone11 Pro + стекло ЗЕЛЕНЫЙ (СЕ) - ПРЕМИУМ'), ['hs', 'copy', 'iPhone 11 Pro'], 'крышка + стекло — корпус');
+  assert.deepEqual(map('Аккумулятор для iPhone11 3500 mAh усиленный iParts (гарантия 1 год) ic orig (100%)'), ['b', 'copy_boost', 'iPhone 11']);
+  assert.equal(kindOf('Шлейф для прибора JC Receiver FPC для iPhone11'), null, 'инструмент — не ремонт');
+  assert.equal(kindOf('Кольцо камеры для iPhone11, БЕЛЫЙ'), null, 'кольцо без стекла — не ремонт');
+  // поставщик в долларах: курс, наличие «+» по складу и магазинам, другой город не считается
+  const data = { ...DATA, suppliers: { ...DATA.suppliers, S1: { name: 'Третий', stock: true, rank: 2, currency: 'USD', rate: 3 } } };
+  const sheets = [{ name: 'Прайс', rows: [
+    [null, 'Новый поставщик - Гарантия качества по лучшим ценам!'],
+    [null, 'Группа/Наименование', 'Артикул', 'Цена', 'Склад', 'ТД Ждановичи', 'ТЦ Атлантик', 'г.Гомель ТЦ'],
+    [null, 'Аккумуляторы'],
+    [null, 'Аккумулятор для iPhone11 1:1 TI', 5001, 10, '-', '+', '-', '-'],
+    [null, 'Аккумулятор для iPhone14 1:1 TI', 5002, 12, '-', '-', '-', '+'],
+    [null, 'Buzzer для iPhone11', 5003, 1.5, '+', '-', '-', '-'],
+  ] }];
+  const cols = detect(sheets, 'S1', data);
+  assert.deepEqual([cols.nameCol, cols.priceCol, cols.stockCols, cols.rate], [1, 3, [4, 5, 6], 3], 'Гомель не учитываем');
+  const { next } = buildImport(data, 'S1', sheets, cols, '2026-11-05');
+  const s1 = next.parts.filter((p) => p.sup === 'S1').map((p) => [p.name, p.cost, p.stock]);
+  assert.deepEqual(s1, [['Аккумулятор для iPhone11 1:1 TI', 30, 'В наличии'], ['Аккумулятор для iPhone14 1:1 TI', 36, 'Нет в наличии'], ['Buzzer для iPhone11', 4.5, 'В наличии']]);
+  // новый курс пересчитывает закупку этого поставщика и только его
+  const r = withRate(next, 'S1', 3.3);
+  assert.deepEqual(r.parts.filter((p) => p.sup === 'S1').map((p) => p.cost), [33, 39.6, 4.95]);
+  assert.equal(r.suppliers.S1.rate, 3.3);
+  assert.deepEqual(r.parts.filter((p) => p.sup !== 'S1').map((p) => p.cost), next.parts.filter((p) => p.sup !== 'S1').map((p) => p.cost));
+});
+
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {
   const salt = randomBytes(16);
   const key = await deriveKeyBytes(' Abcd-Efgh ', salt, 1000);
