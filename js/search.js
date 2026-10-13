@@ -1,5 +1,7 @@
 // Поиск модели по-русски и с ошибками: «айфон 14 про», «редми ноут 13», «самсунг а52», «пиксель 6», «техно спарк 10», «iphon 13».
 
+import { APP_ONLY } from './data.js';
+
 const WORDS = [
   [/(айфон|айфн|ифон|ипхон|айфоун)[а-я]*/g, 'iphone'],
   [/(самсунг|самсунк|самсун|самсн)[а-я]*/g, 'samsung'],
@@ -94,7 +96,10 @@ export class ModelSearch {
   constructor(models) {
     this.items = models.map((m, i) => {
       const words = norm(m.brand + ' ' + m.model + ' ' + (ALIASES[m.brand] || '')).split(' ');
-      return { m, i, words: [...new Set(words)], size: norm(m.model).split(' ').length };
+      const own = new Set(norm(m.brand + ' galaxy ' + (ALIASES[m.brand] || '')).split(' '));
+      const mw = norm(m.model).split(' ');
+      // core — слова модели без бренда: «с23» — это Samsung Galaxy S23 (s23), а не Itel S23 (тоже s23, но модель приложения)
+      return { m, i, words: [...new Set(words)], core: mw.filter((w) => !own.has(w)).length, app: APP_ONLY.has(m.model) ? 1 : 0, size: mw.length };
     });
   }
 
@@ -112,7 +117,7 @@ export class ModelSearch {
       }
       if (ok) out.push({ it, score });
     }
-    out.sort((a, b) => (b.score - a.score) || (a.it.size - b.it.size) || (a.it.i - b.it.i));
+    out.sort((a, b) => (b.score - a.score) || (a.it.core - b.it.core) || (a.it.app - b.it.app) || (a.it.size - b.it.size) || (a.it.i - b.it.i));
     return out.slice(0, limit).map((x) => x.it.m);
   }
 }

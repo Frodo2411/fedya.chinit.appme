@@ -146,6 +146,8 @@ export function buildImport(data, supKey, sheets, cols, today) {
     let old = olds ? olds[Math.min(n, olds.length - 1)] : null;
     used.set(key, n + 1);
     if (old && !old.models.length && families(name).size && mapRow(name, svc, idx, famOfModel).models.length) old = null;
+    // вид детали теперь другой (шлейф SIM был «разъёмом зарядки»): размечаем заново, снятую галочкой не трогаем
+    if (old && old.svc !== svc && old.tier !== 'skip') old = null;
     if (old) {
       seen.add(key);
       report.known++;

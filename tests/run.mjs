@@ -343,6 +343,42 @@ await test('список моделей приложения: без повто�
   for (const [a, m] of SITE_ALIASES) assert.ok(a && m && !keys.has(normModel(m)), 'другое название сайта ведёт на модель сайта: ' + a);
 });
 
+await test('после проверки: шлейф SIM в старых данных, «+ OCA», серия у части, поиск, год модели', async () => {
+  const { APP_ALIASES, APP_MODELS: _ } = await imp('js/data.js');
+  // знакомая позиция с прежним видом «разъём зарядки» размечается заново как другой шлейф
+  const sim = 'Шлейф iPhone 14 - на разъем SIM (премиум)';
+  const before = { ...DATA, parts: [...DATA.parts, P('E', sim, 7, null, 'p', 'copy', ['iPhone 14'])] };
+  const sheets = [{ name: 'Прайс', rows: [['Наименование', 'Цена'], ...DATA.parts.filter((p) => p.sup === 'E').map((p) => [p.name, p.cost]), [sim, 7]] }];
+  const { next } = buildImport(before, 'E', sheets, detect(sheets, 'E', before), '2026-11-05');
+  assert.deepEqual(next.parts.filter((p) => p.name === sim).map((p) => [p.svc, p.models.join()]), [['fo', 'iPhone 14']]);
+  assert.equal(kindOf('Шлейф Xiaomi Mi 11 Lite/Mi 11 Lite 5G/11 Lite 5G NE на разъем SIM/MMC'), 'fo');
+  // «+ OCA» после модели у стекла под переклейку и тачскрина
+  const models = [{ brand: 'Samsung', model: 'Samsung Galaxy A56' }, { brand: 'iPhone', model: 'iPhone 13' }, { brand: 'Honor', model: 'Honor 50' }, { brand: 'Huawei', model: 'Huawei nova 9' },
+    { brand: 'Infinix', model: 'Infinix Note 10 Pro' }, { brand: 'Infinix', model: 'Infinix Note 11 Pro' }, { brand: 'Infinix', model: 'Infinix Hot 30' },
+    { brand: 'Infinix', model: 'Infinix Hot 40' }, { brand: 'Infinix', model: 'Infinix Hot 40 Pro' }, { brand: 'Infinix', model: 'Infinix Hot 50 Pro' },
+    { brand: 'Infinix', model: 'Infinix Note 40' }, { brand: 'Infinix', model: 'Infinix Note 40 Pro' }, { brand: 'Infinix', model: 'Infinix Note 50 Pro' },
+    { brand: 'Tecno', model: 'Tecno Pova 2' }, { brand: 'Tecno', model: 'Tecno Pova 8' }, { brand: 'Infinix', model: 'Infinix Note 7' }, { brand: 'Infinix', model: 'Infinix Note 8' }];
+  const idx = siteIndex(models.map((m) => m.model), APP_ALIASES);
+  const fam = new Map(models.map((m) => [m.model, BRAND_FAM[m.brand]]));
+  const map = (n) => mapRow(n, kindOf(n), idx, fam).models;
+  assert.deepEqual(map('Стекло для переклейки Samsung A56 + OCA - G-oca pro'), ['Samsung Galaxy A56']);
+  assert.deepEqual(map('Тачскрин iPhone 13 + OCA - Orig (G-oca pro)'), ['iPhone 13']);
+  assert.deepEqual(map('Стекло для переклейки Huawei Honor 50/ Nova 9 + OCA - (G-oca pro)'), ['Honor 50', 'Huawei nova 9']);
+  // своя серия у части: «Hot 30 4G/40» после «Note 10 Pro» — это Hot 40, а не Note 40
+  assert.deepEqual(map('Аккумулятор Infinix Note 10 Pro/11 Pro/Hot 30 4G/40/40 Pro/50 Pro (BL-49JX)'),
+    ['Infinix Note 10 Pro', 'Infinix Note 11 Pro', 'Infinix Hot 30', 'Infinix Hot 40', 'Infinix Hot 40 Pro', 'Infinix Hot 50 Pro']);
+  // голый номер берёт бренд ближайшей части: «Infinix Note 7/8», а не Tecno Pova 8
+  assert.deepEqual(map('Шлейф Tecno Pova 2/Infinix Note 7/8 - сканер отпечатка'), ['Tecno Pova 2', 'Infinix Note 7', 'Infinix Note 8']);
+  // поиск: модель сайта выше модели приложения с тем же номером
+  const s = new ModelSearch(decode(encode({ ...DATA, models: [...DATA.models, { brand: 'Samsung', model: 'Samsung Galaxy S23' }, { brand: 'Samsung', model: 'Samsung Galaxy A31' }] })).models);
+  assert.equal((s.find('с23')[0] || {}).model, 'Samsung Galaxy S23');
+  assert.equal((s.find('а31')[0] || {}).model, 'Samsung Galaxy A31');
+  // год модели приложения — из списка, даже если пакет сохранён со старым годом
+  const old = encode(decode(encode(DATA)));
+  old.models = old.models.map((m) => (m[1] === 'Google Pixel 8a' ? [m[0], m[1], 2019, null, null, null] : m));
+  assert.equal(decode(old).models.find((m) => m.model === 'Google Pixel 8a').year, 2024);
+});
+
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {
   const salt = randomBytes(16);
   const key = await deriveKeyBytes(' Abcd-Efgh ', salt, 1000);

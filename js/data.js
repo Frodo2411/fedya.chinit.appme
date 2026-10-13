@@ -18,6 +18,12 @@ export function decode(b) {
   const parts = b.parts.map(([sup, name, cost, stock, svc, tier, ms, line]) => ({
     sup, name, cost, stock: stock || null, svc, tier, models: ms.map((i) => names[i]), line: line === 0 ? name : line,
   }));
+  // бренд и год моделей приложения — из models-app.js, даже если пакет сохранён старой версией
+  const appBy = new Map(APP_MODELS.map(([brand, model, year]) => [model, { brand, year }]));
+  for (const m of models) {
+    const a = appBy.get(m.model);
+    if (a) { m.brand = a.brand; m.year = a.year; }
+  }
   const have = new Set(names);
   for (const [brand, model, year] of APP_MODELS) {
     if (!have.has(model)) models.push({ brand, model, year, ifixit: null, sf: null, sfUrl: null });

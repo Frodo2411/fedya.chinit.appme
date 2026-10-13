@@ -102,14 +102,20 @@ export function items(name) {
       alts = [p];
     } else {
       const order = [];
-      for (const pre of [...prefixes].reverse()) {
+      // голый номер («Tecno Pova 2/Infinix Note 7/8») — только от бренда ближайшей части
+      const famOf = (pre) => { const w = pySplit(pre)[0].toLowerCase(); return FAM[w] || w; };
+      const near = prefixes.length ? famOf(prefixes[prefixes.length - 1]) : null;
+      for (const pre of [...prefixes].reverse().filter((x) => lead.length || famOf(x) === near)) {
         for (const cand of [pre, pySplit(pre)[0]]) if (!order.includes(cand)) order.push(cand);
       }
       alts = order.length ? order.map((pre) => pre + ' ' + p) : [p];
       if (p.startsWith('Note') && !prefixes.includes('Redmi')) alts.push('Redmi ' + p);
     }
     out.push(alts);
-    const fullLead = leadWords(pySplit(alts[0]));
+    // своя серия у части («Hot 30» после «Infinix Note 10»): префикс — бренд + серия, а не «Infinix Note Hot»
+    const brandOf = (pre) => { const w = pySplit(pre); const b = []; for (const x of w) { if (!isBrand(x)) break; b.push(x); } return b; };
+    const fullLead = lead.length && !isBrand(lead[0]) && prefixes.length && brandOf(prefixes[prefixes.length - 1]).length
+      ? [...brandOf(prefixes[prefixes.length - 1]), ...lead] : leadWords(pySplit(alts[0]));
     if (fullLead.length) {
       const pre = fullLead.join(' ');
       const at = prefixes.indexOf(pre);
@@ -302,7 +308,7 @@ export function kindOf(name) {
   if (/^Плата для/i.test(n)) return null;
   if (/^(Плата зарядки|Шлейф зарядки|Шлейф\s*\/\s*плата зарядки|Нижняя плата)/i.test(n)) return 'p';
   // шлейф на разъём SIM — не зарядка, а SIM-ридер (другой шлейф)
-  if (/^Шлейф/i.test(n) && /системн|разъ[её]м/i.test(n) && !(/\b(SIM|MMC)\b/i.test(n) && !/системн|заряд/i.test(n))) return 'p';
+  if (/^Шлейф/i.test(n) && /системн|разъ[её]м/i.test(n)) return /\b(SIM|MMC)\b/i.test(n) && !/системн|заряд/i.test(n) ? 'fo' : 'p';
   return moreKind(n);
 }
 
@@ -352,6 +358,7 @@ function moreModels(name) {
     .replace(/\(\s*(20\d\d)\s*\)/g, ' $1')
     .replace(/\([^)]*\)/g, ' ')
     .replace(SEG_ESIM, '')
+    .replace(/\s*\+\s*(?:OCA|рамк[а-яё]*)(?=\s|$)/gi, ' ')
     .replace(/\s+[а-яё].*$/i, '');
   return 'Дисплей ' + head + (dash < 0 ? '' : tail.slice(dash));
 }
