@@ -6,7 +6,7 @@ import { SVC } from './view-prices.js';
 import { openImport } from './import-flow.js';
 import { withRate, oddRate } from './importer.js';
 import { monthTitle } from './ui.js';
-import { publishSite, siteToken, setSiteToken } from './site-publish.js';
+import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteKey } from './site-publish.js';
 
 export const APP_VERSION = '1.0.0';
 
@@ -43,7 +43,7 @@ export function createMoreView(app) {
           app.hasPrevData() ? h('button', { class: 'btn small', text: 'Вернуть прошлые прайсы', onclick: () => app.restorePrevData() }) : null,
           h('button', { class: 'btn small', text: 'Обновить цены на сайте', onclick: () => toSite() }),
           h('button', { class: 'btn small', text: 'Файл цен для сайта', onclick: () => exportSite() }),
-          siteToken() ? h('button', { class: 'btn small', text: 'Ключ для сайта', onclick: () => openSiteKey(null) }) : null)),
+          siteKey() ? h('button', { class: 'btn small', text: 'Ключи для сайта', onclick: () => openSiteKey(null) }) : null)),
 
       h('div', { class: 'card' },
         h('h3', { text: 'Расчёт цены' }),
@@ -94,38 +94,48 @@ export function createMoreView(app) {
     toast('Файл prices-models.js готов: в нём только цены клиенту');
   }
 
-  // Цены на сайт: без ключа — сначала ключ GitHub, потом отправка
+  // Цены на сайт: без ключа сайта — сначала ключи, потом отправка на хостинг (и копия на GitHub, если есть ключ)
   async function toSite() {
-    if (!siteToken()) { openSiteKey(() => toSite()); return; }
+    if (!siteKey()) { openSiteKey(() => toSite()); return; }
     if (!confirm('Обновить цены на сайте? На сайт уйдут цены клиенту из приложения, без закупки и поставщиков.')) return;
     toast('Отправляю цены на сайт…', 3000);
+    const text = siteText();
     try {
-      const r = await publishSite(siteText(), siteToken());
-      toast(r === 'same' ? 'На сайте уже эти цены' : 'Готово: сайт обновится через 1–2 минуты', 5000);
+      await publishHosting(text, siteKey());
     } catch (e) {
       toast('Не получилось: ' + e.message, 6000);
       if (/ключ/.test(e.message)) openSiteKey(null);
+      return;
     }
+    let copy = '';
+    if (siteToken()) {
+      try { await publishSite(text, siteToken()); } catch (e) { copy = ' Копия на GitHub не сохранилась: ' + e.message + '.'; }
+    }
+    toast('Готово: цены на сайте обновлены.' + copy, copy ? 7000 : 4000);
   }
 
   return { el: root, draw };
 }
 
-// Ключ GitHub для кнопки «Обновить цены на сайте»: хранится только на этом телефоне
+// Ключи для кнопки «Обновить цены на сайте»: хранятся только на этом телефоне
 function openSiteKey(then) {
+  let key = siteKey();
   let token = siteToken();
   const body = h('div', {},
-    h('div', { class: 'small muted', style: 'margin-bottom:10px', text: 'Один раз: на github.com → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token. Repository access: Only select repositories → fedya.chinet. Permissions → Contents: Read and write. Срок — 1 год. Скопируй ключ сюда.' }),
-    field('Ключ GitHub', h('input', { class: 'input', type: 'password', value: token, placeholder: 'github_pat_…', autocapitalize: 'off', autocomplete: 'off', oninput: (e) => { token = e.target.value.trim(); } })),
-    h('div', { class: 'tiny faint', style: 'margin-top:8px', text: 'Ключ хранится только на этом телефоне и даёт доступ только к файлу цен сайта.' }));
+    field('Ключ сайта', h('input', { class: 'input', type: 'password', value: key, placeholder: '24 буквы и цифры', autocapitalize: 'off', autocomplete: 'off', oninput: (e) => { key = e.target.value.trim(); } }),
+      'Тот, что записан в prices-update.php на хостинге.'),
+    field('Ключ GitHub (необязательно)', h('input', { class: 'input', type: 'password', value: token, placeholder: 'github_pat_…', autocapitalize: 'off', autocomplete: 'off', oninput: (e) => { token = e.target.value.trim(); } }),
+      'Если есть — копия цен сохраняется и в репозиторий сайта на GitHub.'),
+    h('div', { class: 'tiny faint', style: 'margin-top:8px', text: 'Ключи хранятся только на этом телефоне.' }));
   const sheet = openSheet('Цены на сайт', body, [
-    siteToken() ? h('button', { class: 'btn danger', text: 'Убрать ключ', onclick: () => { setSiteToken(''); sheet.close(); toast('Ключ убран'); } })
-      : h('button', { class: 'btn', text: 'Отмена', onclick: () => sheet.close() }),
+    h('button', { class: 'btn', text: 'Отмена', onclick: () => sheet.close() }),
     h('button', { class: 'btn primary', text: 'Сохранить', onclick: () => {
-      if (!/^(github_pat_|ghp_)\w{20,}$/.test(token)) { toast('Это не похоже на ключ GitHub (начинается с github_pat_)'); return; }
+      if (key.length < 16) { toast('Ключ сайта короче, чем нужно'); return; }
+      if (token && !/^(github_pat_|ghp_)\w{20,}$/.test(token)) { toast('Ключ GitHub не похож на настоящий (начинается с github_pat_)'); return; }
+      setSiteKey(key);
       setSiteToken(token);
       sheet.close();
-      if (then) then(); else toast('Ключ сохранён');
+      if (then) then(); else toast('Сохранено');
     } }),
   ]);
 }

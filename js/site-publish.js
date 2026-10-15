@@ -1,6 +1,7 @@
-// Цены на сайт одной кнопкой: приложение кладёт prices-models.js в репозиторий сайта через GitHub API,
-// сайт обновляется сам. Нужен ключ GitHub (fine-grained token) с доступом только к репозиторию сайта:
-// Contents — Read and write. Ключ хранится только на этом телефоне, в таблицу не копируется.
+// Цены на сайт одной кнопкой. Сайт лежит на хостинге (hoster.by): приложение отправляет prices-models.js
+// в приёмник prices-update.php рядом с сайтом, по ключу сайта. Если задан ключ GitHub (fine-grained token
+// только для репозитория сайта, Contents — Read and write), тот же файл кладётся и в репозиторий — копия.
+// Ключи хранятся только на этом телефоне, в таблицу не копируются.
 
 import { store } from './store.js';
 
@@ -9,8 +10,23 @@ const PATH = 'prices-models.js';
 const BRANCH = 'main';
 const API = 'https://api.github.com/repos/' + SITE_REPO + '/contents/' + PATH;
 
+export const SITE_UPLOAD = 'https://fedya-chinit.by/prices-update.php';
+
 export const siteToken = () => store.get('siteToken', '') || '';
 export const setSiteToken = (t) => (t ? store.set('siteToken', t.trim()) : store.remove('siteToken'));
+export const siteKey = () => store.get('siteKey', '') || '';
+export const setSiteKey = (t) => (t ? store.set('siteKey', t.trim()) : store.remove('siteKey'));
+
+// На хостинг: приёмник отвечает «ok»
+export async function publishHosting(text, key, fetchFn = fetch) {
+  let r;
+  try {
+    r = await fetchFn(SITE_UPLOAD, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8', 'X-Key': key }, body: text, cache: 'no-store' });
+  } catch { throw new Error('нет связи с сайтом (проверь, что на хостинге есть prices-update.php)'); }
+  if (r.status === 403) throw new Error('ключ сайта не подходит');
+  if (r.status === 404) throw new Error('на хостинге нет prices-update.php');
+  if (!r.ok) throw new Error('сайт ответил ' + r.status);
+}
 
 // UTF-8 в base64 и обратно (atob/btoa понимают только латиницу)
 export function toBase64(text) {

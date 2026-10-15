@@ -540,6 +540,12 @@ await test('цены на сайт одной кнопкой: GitHub API', async
   assert.match(put[1], /repos\/Frodo2411\/fedya\.chinet\/contents\/prices-models\.js$/);
   assert.deepEqual([put[2].sha, put[2].branch, fromBase64(put[2].content), put[3]], ['s1', 'main', text, 'Bearer k1']);
   await assert.rejects(publishSite(text, 'bad', async () => ({ ok: false, status: 401 })), /ключ/);
+  // на хостинг: приёмник prices-update.php, ключ в заголовке
+  const { publishHosting } = await imp('js/site-publish.js');
+  let sent = null;
+  await publishHosting(text, 'site-key-1234567890', async (url, o) => { sent = [url, o.method, o.headers['X-Key'], o.body]; return { ok: true, status: 200 }; });
+  assert.deepEqual(sent, ['https://fedya-chinit.by/prices-update.php', 'POST', 'site-key-1234567890', text]);
+  await assert.rejects(publishHosting(text, 'x', async () => ({ ok: false, status: 403 })), /ключ сайта/);
 });
 
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {
