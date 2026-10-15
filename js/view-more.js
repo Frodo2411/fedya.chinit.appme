@@ -6,6 +6,7 @@ import { SVC } from './view-prices.js';
 import { openImport } from './import-flow.js';
 import { withRate, oddRate } from './importer.js';
 import { monthTitle } from './ui.js';
+import { publishSite, siteToken, setSiteToken } from './site-publish.js';
 
 export const APP_VERSION = '1.0.0';
 
@@ -40,7 +41,9 @@ export function createMoreView(app) {
           hist.map((x) => fmtDate(x.date) + ' ' + ((app.data.suppliers[x.sup] || {}).name || x.sup) + ' (новых ' + x.fresh + ', пропало ' + x.gone + ')').join('; ')) : null,
         h('div', { class: 'row wrap', style: 'margin-top:14px' },
           app.hasPrevData() ? h('button', { class: 'btn small', text: 'Вернуть прошлые прайсы', onclick: () => app.restorePrevData() }) : null,
-          h('button', { class: 'btn small', text: 'Файл цен для сайта', onclick: () => exportSite() }))),
+          h('button', { class: 'btn small', text: 'Обновить цены на сайте', onclick: () => toSite() }),
+          h('button', { class: 'btn small', text: 'Файл цен для сайта', onclick: () => exportSite() }),
+          siteToken() ? h('button', { class: 'btn small', text: 'Ключ для сайта', onclick: () => openSiteKey(null) }) : null)),
 
       h('div', { class: 'card' },
         h('h3', { text: 'Расчёт цены' }),
@@ -80,14 +83,51 @@ export function createMoreView(app) {
     );
   }
 
-  async function exportSite() {
+  const siteText = () => {
     const d = new Date();
-    const text = siteFile(app.pricer, monthTitle(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')));
+    return siteFile(app.pricer, monthTitle(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')));
+  };
+
+  async function exportSite() {
+    const text = siteText();
     await shareFile('prices-models.js', text, 'text/javascript');
     toast('Файл prices-models.js готов: в нём только цены клиенту');
   }
 
+  // Цены на сайт: без ключа — сначала ключ GitHub, потом отправка
+  async function toSite() {
+    if (!siteToken()) { openSiteKey(() => toSite()); return; }
+    if (!confirm('Обновить цены на сайте? На сайт уйдут цены клиенту из приложения, без закупки и поставщиков.')) return;
+    toast('Отправляю цены на сайт…', 3000);
+    try {
+      const r = await publishSite(siteText(), siteToken());
+      toast(r === 'same' ? 'На сайте уже эти цены' : 'Готово: сайт обновится через 1–2 минуты', 5000);
+    } catch (e) {
+      toast('Не получилось: ' + e.message, 6000);
+      if (/ключ/.test(e.message)) openSiteKey(null);
+    }
+  }
+
   return { el: root, draw };
+}
+
+// Ключ GitHub для кнопки «Обновить цены на сайте»: хранится только на этом телефоне
+function openSiteKey(then) {
+  let token = siteToken();
+  const body = h('div', {},
+    h('div', { class: 'small muted', style: 'margin-bottom:10px', text: 'Один раз: на github.com → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token. Repository access: Only select repositories → fedya.chinet. Permissions → Contents: Read and write. Срок — 1 год. Скопируй ключ сюда.' }),
+    field('Ключ GitHub', h('input', { class: 'input', type: 'password', value: token, placeholder: 'github_pat_…', autocapitalize: 'off', autocomplete: 'off', oninput: (e) => { token = e.target.value.trim(); } })),
+    h('div', { class: 'tiny faint', style: 'margin-top:8px', text: 'Ключ хранится только на этом телефоне и даёт доступ только к файлу цен сайта.' }));
+  const sheet = openSheet('Цены на сайт', body, [
+    siteToken() ? h('button', { class: 'btn danger', text: 'Убрать ключ', onclick: () => { setSiteToken(''); sheet.close(); toast('Ключ убран'); } })
+      : h('button', { class: 'btn', text: 'Отмена', onclick: () => sheet.close() }),
+    h('button', { class: 'btn primary', text: 'Сохранить', onclick: () => {
+      if (!/^(github_pat_|ghp_)\w{20,}$/.test(token)) { toast('Это не похоже на ключ GitHub (начинается с github_pat_)'); return; }
+      setSiteToken(token);
+      sheet.close();
+      if (then) then(); else toast('Ключ сохранён');
+    } }),
+  ]);
 }
 
 // Поставщик: название, валюта и курс, есть ли наличие в прайсе, сайт. Новый — с пустым прайсом, его загружают кнопкой «Загрузить».

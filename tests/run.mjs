@@ -521,6 +521,27 @@ await test('новый поставщик: .xls, цены в долларах, �
   assert.deepEqual(un.parts.filter((p) => p.sup === 'S1').map((p) => [p.cost, p.stock]), [[30.5, 'В наличии'], [36.6, 'Нет в наличии'], [4.57, 'В наличии']]);
 });
 
+await test('цены на сайт одной кнопкой: GitHub API', async () => {
+  const { publishSite, toBase64, fromBase64 } = await imp('js/site-publish.js');
+  const text = 'window.MODEL_PRICES = [["iPhone", "iPhone 11 — замена"]];';
+  assert.equal(fromBase64(toBase64(text)), text, 'русские буквы туда и обратно');
+  const calls = [];
+  const gh = (cur, put = 200) => async (url, o = {}) => {
+    calls.push([o.method || 'GET', url, o.body ? JSON.parse(o.body) : null, o.headers.Authorization]);
+    if (!o.method) return cur ? { ok: true, status: 200, json: async () => cur } : { ok: false, status: 404 };
+    return { ok: put < 300, status: put, json: async () => ({}) };
+  };
+  assert.equal(await publishSite(text, 'k1', gh({ sha: 's1', content: toBase64(text) })), 'same');
+  assert.equal(calls.length, 1, 'те же цены — не отправляем');
+  calls.length = 0;
+  assert.equal(await publishSite(text, 'k1', gh({ sha: 's1', content: toBase64('старое') })), 'updated');
+  const put = calls[1];
+  assert.equal(put[0], 'PUT');
+  assert.match(put[1], /repos\/Frodo2411\/fedya\.chinet\/contents\/prices-models\.js$/);
+  assert.deepEqual([put[2].sha, put[2].branch, fromBase64(put[2].content), put[3]], ['s1', 'main', text, 'Bearer k1']);
+  await assert.rejects(publishSite(text, 'bad', async () => ({ ok: false, status: 401 })), /ключ/);
+});
+
 await test('шифрование: туда и обратно, чужой ключ не подходит', async () => {
   const salt = randomBytes(16);
   const key = await deriveKeyBytes(' Abcd-Efgh ', salt, 1000);
