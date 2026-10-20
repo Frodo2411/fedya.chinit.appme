@@ -138,7 +138,7 @@ function readExpenses_() { const sh = sheet_(SHEET_EXPENSES); return readRows_(s
 // Списки с листа «Настройки»: заголовок в одной ячейке, значения ниже до пустой
 function lists_() {
   const sh = book_().getSheetByName(SHEET_SETTINGS);
-  const out = { sources: [], devices: [], statuses: [], hints: {}, expenseCats: [], warrantyMonths: 3 };
+  const out = { sources: [], devices: [], statuses: [], hints: {}, expenseCats: [], warrantyMonths: 4 };
   if (!sh) return out;
   const v = sh.getDataRange().getValues();
   function column(title) {

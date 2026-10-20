@@ -13,7 +13,14 @@ import { createOrdersView, openOrderForm } from './view-orders.js';
 import { createSummaryView } from './view-summary.js';
 import { createMoreView, openSheetSetup } from './view-more.js';
 
-const DEFAULT_SETTINGS = { clientFooter: 'Гарантия на работу 3 месяца.', clientHints: true, supplierNotes: {}, formula: null, ts: 0 };
+const DEFAULT_SETTINGS = { clientFooter: 'Гарантия на работу 4 месяца.', clientHints: true, supplierNotes: {}, formula: null, ts: 0 };
+// Гарантия стала 4 месяца: прежнюю строку по умолчанию заменяем, свою строку мастера не трогаем
+const OLD_FOOTER = 'Гарантия на работу 3 месяца.';
+function withDefaults(s) {
+  const out = { ...DEFAULT_SETTINGS, ...s };
+  if (out.clientFooter === OLD_FOOTER) out.clientFooter = DEFAULT_SETTINGS.clientFooter;
+  return out;
+}
 
 const app = {
   data: null,
@@ -23,7 +30,7 @@ const app = {
   key: null,
   salt: null,
   iter: null,
-  settings: { ...DEFAULT_SETTINGS, ...store.get('settings', {}) },
+  settings: withDefaults(store.get('settings', {})),
   sheet: null,
   views: {},
   tab: 'prices',
@@ -196,7 +203,7 @@ async function syncBackups() {
     const rs = await app.sheet.backupGet('settings');
     if (rs && rs.value && rs.ts > (app.settings.ts || 0)) {
       const remote = await open(JSON.parse(rs.value), app.key);
-      app.settings = { ...DEFAULT_SETTINGS, ...remote };
+      app.settings = withDefaults(remote);
       store.set('settings', app.settings);
       app.pricer = new Pricer(app.data, app.settings.formula);
       app.redraw();
