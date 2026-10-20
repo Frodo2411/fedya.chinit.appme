@@ -8,7 +8,7 @@ import { Pricer } from './engine.js';
 import { ModelSearch } from './search.js';
 import { store } from './store.js';
 import { SheetSync } from './sheet.js';
-import { createPricesView, REPAIR, VAR_APP } from './view-prices.js';
+import { createPricesView, REPAIR, VAR_APP, lcFirst } from './view-prices.js';
 import { createOrdersView, openOrderForm } from './view-orders.js';
 import { createSummaryView } from './view-summary.js';
 import { createMoreView, openSheetSetup } from './view-more.js';
@@ -51,15 +51,26 @@ const app = {
   },
 
   newOrderFromPrice(entry, svc, o, p) {
-    const supName = (k) => (this.data.suppliers[k] || {}).name || k;
-    const variant = VAR_APP[o.tier];
     // в «Запчасть» — деталь вместе с проклейкой: это расход на ремонт
     const glue = this.pricer.glueFor(entry.model, svc);
-    const glueText = glue.items.map((g) => (g.fallback ? 'клей/скотч ' : supName(g.sup) + ' — ' + g.name + ' ') + g.cost + ' р.').join('; ');
     openOrderForm(this, null, {
-      device: 'Телефон', model: entry.model, problem: REPAIR[svc] + ' (' + variant[0].toLowerCase() + variant.slice(1) + ')',
+      device: 'Телефон', model: entry.model, problem: REPAIR[svc] + ' (' + lcFirst(VAR_APP[o.tier]) + ')',
       price: p.price, part: Math.round((p.cost + glue.total) * 100) / 100,
-      comment: 'Деталь: ' + supName(p.sup) + ' — ' + p.part + ' ' + p.cost + ' р.' + (glueText ? '; проклейка: ' + glueText : ''),
+      comment: 'Деталь: ' + partNote(p) + glueNote(glue),
+    });
+    if (!this.sheet.connected) toast('Таблица не подключена: заказ уйдёт в неё после подключения', 4000);
+  },
+
+  // Комплекс одним заказом: цена со скидкой, в «Запчасть» — все детали и проклейка на весь комплекс (вскрытие одно)
+  newOrderFromCombo(entry, items, t) {
+    const glue = this.pricer.glueFor(entry.model, items.map((x) => x.svc));
+    const parts = items.reduce((a, x) => a + x.cost, 0);
+    openOrderForm(this, null, {
+      device: 'Телефон', model: entry.model,
+      problem: 'Комплекс: ' + items.map((x) => lcFirst(REPAIR[x.svc]) + ' (' + lcFirst(VAR_APP[x.tier]) + ')').join(', '),
+      price: t.total, part: Math.round((parts + glue.total) * 100) / 100,
+      comment: (t.discount ? 'Без скидки ' + t.sum + ' р., скидка за комплекс ' + this.pricer.S.combo_discount + '% на работу: −' + t.discount + ' р. ' : '')
+        + 'Детали: ' + items.map((x) => partNote(x.p)).join('; ') + glueNote(glue),
     });
     if (!this.sheet.connected) toast('Таблица не подключена: заказ уйдёт в неё после подключения', 4000);
   },
@@ -133,6 +144,20 @@ const app = {
     location.reload();
   },
 };
+
+// Для комментария заказа: «поставщик — деталь цена р.» и «; проклейка: …»
+function supName(k) {
+  return (app.data.suppliers[k] || {}).name || k;
+}
+
+function partNote(p) {
+  return supName(p.sup) + ' — ' + p.part + ' ' + p.cost + ' р.';
+}
+
+function glueNote(glue) {
+  const text = glue.items.map((g) => (g.fallback ? 'клей/скотч ' : supName(g.sup) + ' — ' + g.name + ' ') + g.cost + ' р.').join('; ');
+  return text ? '; проклейка: ' + text : '';
+}
 
 // --- Резервная копия настроек и прайсов в служебном листе таблицы (зашифрованы тем же ключом)
 let settingsTimer = null;

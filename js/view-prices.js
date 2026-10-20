@@ -45,7 +45,7 @@ export const REPAIR = {
 };
 
 // «Копия ЖК (In-Cell, TFT)» → «копия ЖК (In-Cell, TFT)»: сокращения не трогаем
-const lcFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);
+export const lcFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);
 
 // Пояснения для клиента, по тексту с сайта
 function clientHint(svc, tier, model) {
@@ -254,7 +254,7 @@ export function createPricesView(app) {
       const o = entry.services[svc].opts.find((x) => x.tier === tier);
       if (!o) continue;
       const p = priceOf(entry, svc, o);
-      out.push({ svc, tier, price: p.price, work: o.work, cost: p.cost });
+      out.push({ svc, tier, o, p, price: p.price, work: o.work, cost: p.cost });
     }
     return out;
   }
@@ -285,7 +285,11 @@ export function createPricesView(app) {
       t.discount ? h('div', { class: 'small', style: 'margin-top:6px' }, 'Скидка ' + S.combo_discount + '% на работу второго и следующих: ', h('b', { text: '−' + t.discount + ' р.' })) : h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Добавь второй ремонт — будет скидка ' + S.combo_discount + '% на его работу.' }),
       h('div', { class: 'earn', style: 'margin-top:6px' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), glue ? ' · проклейка ' + money(glue) : ''),
       h('div', { class: 'actions wrap' },
-        h('button', { class: 'btn small primary', onclick: async () => { if (await copyText(comboText(entry))) toast('Комплекс скопирован'); } }, icon('copy'), 'Скопировать клиенту'),
+        h('button', {
+          class: 'btn small primary',
+          onclick: () => (items.length === 1 ? app.newOrderFromPrice(entry, items[0].svc, items[0].o, items[0].p) : app.newOrderFromCombo(entry, items, t)),
+        }, 'Записать заказ'),
+        h('button', { class: 'btn small', onclick: async () => { if (await copyText(comboText(entry))) toast('Комплекс скопирован'); } }, icon('copy'), 'Скопировать клиенту'),
         h('button', { class: 'btn small', text: 'Очистить', onclick: () => { st.combo.clear(); draw(); } })));
   }
 
