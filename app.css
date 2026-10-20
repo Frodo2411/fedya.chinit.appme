@@ -155,11 +155,12 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 .repair.on .from { color: var(--accent); }
 .repair:disabled { opacity: 0.4; }
 
-.variant .head { display: flex; align-items: baseline; gap: 12px; }
-.variant .vname { font-weight: 700; font-size: 18px; }
-.variant .price { margin-left: auto; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.variant .earn { margin-top: 2px; font-size: 15px; color: var(--muted); }
-.variant .earn b { color: var(--good); font-weight: 700; }
+.variant .head, .combo .head { display: flex; align-items: baseline; gap: 12px; }
+.variant .vname, .combo .vname { font-weight: 700; font-size: 18px; }
+.variant .price, .combo .price { margin-left: auto; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.variant .earn, .combo .earn { margin-top: 2px; font-size: 15px; color: var(--muted); }
+.variant .earn b, .combo .earn b { color: var(--good); font-weight: 700; }
+.combo { border-color: var(--accent); }
 .variant.dim { opacity: 0.55; }
 .part {
   margin-top: 12px; width: 100%; text-align: left; border: 1px dashed var(--line); background: var(--bg);
@@ -176,6 +177,9 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 .sfline { margin-top: 6px; font-size: 13.5px; color: var(--faint); }
 .actions { display: flex; gap: 8px; margin-top: 12px; }
 .actions .btn { flex: 1; min-width: 0; white-space: nowrap; padding: 0 10px; }
+/* три кнопки не влезают в узкий экран — переносятся на вторую строку, а не обрезаются */
+.actions.wrap { flex-wrap: wrap; }
+.actions.wrap .btn { flex: 1 1 auto; }
 .others { margin-top: 10px; border-top: 1px solid var(--line); }
 .other { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .other:last-child { border-bottom: 0; }

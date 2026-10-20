@@ -162,6 +162,8 @@ await test('проклейка: какая к какому ремонту, на�
   assert.equal(g14.total, 3.4);
   assert.deepEqual(pr.glueFor('iPhone 11', 'd').items.map((x) => [x.type, x.cost, x.sup]), [['gd', 4, 'E']], 'в наличии важнее цены');
   assert.deepEqual(pr.glueFor('iPhone 11', 'b').items.map((x) => x.type), ['gd'], 'iPhone 11 вскрывается через дисплей');
+  assert.deepEqual(pr.glueFor('iPhone 11', ['d', 'b']).items.map((x) => x.type), ['gd'], 'комплекс: проклейка дисплея одна на дисплей и батарею');
+  assert.equal(pr.glueFor('iPhone 14', ['c', 'b']).total, 3.4, 'комплекс: крышка и батарея — одна проклейка крышки');
   assert.equal(pr.glueFor('Samsung Galaxy A52', 'b').items.length, 0);
   assert.equal(new Pricer(data, { year: 2026, glue_default: 1.5 }).glueFor('Samsung Galaxy A52', 'b').total, 1.5);
   assert.equal(new Pricer(data, { year: 2026, glue: false }).glueFor('iPhone 14', 'b').items.length, 0);

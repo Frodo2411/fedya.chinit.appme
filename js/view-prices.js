@@ -44,6 +44,9 @@ export const REPAIR = {
   hs: 'Замена корпуса', cg: 'Замена стекла камеры', sim: 'Замена SIM-лотка', tc: 'Замена тачскрина', gl: 'Замена стекла экрана (переклейка)',
 };
 
+// «Копия ЖК (In-Cell, TFT)» → «копия ЖК (In-Cell, TFT)»: сокращения не трогаем
+const lcFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);
+
 // Пояснения для клиента, по тексту с сайта
 function clientHint(svc, tier, model) {
   const iphone = model.startsWith('iPhone');
@@ -221,7 +224,7 @@ export function createPricesView(app) {
         h('div', { class: 'tiny faint break', text: o.alt.part })) : null,
       h('div', { class: 'sfline', text: sfText }),
       o.hidden ? h('div', { class: 'tiny', style: 'color:var(--accent);margin-top:6px', text: 'Скрыт: не дешевле варианта получше' }) : null,
-      h('div', { class: 'actions' },
+      h('div', { class: 'actions wrap' },
         h('button', { class: 'btn small primary', onclick: () => app.newOrderFromPrice(entry, svc, o, p) }, 'Записать заказ'),
         h('button', {
           class: 'btn small' + (st.combo.get(svc) === o.tier ? ' on' : ''),
@@ -251,7 +254,7 @@ export function createPricesView(app) {
       const o = entry.services[svc].opts.find((x) => x.tier === tier);
       if (!o) continue;
       const p = priceOf(entry, svc, o);
-      out.push({ svc, tier, price: p.price, work: o.work, cost: p.cost, glue: app.pricer.glueFor(entry.model, svc).total });
+      out.push({ svc, tier, price: p.price, work: o.work, cost: p.cost });
     }
     return out;
   }
@@ -260,7 +263,7 @@ export function createPricesView(app) {
     const items = comboItems(entry);
     const t = comboTotal(app.pricer.S, items);
     const lines = [entry.model + ' — комплексный ремонт:'];
-    for (const x of items) lines.push('• ' + REPAIR[x.svc] + ' (' + VAR_CLIENT[x.tier].toLowerCase() + ') — ' + x.price + ' р.');
+    for (const x of items) lines.push('• ' + REPAIR[x.svc] + ' (' + lcFirst(VAR_CLIENT[x.tier]) + ') — ' + x.price + ' р.');
     if (t.discount) lines.push('Скидка за комплекс (' + app.pricer.S.combo_discount + '% на работу): −' + t.discount + ' р.');
     lines.push('Итого: ' + t.total + ' р.');
     const foot = (app.settings.clientFooter || '').trim();
@@ -273,13 +276,15 @@ export function createPricesView(app) {
     if (!items.length) return null;
     const S = app.pricer.S;
     const t = comboTotal(S, items);
-    const earn = items.reduce((a, x) => a + x.price - x.cost - x.glue, 0) - t.discount;
-    return h('div', { class: 'card' },
+    // проклейка на весь комплекс: телефон вскрывается один раз
+    const glue = app.pricer.glueFor(entry.model, items.map((x) => x.svc)).total;
+    const earn = items.reduce((a, x) => a + x.price - x.cost, 0) - glue - t.discount;
+    return h('div', { class: 'card combo' },
       h('div', { class: 'head' }, h('div', { class: 'vname', text: 'Комплекс · ' + items.length }), h('div', { class: 'price', text: t.total + ' р.' })),
-      items.map((x) => h('div', { class: 'small' }, SVC[x.svc] + ' — ' + VAR_APP[x.tier].toLowerCase() + ': ' + x.price + ' р.')),
+      items.map((x) => h('div', { class: 'small' }, SVC[x.svc] + ' — ' + lcFirst(VAR_APP[x.tier]) + ': ' + x.price + ' р.')),
       t.discount ? h('div', { class: 'small', style: 'margin-top:6px' }, 'Скидка ' + S.combo_discount + '% на работу второго и следующих: ', h('b', { text: '−' + t.discount + ' р.' })) : h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Добавь второй ремонт — будет скидка ' + S.combo_discount + '% на его работу.' }),
-      h('div', { class: 'earn', style: 'margin-top:6px' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) })),
-      h('div', { class: 'actions' },
+      h('div', { class: 'earn', style: 'margin-top:6px' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), glue ? ' · проклейка ' + money(glue) : ''),
+      h('div', { class: 'actions wrap' },
         h('button', { class: 'btn small primary', onclick: async () => { if (await copyText(comboText(entry))) toast('Комплекс скопирован'); } }, icon('copy'), 'Скопировать клиенту'),
         h('button', { class: 'btn small', text: 'Очистить', onclick: () => { st.combo.clear(); draw(); } })));
   }

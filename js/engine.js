@@ -230,17 +230,19 @@ export class Pricer {
     return [...new Set(need || (ORDER[svc] ? [open] : []))];
   }
 
-  // Проклейки для ремонта: самая дешёвая из тех, что в наличии; нет в прайсе — не считаем
+  // Проклейки для ремонта: самая дешёвая из тех, что в наличии; нет в прайсе — не считаем.
+  // svc — один ремонт или список (комплекс): общая сторона вскрытия считается один раз
   glueFor(model, svc) {
     const byType = this.glue.get(model);
+    const types = [...new Set([].concat(svc).flatMap((s) => this.glueTypes(model, s)))];
     const items = [];
-    for (const type of this.glueTypes(model, svc)) {
+    for (const type of types) {
       const rows = byType ? byType[type] : [];
       if (!rows.length) continue;
       const best = [...rows].sort((a, b) => (Number(this.inStock(b)) - Number(this.inStock(a))) || (pieceCost(a) - pieceCost(b)) || (this.rank(a.sup) - this.rank(b.sup)))[0];
       items.push({ type, cost: pieceCost(best), sup: best.sup, name: best.name, stock: best.stock, inStock: this.inStock(best), pack: best.cost !== pieceCost(best) });
     }
-    if (!items.length && this.S.glue && this.S.glue_default > 0 && this.glueTypes(model, svc).length) {
+    if (!items.length && this.S.glue && this.S.glue_default > 0 && types.length) {
       items.push({ type: null, cost: this.S.glue_default, sup: null, name: 'клей или скотч (своей проклейки нет в прайсе)', stock: null, inStock: true, fallback: true });
     }
     return { items, total: Math.round(items.reduce((s, x) => s + x.cost, 0) * 100) / 100 };
