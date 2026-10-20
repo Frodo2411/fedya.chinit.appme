@@ -1,7 +1,7 @@
 // Экран «Цены»: поиск модели, ремонты, варианты деталей с ценой клиенту, поставщиком и заработком.
 
 import { h, fill, icon, money, toast, copyText } from './ui.js';
-import { SERVICES, SITE_SERVICES, clientPrice, riskReserve, diffCoef, noveltyCoef, GLUE_NAME } from './engine.js';
+import { SERVICES, SITE_SERVICES, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, GLUE_NAME } from './engine.js';
 import { store } from './store.js';
 import { telHref } from './view-orders.js';
 
@@ -69,7 +69,8 @@ function clientHint(svc, tier, model) {
 }
 
 export function createPricesView(app) {
-  const st = { q: '', model: null, svc: store.get('svc', 'd'), overrides: new Map(), open: new Set(), showHidden: false };
+  // combo — комплекс: ремонт → вариант детали (по одному на ремонт), для открытой модели
+  const st = { q: '', model: null, svc: store.get('svc', 'd'), overrides: new Map(), open: new Set(), showHidden: false, combo: new Map() };
   const root = h('div');
   const results = h('div');
   const input = h('input', {
@@ -113,6 +114,7 @@ export function createPricesView(app) {
 
   function openModel(name) {
     st.model = name;
+    st.combo = new Map();
     st.overrides.clear();
     st.open.clear();
     st.showHidden = false;
@@ -222,6 +224,10 @@ export function createPricesView(app) {
       h('div', { class: 'actions' },
         h('button', { class: 'btn small primary', onclick: () => app.newOrderFromPrice(entry, svc, o, p) }, 'Записать заказ'),
         h('button', {
+          class: 'btn small' + (st.combo.get(svc) === o.tier ? ' on' : ''),
+          onclick: () => { if (st.combo.get(svc) === o.tier) st.combo.delete(svc); else st.combo.set(svc, o.tier); draw(); },
+        }, st.combo.get(svc) === o.tier ? '✓ В комплексе' : 'В комплекс'),
+        h('button', {
           class: 'btn small', onclick: () => { if (st.open.has(key)) st.open.delete(key); else st.open.add(key); draw(); },
         }, (st.open.has(key) ? 'Скрыть детали' : 'Все детали · ' + others.length))),
       st.open.has(key) ? h('div', { class: 'others' },
@@ -236,6 +242,46 @@ export function createPricesView(app) {
               : h('button', { class: 'btn small', text: 'Выбрать', onclick: () => { st.overrides.set(key, r); draw(); } }));
         })) : null);
     return card;
+  }
+
+  // Комплекс: выбранные ремонты, скидка на работу, итог и заработок
+  function comboItems(entry) {
+    const out = [];
+    for (const [svc, tier] of st.combo) {
+      const o = entry.services[svc].opts.find((x) => x.tier === tier);
+      if (!o) continue;
+      const p = priceOf(entry, svc, o);
+      out.push({ svc, tier, price: p.price, work: o.work, cost: p.cost, glue: app.pricer.glueFor(entry.model, svc).total });
+    }
+    return out;
+  }
+
+  function comboText(entry) {
+    const items = comboItems(entry);
+    const t = comboTotal(app.pricer.S, items);
+    const lines = [entry.model + ' — комплексный ремонт:'];
+    for (const x of items) lines.push('• ' + REPAIR[x.svc] + ' (' + VAR_CLIENT[x.tier].toLowerCase() + ') — ' + x.price + ' р.');
+    if (t.discount) lines.push('Скидка за комплекс (' + app.pricer.S.combo_discount + '% на работу): −' + t.discount + ' р.');
+    lines.push('Итого: ' + t.total + ' р.');
+    const foot = (app.settings.clientFooter || '').trim();
+    if (foot) lines.push('', foot);
+    return lines.join('\n');
+  }
+
+  function comboCard(entry) {
+    const items = comboItems(entry);
+    if (!items.length) return null;
+    const S = app.pricer.S;
+    const t = comboTotal(S, items);
+    const earn = items.reduce((a, x) => a + x.price - x.cost - x.glue, 0) - t.discount;
+    return h('div', { class: 'card' },
+      h('div', { class: 'head' }, h('div', { class: 'vname', text: 'Комплекс · ' + items.length }), h('div', { class: 'price', text: t.total + ' р.' })),
+      items.map((x) => h('div', { class: 'small' }, SVC[x.svc] + ' — ' + VAR_APP[x.tier].toLowerCase() + ': ' + x.price + ' р.')),
+      t.discount ? h('div', { class: 'small', style: 'margin-top:6px' }, 'Скидка ' + S.combo_discount + '% на работу второго и следующих: ', h('b', { text: '−' + t.discount + ' р.' })) : h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Добавь второй ремонт — будет скидка ' + S.combo_discount + '% на его работу.' }),
+      h('div', { class: 'earn', style: 'margin-top:6px' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) })),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn small primary', onclick: async () => { if (await copyText(comboText(entry))) toast('Комплекс скопирован'); } }, icon('copy'), 'Скопировать клиенту'),
+        h('button', { class: 'btn small', text: 'Очистить', onclick: () => { st.combo.clear(); draw(); } })));
   }
 
   function clientText(entry, svcs) {
@@ -283,6 +329,7 @@ export function createPricesView(app) {
           onclick: () => { st.svc = svc; store.set('svc', svc); draw(); },
         }, h('span', { class: 'name', text: SVC[svc] }), h('span', { class: 'from', text: from ? 'от ' + from + ' р.' : 'нет деталей' }));
       })),
+      comboCard(e),
       visible.length ? visible.map((o) => variantCard(e, st.svc, o))
         : noParts ? h('div', { class: 'empty' }, 'Деталей для этой модели в прайсе пока нет.', h('br'), 'Если они есть у поставщика — загрузи его свежий прайс: «Ещё» → «Прайсы поставщиков».')
           : h('div', { class: 'empty' }, 'У поставщиков нет деталей для этого ремонта.', h('br'), 'Цена уточняется отдельно.'),

@@ -41,6 +41,8 @@ export const DEFAULTS = {
   // Запас на брак, % от цены детали: на случай, если деталь сломается при ремонте. Добавляется к цене по формуле,
   // выше SmartFix цену не поднимает. d — дисплеи, c — задние стёкла и крышки, other — остальное
   risk: { d: 0, c: 0, other: 0 },
+  // Комплексный ремонт: скидка на работу второго и следующих ремонтов, % (самая дорогая работа — без скидки)
+  combo_discount: 20,
   diff: [[0, 1.5], [3, 1.3], [5, 1.15], [7, 1.0]],
   diff_default: 1.0,
   novelty: [[0, 1.3], [2, 1.15], [4, 1.0]],
@@ -127,6 +129,17 @@ export function riskReserve(S, svc, part) {
   const r = S.risk || {};
   const pct = svc === 'd' ? r.d : svc === 'c' ? r.c : r.other;
   return pct > 0 && part > 0 ? part * pct / 100 : 0;
+}
+
+// Комплекс из нескольких ремонтов одного телефона: items — [{price, work}].
+// Скидка — процент от работы всех ремонтов, кроме самого дорогого по работе, вниз до шага округления.
+export function comboTotal(S, items) {
+  const sum = items.reduce((a, x) => a + x.price, 0);
+  if (items.length < 2) return { sum, discount: 0, total: sum };
+  const works = items.map((x) => x.work).sort((a, b) => b - a);
+  const raw = works.slice(1).reduce((a, w) => a + w, 0) * (S.combo_discount || 0) / 100;
+  const discount = Math.floor(raw / S.round) * S.round;
+  return { sum, discount, total: sum - discount };
 }
 
 // Цена клиенту: по формуле (работа + деталь + запас на брак) и со сверкой с SmartFix

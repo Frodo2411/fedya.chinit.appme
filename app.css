@@ -150,6 +150,7 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 .repair { min-height: 68px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); text-align: left; padding: 10px 14px; }
 .repair .name { font-weight: 700; display: block; }
 .repair .from { font-size: 14px; color: var(--muted); }
+.btn.on { border-color: var(--accent); color: var(--accent); }
 .repair.on { border-color: var(--accent); background: rgba(255, 178, 36, 0.1); }
 .repair.on .from { color: var(--accent); }
 .repair:disabled { opacity: 0.4; }

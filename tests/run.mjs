@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (f) => import(path.join(ROOT, f));
-const { Pricer, clientPrice, riskReserve, workFee, pyRound2, settingsWithDefaults, siteFile, ceilTo } = await imp('js/engine.js');
+const { Pricer, clientPrice, riskReserve, comboTotal, workFee, pyRound2, settingsWithDefaults, siteFile, ceilTo } = await imp('js/engine.js');
 const RULES = await imp('js/rules.js');
 const { mapRow, siteIndex, items, tier, lineKey, kindOf, networkOk, BRAND_FAM } = RULES;
 const { ModelSearch } = await imp('js/search.js');
@@ -82,6 +82,11 @@ await test('цена клиенту и сверка со SmartFix', () => {
   assert.equal(riskReserve(R, 'b', 300), 0);
   assert.equal(clientPrice(R, 85, 300, null, riskReserve(R, 'd', 300)).price, 465); // (85+300+30)/0,9 = 461,1 → 465
   assert.equal(clientPrice(R, 85, 300, 400, riskReserve(R, 'd', 300)).price, 395); // не выше SmartFix − 5
+  // комплекс: скидка 20% на работу всех ремонтов, кроме самого дорогого по работе, вниз до 5 р.
+  assert.equal(S.combo_discount, 20);
+  assert.deepEqual(comboTotal(S, [{ price: 440, work: 85 }]), { sum: 440, discount: 0, total: 440 });
+  assert.deepEqual(comboTotal(S, [{ price: 120, work: 50 }, { price: 440, work: 85 }]), { sum: 560, discount: 10, total: 550 });
+  assert.deepEqual(comboTotal(S, [{ price: 440, work: 85 }, { price: 120, work: 50 }, { price: 90, work: 60 }]), { sum: 650, discount: 20, total: 630 });
 });
 
 await test('выбор детали: наличие, брак, самый дорогой цвет, скрытие слабого варианта, крышка без лазера', () => {
