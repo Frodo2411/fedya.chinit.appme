@@ -528,6 +528,25 @@ await test('новый поставщик: .xls, цены в долларах, �
   assert.deepEqual(un.parts.filter((p) => p.sup === 'S1').map((p) => [p.cost, p.stock]), [[30.5, 'В наличии'], [36.6, 'Нет в наличии'], [4.57, 'В наличии']]);
 });
 
+await test('названия ещё одного поставщика: «АКБ», модель в скобках после кода, «(SP) = пожизненная гарантия»', () => {
+  const models = [['Samsung', 'Samsung Galaxy A41'], ['Samsung', 'Samsung Galaxy A34 5G'], ['Samsung', 'Samsung Galaxy A54 5G'], ['Samsung', 'Samsung Galaxy A14 5G'],
+    ['Samsung', 'Samsung Galaxy A02s'], ['iPhone', 'iPhone 11 Pro'], ['iPhone', 'iPhone XS']];
+  const idx = siteIndex(models.map((m) => m[1]));
+  const fam = new Map(models.map((m) => [m[1], BRAND_FAM[m[0]]]));
+  const map = (n) => { const k = kindOf(n); if (!k) return null; const r = mapRow(n, k, idx, fam); return [k, r.tier, r.models.join()]; };
+  assert.deepEqual(map('АКБ Apple iPhone 11 Pro - JCID усиленная 3400 mAh'), ['b', 'copy_boost', 'iPhone 11 Pro']);
+  assert.deepEqual(map('АКБ Apple iPhone Xs 2658 mAh - ПРЕМИУМ'), ['b', 'copy', 'iPhone XS'], '«Apple» перед iPhone и ёмкость');
+  assert.deepEqual(map('Дисплей Samsung A415F (A41) МОДУЛЬ Черный - (OLED) (Full Size)'), ['d', 'copy_oled', 'Samsung Galaxy A41'], 'модель в скобках после кода');
+  assert.deepEqual(map('АКБ Samsung EB-BA546ABY (A346B A34 5G/A546E A54 5G) - ПРЕМИУМ (SP) = пожизненная гарантия'), ['b', 'copy', 'Samsung Galaxy A34 5G,Samsung Galaxy A54 5G']);
+  assert.deepEqual(map('Дисплей Samsung A146B (A14 5G) в сборе с тачскрином Черный (SP) = пожизненная гарантия'), ['d', 'copy_lcd', 'Samsung Galaxy A14 5G'], '(SP) = гарантия — не Service Pack');
+  assert.deepEqual(map('Дисплей Samsung A146B (A14 5G) в сборе с тачскрином Черный - ОРИГИНАЛ (SP) = пожизненная гарантия'), ['d', 'orig_new', 'Samsung Galaxy A14 5G']);
+  assert.deepEqual(map('Дисплей Samsung A025F (A02s) МОДУЛЬ Черный - ОРИГИНАЛ-СЕРВИС-РЕФ'), ['d', 'orig_reglass', 'Samsung Galaxy A02s'], '«РЕФ» — восстановленный');
+  assert.deepEqual(map('Звонок (buzzer) Samsung A415F (A41) в сборе'), ['ls', 'copy', 'Samsung Galaxy A41']);
+  assert.deepEqual(map('Контейнер SIM/SIM Лоток Samsung A415F (A41) Черный'), ['sim', 'copy', 'Samsung Galaxy A41']);
+  // у прежних названий скобки с кодом не мешают: модель берётся из основной части
+  assert.deepEqual(map('Дисплей Samsung A34 5G (A346B) - OR (SP)'), ['d', 'orig_new', 'Samsung Galaxy A34 5G']);
+});
+
 await test('цены на сайт одной кнопкой: GitHub API', async () => {
   const { publishSite, toBase64, fromBase64 } = await imp('js/site-publish.js');
   const text = 'window.MODEL_PRICES = [["iPhone", "iPhone 11 — замена"]];';

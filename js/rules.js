@@ -4,7 +4,7 @@
 
 import { pyRe, pySplit, pyStrip, beforeFirst } from './pyre.js';
 
-const KIND_PREFIX = pyRe(String.raw`^(Аккумулятор|Дисплей|LCD|Задняя крышка|Заднее стекло|Плата зарядки|Нижняя плата|Шлейф зарядки|Шлейф|Разъем|Разъём)\s+(для\s+)?`, 'i');
+const KIND_PREFIX = pyRe(String.raw`^(Аккумулятор|АКБ|Дисплей|LCD|Задняя крышка|Заднее стекло|Плата зарядки|Нижняя плата|Шлейф зарядки|Шлейф|Разъем|Разъём)\s+(для\s+)?`, 'i');
 
 const NM = [
   [pyRe(String.raw`\bgalaxy\b|\bsamsung\b|\bapple\b|\bgoogle\b|\bhuawei\b(?=\s+(honor|nova|mate|p\d|pura|p smart))`, 'g'), ' '],
@@ -65,7 +65,7 @@ export function modelSegment(name) {
   let s = name.trim().replace(KIND_PREFIX, '');
   // русская буква внутри модели, похожая на латинскую: «iPhoneХS», «Redmi 13С», «iPhone5С»
   s = s.replace(/(?<=[0-9A-Za-z])[АВЕКМНОРСТХаеорсхук]|[АВЕКМНОРСТХаеорсх](?=[0-9A-Za-z])/g, (ch) => LOOKALIKE[ch] || ch);
-  s = applePlus(s);
+  s = applePlus(s).replace(/\bApple\s+(?=iPhone)/i, '');
   s = s.replace(/\biPhone(?=[0-9A-Za-zА-Яа-яЁё])/gi, 'iPhone ').replace(/(\d)(Pro|Plus|Max|mini|Air)\b/gi, '$1 $2').replace(/\bSE(?=\d)/g, 'SE ');
   s = beforeFirst(s, SEG_SPLIT);
   s = s.replace(SEG_YEAR, ' $1');
@@ -228,8 +228,9 @@ const T = {
   bBoost: R('усилен'),
   // внешний (маленький) экран раскладушки — не основной дисплей
   dSkip: R(String.raw`стекл|тачскрин|подсветк|защитн|\bOCA\b|рамка дисплея|внешн|маленьк`),
-  dSkipNot: R('заменено.*стекл|полирован'),
-  dReglass: R(String.raw`переклей|\bRef\b|refurb|заменено`),
+  // «(в сборе) с тачскрином» — целый модуль, а не отдельный тачскрин
+  dSkipNot: R('заменено.*стекл|полирован|с тачскрин'),
+  dReglass: R(String.raw`переклей|\bRef\b|\bреф\b|refurb|заменено`),
   dUsed: R('снят|разбор|б/у|полирован|заменена рамк'),
   dCopy: R('orig tech|под ориг|не ориг|high quality|копия'),
   oled: R(String.raw`oled|amoled|fog`),
@@ -247,6 +248,8 @@ const T = {
 };
 
 export function tier(kind, n) {
+  // «(SP) = пожизненная гарантия» — значок гарантии поставщика, а не Service Pack
+  n = n.replace(/\(SP\)\s*=\s*пожизненн\S*\s+гарант\S*/gi, ' ');
   if (kind === 'd') n = n.replace(/^LCD\s+/i, 'Дисплей '); // «LCD для iPhone» — не признак копии ЖК
   // русская буква в латинском слове: «оrig» с русской «о»
   if (kind !== 'b') n = n.replace(LATIN_MIX, (ch) => LOOKALIKE[ch] || ch);
@@ -340,7 +343,7 @@ export function glueType(name) {
 export function kindOf(name) {
   const n = name.trim();
   if (glueType(n)) return 'g';
-  if (/^Аккумулятор/i.test(n)) return 'b';
+  if (/^(Аккумулятор|АКБ)\s/i.test(n)) return 'b';
   if (/^Дисплей/i.test(n)) return 'd';
   // «Задняя крышка для iPhone… + стекло» — корпус в сборе (у старых айфонов задняя крышка и есть корпус);
   // одно стекло называют «Заднее стекло»
@@ -372,9 +375,9 @@ function moreKind(n) {
   if (/^[СC]текло (?:двойной |тройной )?камер/i.test(n)) return 'cg';
   if (/^[СC]текло[\s+]/i.test(n) && /переклей|для ремонта/i.test(n)) return /маленьк|внешн/i.test(n) ? null : 'gl';
   if (/^Тачскрин/i.test(n)) return 'tc';
-  if (/^(Сим|SIM)[\s-]*лоток|^Лоток для сим/i.test(n)) return 'sim';
+  if (/^(Сим|SIM)[\s-]*лоток|^Лоток для сим|^Контейнер SIM/i.test(n)) return 'sim';
   if (/^Кольцо камеры со стеклом/i.test(n)) return 'cg';
-  if (/^Buzzer\s/i.test(n)) return 'ls';
+  if (/^Buzzer\s|^Звонок\s/i.test(n)) return 'ls';
   if (/^Вибро/i.test(n)) return 'vb';
   if (/^Внутрикорпусная катушка/i.test(n)) return 'fo';
   if (/^(Корпус|Средняя часть)/i.test(n)) return 'hs';
@@ -419,12 +422,28 @@ function moreModels(name) {
 }
 
 // Разметка новой строки: модели, вариант, линия. Как map_row() из rules.py плюс поправки из merge_mapping.py.
+function parenModels(name, idx) {
+  const b = name.match(BRAND_ONE);
+  if (!b) return [];
+  const out = [];
+  for (const [, inner] of name.matchAll(/\(\s*([^()]*?[A-Za-z0-9][^()]*?)\s*\)/g)) {
+    if (/^(19|20)\d\d$/.test(inner)) continue;
+    // код перед моделью внутри скобок: «(A346B A34 5G/A546E A54 5G)», «( N910C Note 4 )»
+    const clean = inner.replace(/\b[A-Z]{1,3}\d{3,4}[A-Z]{0,3}\s+(?=\S)/g, '');
+    const c = BRAND_ONE.test(clean) ? clean : b[0] + ' ' + clean;
+    for (const m of matchModels('Дисплей ' + c, idx)) if (!out.includes(m)) out.push(m);
+  }
+  return out;
+}
+
 export function mapRow(name, kind, idx, famOfModel) {
   const fams = families(name);
   // у проклейки та же запись модели, что у дисплея: «Проклейка дисплея iPhone 15 - Orig» → «Дисплей iPhone 15 - Orig»
   const forModels = kind === 'g' ? name.trim().replace(GLUE_PREFIX, 'Дисплей ') : MORE_KINDS.has(kind) ? moreModels(name) : name;
   let models = [];
   for (const m of matchModels(forModels, idx)) if (fams.has(famOfModel.get(m)) && !models.includes(m)) models.push(m);
+  // модель не нашлась — бывает, что понятное название в скобках после кода: «Samsung A415F (A41)», «АКБ Xiaomi BP4E (13 Lite)»
+  if (!models.length) for (const m of parenModels(name, idx)) if (fams.has(famOfModel.get(m)) && !models.includes(m)) models.push(m);
   let t = kind === 'g' ? glueType(name) : tier(kind, name);
   if (t === 'skip') models = [];
   if (!models.length) t = 'skip';
