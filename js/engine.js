@@ -154,7 +154,25 @@ export function clientPrice(S, work, part, sf, reserve = 0) {
 }
 
 export function usable(p) {
+  if (p.own) return p.cost > 0;
   return p.cost !== null && p.cost !== undefined && p.cost > 0 && !DEFECT.test(p.name);
+}
+
+// Своя деталь: цену мастер вписал сам — у поставщиков такой детали нет или он берёт её в другом месте.
+// Хранится в настройках (ownParts: [{id, model, svc, tier, cost, name, date}]), в расчёт идёт как деталь «поставщика» OWN.
+export const OWN = '_own';
+export const OWN_NAME = 'Своя деталь';
+
+export function withOwnParts(data, own) {
+  if (!own || !own.length) return data;
+  return {
+    ...data,
+    suppliers: { ...data.suppliers, [OWN]: { name: OWN_NAME, stock: false, rank: 99 } },
+    parts: [...data.parts, ...own.map((x) => ({
+      sup: OWN, name: x.name || 'цена вписана вручную', cost: x.cost, stock: null, svc: x.svc, tier: x.tier,
+      models: [x.model], line: 'own:' + x.id, own: true, id: x.id,
+    }))],
+  };
 }
 
 // Проклейка в наборе «(5шт)» — цена за одну штуку
@@ -205,9 +223,10 @@ export class Pricer {
         continue;
       }
       if (p.tier === 'skip' || !ORDER[p.svc] || !ORDER[p.svc].includes(p.tier)) continue;
-      if (p.svc === 'c' && WIDE_CUT.test(p.name)) continue;
+      // свою деталь мастер вписал сознательно: правила про лазер и вырез к ней не применяем
+      if (p.svc === 'c' && !p.own && WIDE_CUT.test(p.name)) continue;
       for (const model of p.models) {
-        if (p.svc === 'c' && model.startsWith('iPhone') && !noLaser.has(model)) continue;
+        if (p.svc === 'c' && !p.own && model.startsWith('iPhone') && !noLaser.has(model)) continue;
         const key = model + '|' + p.svc + '|' + p.tier;
         let lines = index.get(key);
         if (!lines) index.set(key, (lines = new Map()));
@@ -291,7 +310,7 @@ export class Pricer {
       const sfv = key && m.sf ? m.sf[key] : null;
       const cp = clientPrice(S, work, best.cost, sfv, riskReserve(S, svc, best.cost));
       opts.push({
-        tier, svc, work, cost: best.cost, sup: best.sup, part: best.row.name, stock: best.row.stock,
+        tier, svc, work, cost: best.cost, sup: best.sup, part: best.row.name, stock: best.row.stock, ownId: best.row.own ? best.row.id : null,
         colours: best.colours, inStock: best.inStock, sfKey: key, sf: sfv || null,
         price: cp.price, formula: cp.formula, smartfix: cp.smartfix,
         alt: alt ? { cost: alt.cost, sup: alt.sup, part: alt.row.name, stock: alt.row.stock, inStock: alt.inStock } : null,

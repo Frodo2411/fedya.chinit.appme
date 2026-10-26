@@ -154,6 +154,8 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 .repair.on { border-color: var(--accent); background: rgba(255, 178, 36, 0.1); }
 .repair.on .from { color: var(--accent); }
 .repair:disabled { opacity: 0.4; }
+/* ремонт без деталей: вкладка открывается (можно вписать свою деталь), но приглушена */
+.repair.none:not(.on) { opacity: 0.55; }
 
 .variant .head, .combo .head { display: flex; align-items: baseline; gap: 12px; }
 .variant .vname, .combo .vname { font-weight: 700; font-size: 18px; }

@@ -29,6 +29,11 @@ export class SheetSync {
     return { ...DEFAULT_LISTS, ...((this.cache && this.cache.lists) || {}) };
   }
 
+  // Версия скрипта таблицы: со 2-й он нумерует гарантийные заказы отдельно (Г1, Г2…). null — список ещё не загружен
+  get version() {
+    return this.cache ? this.cache.version || 1 : null;
+  }
+
   configure(cfg) {
     this.cfg = cfg;
     if (cfg) store.set('sheet', cfg);
@@ -64,9 +69,9 @@ export class SheetSync {
     return j.data;
   }
 
-  // --- Очередь изменений
-  add(kind, fields) {
-    const op = { id: newId(), op: kind, fields, at: Date.now() };
+  // --- Очередь изменений. extra — признаки самой операции, например { warranty: true } для гарантийного заказа
+  add(kind, fields, extra) {
+    const op = { id: newId(), op: kind, fields, at: Date.now(), ...extra };
     this.outbox.push(op);
     this.save();
     this.onChange();
@@ -187,7 +192,7 @@ export class SheetSync {
         const o = num !== null && num !== undefined ? byNum.get(String(num)) : list.find((x) => x.pendingId && x.pendingId === op.ref);
         if (o) Object.assign(o, op.fields, { pending: true });
       } else if (op.op === 'addOrder') {
-        list.push({ ...op.fields, num: null, row: null, pending: true, pendingId: op.id });
+        list.push({ ...op.fields, num: null, row: null, pending: true, pendingId: op.id, warrantyOrder: op.warranty || undefined });
       }
     }
     return list;

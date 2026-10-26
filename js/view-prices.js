@@ -1,8 +1,8 @@
 // Экран «Цены»: поиск модели, ремонты, варианты деталей с ценой клиенту, поставщиком и заработком.
 
-import { h, fill, icon, money, toast, copyText } from './ui.js';
-import { SERVICES, SITE_SERVICES, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, GLUE_NAME } from './engine.js';
-import { store } from './store.js';
+import { h, fill, icon, money, toast, copyText, openSheet, field, select, parseNum, fmtDate } from './ui.js';
+import { SERVICES, SITE_SERVICES, ORDER, OWN, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, workFee, sfKey, GLUE_NAME } from './engine.js';
+import { store, newId, today } from './store.js';
 import { telHref } from './view-orders.js';
 
 // Заметка «как заказать»: @бот → Telegram, адрес сайта и телефон — тоже нажимаются
@@ -144,6 +144,7 @@ export function createPricesView(app) {
   }
 
   function stockBadge(sup, stock) {
+    if (sup === OWN) return h('span', { class: 'badge info', text: 'своя цена' });
     const s = app.data.suppliers[sup];
     if (!s || !s.stock) return h('span', { class: 'badge warn', text: 'уточнить наличие' });
     if (stock === 'В наличии') return h('span', { class: 'badge good', text: 'в наличии' });
@@ -151,7 +152,8 @@ export function createPricesView(app) {
   }
 
   function supName(key) {
-    return (app.data.suppliers[key] && app.data.suppliers[key].name) || key;
+    const s = app.pricer.data.suppliers[key];
+    return (s && s.name) || key;
   }
 
   function supSite(key) {
@@ -217,6 +219,7 @@ export function createPricesView(app) {
       h('span', { class: 'pname', text: p.part }),
       !p.override && o.colours > 1 ? h('span', { class: 'tiny faint', text: 'Цветов: ' + o.colours + ', цена по самому дорогому' }) : null),
       siteButton(p.sup, p.part),
+      o.ownId && !p.override ? ownLine(entry, svc, o.ownId) : null,
       note ? h('div', { class: 'small muted', style: 'margin-top:8px' }, 'Как заказать: ', linkify(note)) : null,
       glue.items.map((g) => glueRow(g)),
       o.alt && !p.override ? h('div', { class: 'alt' }, 'Второй поставщик: ', h('b', { text: supName(o.alt.sup) + ' — ' + money(o.alt.cost) }), ' ', stockBadge(o.alt.sup, o.alt.stock),
@@ -245,6 +248,36 @@ export function createPricesView(app) {
               : h('button', { class: 'btn small', text: 'Выбрать', onclick: () => { st.overrides.set(key, r); draw(); } }));
         })) : null);
     return card;
+  }
+
+  // Своя деталь в карточке: когда вписана и кнопка «Изменить»
+  function ownLine(entry, svc, id) {
+    const item = (app.settings.ownParts || []).find((x) => x.id === id);
+    if (!item) return null;
+    return h('div', { class: 'row', style: 'margin-top:8px' },
+      h('div', { class: 'tiny faint grow', text: 'Цена детали вписана ' + fmtDate(item.date) + '. Обновлять её при загрузке прайсов не будет.' }),
+      h('button', { class: 'btn small', text: 'Изменить', onclick: () => openOwnPart(app, entry, svc, item) }));
+  }
+
+  // Почему нет деталей и что делать: своя деталь, а у айфонов с лазером ещё и корпус
+  function emptyState(e, svc, noParts) {
+    const laser = svc === 'c' && e.model.startsWith('iPhone') && !app.pricer.noLaser.has(e.model);
+    const hs = e.services.hs.opts.filter((o) => !o.hidden);
+    const hsFrom = hs.length ? Math.min(...hs.map((o) => priceOf(e, 'hs', o).price)) : null;
+    let why;
+    if (laser) {
+      why = h('div', {}, 'На этой модели заднее стекло снимается только лазером, поэтому крышки из прайса здесь не считаются.',
+        h('br'), 'Если делаешь с лазером (сам или отдаёшь) — впиши свою деталь или добавь модель в «Ещё → Расчёт цены → Модели без лазера».',
+        hsFrom ? h('div', { style: 'margin-top:8px' }, 'Без лазера меняют корпус целиком.') : null);
+    } else if (noParts) {
+      why = h('div', {}, 'Деталей для этой модели в прайсе пока нет.', h('br'), 'Если они есть у поставщика — загрузи его свежий прайс: «Ещё» → «Прайсы поставщиков». Или впиши свою деталь.');
+    } else {
+      why = h('div', {}, 'У поставщиков нет детали для этого ремонта.', h('br'), 'Купил или нашёл её в другом месте — впиши цену детали, приложение посчитает цену клиенту.');
+    }
+    return h('div', { class: 'empty' }, why,
+      h('div', { class: 'row wrap', style: 'justify-content:center;margin-top:14px' },
+        h('button', { class: 'btn small primary', text: '+ Своя деталь', onclick: () => openOwnPart(app, e, svc, null) }),
+        laser && hsFrom ? h('button', { class: 'btn small', text: 'Корпус · от ' + hsFrom + ' р.', onclick: () => { st.svc = 'hs'; store.set('svc', 'hs'); draw(); } }) : null));
   }
 
   // Комплекс: выбранные ремонты, скидка на работу, итог и заработок
@@ -333,15 +366,15 @@ export function createPricesView(app) {
       h('div', { class: 'repairs' }, SERVICES.filter((svc) => SITE_SERVICES.includes(svc) || e.services[svc].opts.length).map((svc) => {
         const vis = e.services[svc].opts.filter((o) => !o.hidden);
         const from = vis.length ? Math.min(...vis.map((o) => priceOf(e, svc, o).price)) : null;
+        // и без деталей вкладка открывается: там можно вписать свою деталь
         return h('button', {
-          class: 'repair' + (svc === st.svc ? ' on' : ''), disabled: !vis.length,
+          class: 'repair' + (svc === st.svc ? ' on' : '') + (vis.length ? '' : ' none'),
           onclick: () => { st.svc = svc; store.set('svc', svc); draw(); },
         }, h('span', { class: 'name', text: SVC[svc] }), h('span', { class: 'from', text: from ? 'от ' + from + ' р.' : 'нет деталей' }));
       })),
       comboCard(e),
-      visible.length ? visible.map((o) => variantCard(e, st.svc, o))
-        : noParts ? h('div', { class: 'empty' }, 'Деталей для этой модели в прайсе пока нет.', h('br'), 'Если они есть у поставщика — загрузи его свежий прайс: «Ещё» → «Прайсы поставщиков».')
-          : h('div', { class: 'empty' }, 'У поставщиков нет деталей для этого ремонта.', h('br'), 'Цена уточняется отдельно.'),
+      visible.length ? visible.map((o) => variantCard(e, st.svc, o)) : emptyState(e, st.svc, noParts),
+      visible.length ? h('button', { class: 'link', style: 'margin-top:8px;display:block', text: '+ Своя деталь (не из прайса)', onclick: () => openOwnPart(app, e, st.svc, null) }) : null,
       hidden.length ? h('button', { class: 'link', style: 'margin-top:8px', onclick: () => { st.showHidden = !st.showHidden; draw(); } },
         st.showHidden ? 'Не показывать скрытые варианты' : 'Скрытые варианты: ' + hidden.length + ' (не дешевле варианта получше)') : null,
       st.showHidden ? hidden.map((o) => variantCard(e, st.svc, o)) : null,
@@ -372,4 +405,62 @@ export function createPricesView(app) {
     openModel,
     get model() { return st.model; },
   };
+}
+
+// Своя деталь: у поставщиков её нет или берёшь в другом месте — вписываешь цену детали, приложение считает цену клиенту
+// так же, как для деталей из прайса. Хранится в настройках (и в их копии в таблице), попадает и в файл цен для сайта.
+export function openOwnPart(app, entry, svc, item) {
+  const S = app.pricer.S;
+  const tiers = ORDER[svc];
+  const x = item ? { ...item } : { tier: tiers[0], cost: null, name: '' };
+  const work = workFee(S, svc, entry);
+  const preview = h('div', { class: 'card', style: 'margin-top:16px' });
+  const update = () => {
+    if (!(x.cost > 0)) {
+      fill(preview, h('div', { class: 'small muted', text: 'Впиши цену детали — покажу цену клиенту и заработок.' }));
+      return;
+    }
+    const key = sfKey(svc, x.tier);
+    const sf = key && entry.sf ? entry.sf[key] : null;
+    const cp = clientPrice(S, work, x.cost, sf, riskReserve(S, svc, x.cost));
+    const glue = app.pricer.glueFor(entry.model, svc).total;
+    const earn = Math.round((cp.price - x.cost - glue) * 100) / 100;
+    fill(preview,
+      h('div', { class: 'row' }, h('div', { class: 'grow small muted', text: 'Цена клиенту' }), h('b', { style: 'font-size:24px', text: cp.price + ' р.' })),
+      h('div', { class: 'small muted', style: 'margin-top:4px' }, 'заработок ', h('b', { style: 'color:var(--good)', text: money(earn) }),
+        ' · деталь ', money(x.cost), glue ? ' · проклейка ' + money(glue) : '', ' · работа ', work, ' р.'),
+      cp.smartfix ? h('div', { class: 'tiny faint', style: 'margin-top:4px', text: 'Сверено с SmartFix: у них ' + cp.smartfix + ' р.' }) : null);
+  };
+  const body = h('div', {},
+    h('div', { class: 'small muted', style: 'margin-top:8px', text: entry.model + ' · ' + REPAIR[svc] }),
+    tiers.length > 1 ? field('Какая деталь', select(tiers.map((t) => ({ value: t, label: VAR_APP[t] })), x.tier, (v) => { x.tier = v; update(); })) : null,
+    field('Цена детали, р.', h('input', {
+      class: 'input num', inputmode: 'decimal', value: x.cost ?? '', placeholder: 'сколько платишь за деталь',
+      oninput: (e) => { x.cost = parseNum(e.target.value); update(); },
+    })),
+    field('Где взять, название', h('input', {
+      class: 'input', value: x.name || '', placeholder: 'Kufar, AliExpress, с донора…', autocomplete: 'off',
+      oninput: (e) => { x.name = e.target.value; },
+    })),
+    preview,
+    h('div', { class: 'tiny faint', style: 'margin-top:10px', text: 'Цена клиенту считается по той же формуле, что для деталей из прайса. Свою деталь видно только в этом ремонте этой модели; на сайт она попадёт при следующем «Обновить цены на сайте».' }));
+  update();
+  const save = () => {
+    if (!(x.cost > 0)) { toast('Впиши цену детали'); return; }
+    const rest = (app.settings.ownParts || []).filter((y) => y.id !== x.id);
+    const next = { id: x.id || newId(), model: entry.model, svc, tier: x.tier, cost: x.cost, name: (x.name || '').trim(), date: today() };
+    app.saveSettings({ ownParts: [...rest, next] });
+    sheet.close();
+    toast(item ? 'Своя деталь сохранена' : 'Своя деталь добавлена');
+  };
+  const remove = () => {
+    if (!confirm('Убрать свою деталь «' + (item.name || VAR_APP[item.tier]) + '»?')) return;
+    app.saveSettings({ ownParts: (app.settings.ownParts || []).filter((y) => y.id !== item.id) });
+    sheet.close();
+    toast('Своя деталь убрана');
+  };
+  const sheet = openSheet(item ? 'Своя деталь' : 'Своя деталь · ' + SVC[svc], body, [
+    item ? h('button', { class: 'btn danger', text: 'Убрать', onclick: remove }) : h('button', { class: 'btn', text: 'Отмена', onclick: () => sheet.close() }),
+    h('button', { class: 'btn primary', text: 'Сохранить', onclick: save }),
+  ]);
 }

@@ -19,6 +19,12 @@ export const IN_REPAIR = ['Принят', 'Диагностика', 'Жду за
 const num = (v) => (typeof v === 'number' ? v : (v === null || v === undefined || v === '' ? 0 : Number(String(v).replace(',', '.')) || 0));
 const empty = (v) => v === null || v === undefined || v === '';
 
+// Гарантийный заказ: в таблице номер «Г1», «Г2»… (своя нумерация), ещё не отправленный — с признаком warrantyOrder.
+// (o.warranty — это «Гарантия до» из таблицы, не путать)
+export function isWarranty(o) {
+  return !!o.warrantyOrder || /^\s*Г/i.test(String(o.num ?? ''));
+}
+
 export function monthOf(dateStr) {
   return dateStr ? dateStr.slice(0, 7) : null;
 }
@@ -41,8 +47,9 @@ export function computed(o, warrantyMonths) {
   return { profit, due, warranty, month };
 }
 
+// Гарантийные ремонты считаются, как в таблице (запчасть уходит в минус прибыли), и отдельно: сколько их и во что обошлись
 export function summary(orders, expenses, month, warrantyMonths) {
-  const s = { taken: 0, issued: 0, revenue: 0, profit: 0, expenses: 0, net: 0 };
+  const s = { taken: 0, issued: 0, revenue: 0, profit: 0, expenses: 0, net: 0, warranty: 0, warrantyCost: 0 };
   for (const o of orders) {
     const c = computed(o, warrantyMonths);
     if (monthOf(o.date) === month) s.taken++;
@@ -51,7 +58,13 @@ export function summary(orders, expenses, month, warrantyMonths) {
       s.issued++;
       s.revenue += num(o.price);
     }
-    if (o.status === 'Выдан' || o.status === 'Отказ') s.profit += c.profit || 0;
+    if (o.status === 'Выдан' || o.status === 'Отказ') {
+      s.profit += c.profit || 0;
+      if (isWarranty(o)) {
+        s.warranty++;
+        s.warrantyCost += num(o.part);
+      }
+    }
   }
   for (const e of expenses) if (monthOf(e.date) === month) s.expenses += num(e.sum);
   s.net = s.profit - s.expenses;

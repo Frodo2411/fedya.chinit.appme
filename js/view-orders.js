@@ -1,7 +1,7 @@
 // Экран «Заказы»: журнал из Google Таблицы, форма заказа, статусы.
 
-import { h, fill, icon, money, fmtDate, toast, openSheet, field, select, parseNum } from './ui.js';
-import { ACTIVE, computed } from './orders.js';
+import { h, fill, icon, money, fmtDate, toast, openSheet, field, select, chips, parseNum } from './ui.js';
+import { ACTIVE, computed, isWarranty } from './orders.js';
 import { store, today } from './store.js';
 
 const STATUS_CLASS = {
@@ -9,7 +9,7 @@ const STATUS_CLASS = {
   'Готов': 'ready', 'Выдан': 'done', 'Отказ': 'bad', 'Долгосрок': 'later',
 };
 const RANK = ['Готов', 'Жду запчасть', 'В работе', 'Диагностика', 'Принят', 'Обращение', 'Долгосрок'];
-const EDITABLE = ['date', 'status', 'device', 'model', 'problem', 'done', 'price', 'part', 'prepay', 'source', 'urgent', 'issued', 'refusal', 'client', 'phone', 'address', 'comment'];
+const EDITABLE = ['date', 'status', 'device', 'model', 'problem', 'done', 'price', 'part', 'prepay', 'source', 'urgent', 'issued', 'refusal', 'client', 'phone', 'address', 'comment', 'wfor'];
 
 export function statusBadge(s) {
   return s ? h('span', { class: 'badge st-' + (STATUS_CLASS[s] || 'later'), text: s }) : null;
@@ -40,6 +40,16 @@ export function phoneText(p) {
   return String(p || '');
 }
 
+// Поиск заказа: все слова запроса есть в номере, модели, клиенте, телефоне или описании
+export function matchOrder(o, q) {
+  if (!q) return true;
+  const hay = [o.num, o.model, o.client, o.phone, o.problem, o.done, o.comment, o.device].filter(Boolean).join(' ').toLowerCase().replace(/ё/g, 'е');
+  return q.toLowerCase().replace(/ё/g, 'е').split(/\s+/).filter(Boolean).every((t) => hay.includes(t));
+}
+
+// Номер для сортировки: «Г12» → 12, без номера (ещё не отправлен) — в начало
+const seq = (o) => Number(String(o.num ?? '').replace(/^\s*Г\s*/i, '')) || 1e9;
+
 export function connectCard(app, what) {
   return h('div', { class: 'card', style: 'margin-top:12px' },
     h('h3', { text: 'Подключи Google Таблицу' }),
@@ -56,24 +66,19 @@ export function createOrdersView(app) {
     spellcheck: false, 'aria-label': 'Поиск заказа', oninput: () => { st.q = search.value; drawList(); },
   });
 
-  function matches(o, q) {
-    if (!q) return true;
-    const hay = [o.num, o.model, o.client, o.phone, o.problem, o.done, o.comment, o.device].filter(Boolean).join(' ').toLowerCase().replace(/ё/g, 'е');
-    return q.toLowerCase().replace(/ё/g, 'е').split(/\s+/).filter(Boolean).every((t) => hay.includes(t));
-  }
-
   function inFilter(o, f) {
     if (f === 'active') return ACTIVE.includes(o.status) || !o.status;
     if (f === 'ready') return o.status === 'Готов';
     if (f === 'done') return o.status === 'Выдан';
     if (f === 'refused') return o.status === 'Отказ';
+    if (f === 'warranty') return isWarranty(o);
     return true;
   }
 
   function drawList() {
     const all = app.sheet.orders();
     const q = st.q.trim();
-    const rows = all.filter((o) => inFilter(o, st.filter) && matches(o, q));
+    const rows = all.filter((o) => inFilter(o, st.filter) && matchOrder(o, q));
     rows.sort((a, b) => {
       if (st.filter === 'active') {
         const u = (b.urgent === 'Да') - (a.urgent === 'Да');
@@ -81,7 +86,7 @@ export function createOrdersView(app) {
         const r = RANK.indexOf(a.status) - RANK.indexOf(b.status);
         if (r) return r;
       }
-      return String(b.date || '').localeCompare(String(a.date || '')) || (Number(b.num) || 1e9) - (Number(a.num) || 1e9);
+      return String(b.date || '').localeCompare(String(a.date || '')) || seq(b) - seq(a);
     });
     fill(listBox, rows.length ? h('div', { class: 'list' }, rows.map(orderItem))
       : h('div', { class: 'empty', text: q ? 'Ничего не нашлось.' : 'Здесь пока пусто.' }));
@@ -90,13 +95,17 @@ export function createOrdersView(app) {
   function orderItem(o) {
     const lm = app.sheet.lists.warrantyMonths;
     const c = computed(o, lm);
+    const w = isWarranty(o);
+    // у гарантийного цена обычно 0 — вместо неё значок
+    const showPrice = o.price !== null && o.price !== undefined && o.price !== '' && !(w && Number(o.price) === 0);
     return h('button', { class: 'item order', onclick: () => openOrderForm(app, o) },
       h('div', { class: 'grow' },
         h('div', { class: 'row' }, h('span', { class: 'num', text: o.num ? '№' + o.num : '…' }), h('span', { class: 'model grow', text: o.model || o.device || 'Без модели' }),
-          o.price !== null && o.price !== undefined && o.price !== '' ? h('span', { class: 'price', text: money(o.price) }) : null),
+          w ? h('span', { class: 'badge violet', text: 'гарантия' }) : null,
+          showPrice ? h('span', { class: 'price', text: money(o.price) }) : null),
         h('div', { class: 'row' }, h('div', { class: 'prob grow', text: o.problem || o.done || '' }), statusBadge(o.status)),
         h('div', { class: 'tiny faint', style: 'margin-top:2px' },
-          [fmtDate(o.date, true), o.source, o.urgent === 'Да' ? 'срочно' : null, o.client,
+          [fmtDate(o.date, true), w && o.wfor ? 'по заказу №' + o.wfor : null, o.source, o.urgent === 'Да' ? 'срочно' : null, o.client,
             o.status === 'Выдан' && c.warranty ? 'гарантия до ' + fmtDate(c.warranty) : null].filter(Boolean).join(' · '),
           o.pending ? h('span', { class: 'badge warn', style: 'margin-left:6px', text: 'не отправлено' }) : null)));
   }
@@ -139,7 +148,8 @@ export function createOrdersView(app) {
         h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => s.dropFailed(f.id) })))));
     fill(chipsBox, select([
       { value: 'active', label: 'Активные · ' + count('active') }, { value: 'ready', label: 'Готов · ' + count('ready') },
-      { value: 'done', label: 'Выданы · ' + count('done') }, { value: 'refused', label: 'Отказ · ' + count('refused') }, { value: 'all', label: 'Все · ' + all.length },
+      { value: 'done', label: 'Выданы · ' + count('done') }, { value: 'refused', label: 'Отказ · ' + count('refused') },
+      { value: 'warranty', label: 'Гарантия · ' + count('warranty') }, { value: 'all', label: 'Все · ' + all.length },
     ], st.filter, (v) => { st.filter = v; drawList(); }, { label: 'Какие заказы показать' }));
     drawList();
   }
@@ -149,13 +159,22 @@ export function createOrdersView(app) {
 
 function describeOp(op) {
   const f = op.fields || {};
-  if (op.op === 'addOrder') return 'новый заказ ' + (f.model || f.problem || '');
+  if (op.op === 'addOrder') return (op.warranty ? 'новый гарантийный заказ ' : 'новый заказ ') + (f.model || f.problem || '');
   if (op.op === 'updateOrder') return 'заказ №' + op.num;
   if (op.op === 'addExpense') return 'расход ' + (f.what || '');
   return 'расход';
 }
 
-// Форма заказа. prefill — из экрана «Цены».
+// Гарантия по заказу: клиент и телефон те же, ремонт бесплатный
+export function warrantyPrefill(order) {
+  return {
+    warrantyOrder: true, wfor: order.num, price: 0,
+    client: order.client || '', phone: order.phone || '', address: order.address || '',
+    device: order.device || 'Телефон', model: order.model || '', source: order.source || store.get('lastSource', ''),
+  };
+}
+
+// Форма заказа. prefill — из экрана «Цены» или из заказа, по которому оформляется гарантия (warrantyPrefill).
 export function openOrderForm(app, order, prefill) {
   const lists = app.sheet.lists;
   const isNew = !order;
@@ -163,11 +182,12 @@ export function openOrderForm(app, order, prefill) {
     ? { date: today(), status: 'Обращение', urgent: 'Нет', device: 'Телефон', source: store.get('lastSource', ''), ...prefill }
     : { ...order };
   const orig = { ...o };
+  // цену из «Цен» запоминаем: переключил на гарантию и обратно — она вернётся
+  let paid = isWarranty(o) ? null : o.price;
   const body = h('div');
   const info = h('div', { class: 'small muted', style: 'margin-top:10px' });
   const statusHint = h('div', { class: 'tiny faint', style: 'margin-top:6px' });
   const refusalBox = h('div');
-  const issuedInput = h('input', { class: 'input', type: 'date', value: o.issued || '', oninput: (e) => { o.issued = e.target.value || null; recalc(); } });
 
   const text = (key, label, opts = {}) => field(label, h(opts.area ? 'textarea' : 'input', {
     class: 'input', value: o[key] ?? '', type: opts.area ? null : (opts.type || 'text'), inputmode: opts.inputmode, placeholder: opts.placeholder || '',
@@ -186,51 +206,112 @@ export function openOrderForm(app, order, prefill) {
   }
   fill(refusalBox, field('Если отказ: запчасть', select(['Вернул', 'Осталась у меня'], o.refusal || '', (v) => { o.refusal = v || null; recalc(); }, { empty: '—' })));
 
-  const clientOpen = !!(o.client || o.phone || o.address);
-  body.append(
-    field('Статус', select(lists.statuses, o.status || '', (v) => {
-      o.status = v || null;
-      if (v === 'Выдан' && !o.issued) { o.issued = today(); issuedInput.value = o.issued; }
-      recalc();
-    }, { empty: '—' })),
-    statusHint,
-    refusalBox,
-    h('div', { class: 'grid2' },
-      field('Дата приёма', h('input', { class: 'input', type: 'date', value: o.date || '', oninput: (e) => { o.date = e.target.value || null; recalc(); } })),
-      field('Дата выдачи', issuedInput)),
-    field('Устройство', select(lists.devices, o.device || '', (v) => { o.device = v || null; }, { empty: '—' })),
-    text('model', 'Модель', { placeholder: 'iPhone 13, Redmi Note 8 Pro…' }),
-    text('problem', 'Неисправность', { placeholder: 'Разбит дисплей, замена АКБ…' }),
-    text('done', 'Что сделано'),
-    h('div', { class: 'grid3' },
-      text('price', 'Цена, р.', { inputmode: 'decimal', num: true }),
-      text('part', 'Запчасть, р.', { inputmode: 'decimal', num: true }),
-      text('prepay', 'Предоплата', { inputmode: 'decimal', num: true })),
-    info,
-    field('Источник', select(lists.sources, o.source || '', (v) => { o.source = v || null; }, { empty: '—' })),
-    h('label', { class: 'switch', style: 'margin-top:8px' },
-      h('input', { type: 'checkbox', checked: o.urgent === 'Да', onchange: (e) => { o.urgent = e.target.checked ? 'Да' : 'Нет'; } }), 'Срочно'),
-    h('details', { open: clientOpen },
-      h('summary', { text: 'Клиент (необязательно)' }),
-      text('client', 'Имя'),
-      text('phone', 'Телефон', { type: 'tel', inputmode: 'tel' }),
+  function setWarranty(on) {
+    if (on === isWarranty(o)) return;
+    o.warrantyOrder = on || undefined;
+    if (on) {
+      paid = o.price;
+      o.price = 0;
+    } else {
+      o.price = paid ?? null;
+      o.wfor = null;
+    }
+    sheet.el.querySelector('.sheet-head h3').textContent = on ? 'Гарантия' : 'Новый заказ';
+    draw();
+  }
+
+  // Скрипт таблицы до гарантии нумеровал бы такой заказ как обычный
+  const oldScript = () => isNew && isWarranty(o) && app.sheet.connected && app.sheet.version !== null && app.sheet.version < 2;
+
+  function clientFields(required) {
+    const mark = required ? ' *' : '';
+    return [
+      text('client', 'Имя' + mark),
+      text('phone', 'Телефон' + mark, { type: 'tel', inputmode: 'tel' }),
       o.phone ? h('a', { href: telHref(o.phone), class: 'small', text: 'Позвонить ' + phoneText(o.phone) }) : null,
-      text('address', 'Адрес')),
-    text('comment', 'Комментарий', { area: true }),
-  );
-  recalc();
+      text('address', 'Адрес'),
+    ];
+  }
+
+  function draw() {
+    const w = isWarranty(o);
+    const issuedInput = h('input', { class: 'input', type: 'date', value: o.issued || '', oninput: (e) => { o.issued = e.target.value || null; recalc(); } });
+    fill(body,
+      isNew ? h('div', { style: 'margin-top:8px' }, chips([{ value: 'order', label: 'Заказ' }, { value: 'warranty', label: 'Гарантия' }],
+        w ? 'warranty' : 'order', (v) => setWarranty(v === 'warranty'))) : null,
+      oldScript() ? h('div', { class: 'banner warn', style: 'margin-top:12px' },
+        h('b', { text: 'Обнови скрипт таблицы. ' }), 'Старый скрипт даст гарантийному заказу обычный номер, а не Г1, Г2… ',
+        '«Ещё → Google Таблица» → «Скопировать код скрипта» → вставь в Apps Script вместо старого → «Сохранить» → Развертывание → Управление развертываниями → карандаш → Версия: «Новая версия» → Развернуть.',
+        h('div', { class: 'row wrap', style: 'margin-top:10px' },
+          h('button', { class: 'btn small', text: 'Открыть «Google Таблица»', onclick: () => app.openSheetSetup() }),
+          h('button', { class: 'btn small', text: 'Я обновил, проверить', onclick: async () => { await app.sheet.refresh(); draw(); if (!oldScript()) toast('Скрипт обновлён'); } }))) : null,
+      !isNew && w ? h('div', { class: 'banner', style: 'margin-top:8px' }, h('b', { text: 'Гарантийный ремонт' }), o.wfor ? ' по заказу №' + o.wfor : '') : null,
+      // гарантия: клиент обязателен и идёт первым
+      w ? h('div', {},
+        h('h3', { style: 'margin-top:16px', text: 'Клиент' }),
+        clientFields(true),
+        originPicker(app, o, (x) => {
+          o.wfor = x ? x.num : null;
+          if (x) {
+            o.client = x.client || o.client;
+            o.phone = x.phone || o.phone;
+            o.address = x.address || o.address;
+            if (!o.model) { o.model = x.model || ''; o.device = x.device || o.device; }
+          }
+          draw();
+        }),
+        h('h3', { style: 'margin-top:20px', text: 'Ремонт' })) : null,
+      field('Статус', select(lists.statuses, o.status || '', (v) => {
+        o.status = v || null;
+        if (v === 'Выдан' && !o.issued) { o.issued = today(); issuedInput.value = o.issued; }
+        recalc();
+      }, { empty: '—' })),
+      statusHint,
+      refusalBox,
+      h('div', { class: 'grid2' },
+        field('Дата приёма', h('input', { class: 'input', type: 'date', value: o.date || '', oninput: (e) => { o.date = e.target.value || null; recalc(); } })),
+        field('Дата выдачи', issuedInput)),
+      field('Устройство', select(lists.devices, o.device || '', (v) => { o.device = v || null; }, { empty: '—' })),
+      text('model', 'Модель', { placeholder: 'iPhone 13, Redmi Note 8 Pro…' }),
+      text('problem', 'Неисправность', { placeholder: w ? 'Что случилось: треснула задняя крышка…' : 'Разбит дисплей, замена АКБ…' }),
+      text('done', 'Что сделано'),
+      h('div', { class: 'grid3' },
+        text('price', 'Цена, р.', { inputmode: 'decimal', num: true }),
+        text('part', 'Запчасть, р.', { inputmode: 'decimal', num: true }),
+        text('prepay', 'Предоплата', { inputmode: 'decimal', num: true })),
+      w ? h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'По гарантии клиент не платит: цена 0. Запчасть — твой расход, уйдёт в минус прибыли месяца.' }) : null,
+      info,
+      field('Источник', select(lists.sources, o.source || '', (v) => { o.source = v || null; }, { empty: '—' })),
+      h('label', { class: 'switch', style: 'margin-top:8px' },
+        h('input', { type: 'checkbox', checked: o.urgent === 'Да', onchange: (e) => { o.urgent = e.target.checked ? 'Да' : 'Нет'; } }), 'Срочно'),
+      w ? null : h('details', { open: !!(o.client || o.phone || o.address) },
+        h('summary', { text: 'Клиент (необязательно)' }),
+        clientFields(false)),
+      text('comment', 'Комментарий', { area: true }),
+      // по выданному заказу можно сразу оформить гарантию
+      !isNew && !w && o.num ? h('button', {
+        class: 'btn small block', style: 'margin-top:16px', text: 'Гарантия по этому заказу',
+        onclick: () => { sheet.close(); openOrderForm(app, null, warrantyPrefill(order)); },
+      }) : null,
+    );
+    recalc();
+  }
 
   const save = h('button', {
     class: 'btn primary', text: isNew ? 'Записать' : 'Сохранить',
     onclick: () => {
+      const w = isWarranty(o);
       if (o.phone) o.phone = normPhone(o.phone);
+      if (w && (!String(o.client || '').trim() || !String(o.phone || '').trim())) { toast('Для гарантии заполни имя и телефон клиента'); return; }
+      if (w && String(o.phone).replace(/\D/g, '').length < 7) { toast('Проверь телефон клиента'); return; }
+      if (oldScript()) { toast('Сначала обнови скрипт таблицы: иначе заказ получит обычный номер', 4000); return; }
       if (isNew) {
         const fields = {};
         for (const k of EDITABLE) if (o[k] !== null && o[k] !== undefined && o[k] !== '') fields[k] = o[k];
         if (!fields.model && !fields.problem && !fields.client) { toast('Заполни модель или неисправность'); return; }
         if (fields.source) store.set('lastSource', fields.source);
-        app.sheet.add('addOrder', fields);
-        toast('Заказ записан' + (app.sheet.connected ? '' : ' в очередь'));
+        app.sheet.add('addOrder', fields, w ? { warranty: true } : undefined);
+        toast((w ? 'Гарантийный заказ записан' : 'Заказ записан') + (app.sheet.connected ? '' : ' в очередь'));
       } else {
         const changed = {};
         for (const k of EDITABLE) if ((o[k] ?? null) !== (orig[k] ?? null)) changed[k] = o[k] ?? '';
@@ -242,6 +323,45 @@ export function openOrderForm(app, order, prefill) {
       app.redraw();
     },
   });
-  const sheet = openSheet(isNew ? 'Новый заказ' : 'Заказ №' + (order.num || '…'), body,
+  const w0 = isWarranty(o);
+  const sheet = openSheet(isNew ? (w0 ? 'Гарантия' : 'Новый заказ') : (w0 ? 'Гарантия №' : 'Заказ №') + (order.num || '…'), body,
     [h('button', { class: 'btn', text: 'Отмена', onclick: () => sheet.close() }), save]);
+  draw();
+}
+
+// По какому заказу гарантия: поиск по номеру, клиенту, телефону, модели. Без запроса — последние выданные.
+// onPick(order) — выбран заказ, onPick(null) — убрать
+function originPicker(app, o, onPick) {
+  const lists = app.sheet.lists;
+  const all = app.sheet.orders().filter((x) => x.num && !isWarranty(x));
+  const describe = (x) => {
+    const c = computed(x, lists.warrantyMonths);
+    const ended = c.warranty && c.warranty < today();
+    return h('span', {},
+      [x.model || x.device, x.client, x.problem, x.issued ? 'выдан ' + fmtDate(x.issued) : null].filter(Boolean).join(' · '),
+      c.warranty ? h('span', { style: ended ? 'color:var(--bad)' : null, text: (ended ? ' · гарантия закончилась ' : ' · гарантия до ') + fmtDate(c.warranty) }) : null);
+  };
+  if (o.wfor) {
+    const x = all.find((y) => String(y.num) === String(o.wfor));
+    return h('div', { class: 'card', style: 'margin-top:14px' },
+      h('div', { class: 'row' }, h('b', { class: 'grow', text: 'По заказу №' + o.wfor }),
+        h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => onPick(null) })),
+      x ? h('div', { class: 'small muted', style: 'margin-top:4px' }, describe(x)) : null);
+  }
+  const results = h('div');
+  const show = (q) => {
+    const rows = q.trim()
+      ? all.filter((x) => matchOrder(x, q.trim())).sort((a, b) => seq(b) - seq(a)).slice(0, 6)
+      : all.filter((x) => x.status === 'Выдан').sort((a, b) => String(b.issued || b.date || '').localeCompare(String(a.issued || a.date || '')) || seq(b) - seq(a)).slice(0, 5);
+    fill(results, rows.length
+      ? h('div', { class: 'list', style: 'margin-top:8px' }, rows.map((x) => h('button', { type: 'button', class: 'item', onclick: () => onPick(x) },
+        h('div', { class: 'grow' }, h('div', { class: 't', text: '№' + x.num }), h('div', { class: 's' }, describe(x))))))
+      : h('div', { class: 'tiny faint', style: 'margin-top:8px', text: q.trim() ? 'Такого заказа нет. Можно записать гарантию и без него.' : '' }));
+  };
+  const input = h('input', {
+    class: 'input', type: 'search', placeholder: 'Номер, имя, телефон или модель', autocomplete: 'off', autocorrect: 'off', spellcheck: false,
+    oninput: () => show(input.value),
+  });
+  show('');
+  return h('div', {}, field('По какому заказу (если есть в журнале)', input), results);
 }

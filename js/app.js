@@ -4,7 +4,7 @@
 import { h, fill, icon, toast } from './ui.js';
 import { open, seal, deriveKeyBytes, fromB64, toB64 } from './crypto.js';
 import { decode, encode } from './data.js';
-import { Pricer } from './engine.js';
+import { Pricer, withOwnParts } from './engine.js';
 import { ModelSearch } from './search.js';
 import { store } from './store.js';
 import { SheetSync } from './sheet.js';
@@ -13,7 +13,8 @@ import { createOrdersView, openOrderForm } from './view-orders.js';
 import { createSummaryView } from './view-summary.js';
 import { createMoreView, openSheetSetup } from './view-more.js';
 
-const DEFAULT_SETTINGS = { clientFooter: 'Гарантия на работу 4 месяца.', clientHints: true, supplierNotes: {}, formula: null, ts: 0 };
+// ownParts — свои детали (цену вписал сам), см. withOwnParts в engine.js
+const DEFAULT_SETTINGS = { clientFooter: 'Гарантия на работу 4 месяца.', clientHints: true, supplierNotes: {}, formula: null, ownParts: [], ts: 0 };
 // Гарантия стала 4 месяца: прежнюю строку по умолчанию заменяем, свою строку мастера не трогаем
 const OLD_FOOTER = 'Гарантия на работу 3 месяца.';
 function withDefaults(s) {
@@ -37,8 +38,13 @@ const app = {
 
   setData(d) {
     this.data = d;
-    this.pricer = new Pricer(d, this.settings.formula);
+    this.pricer = this.makePricer();
     this.search = new ModelSearch(d.models);
+  },
+
+  // Расчёт по прайсам и своим деталям из настроек
+  makePricer() {
+    return new Pricer(withOwnParts(this.data, this.settings.ownParts), this.settings.formula);
   },
 
   redraw() {
@@ -52,7 +58,7 @@ const app = {
     if (patch.formula === null) next.formula = null;
     this.settings = next;
     store.set('settings', next);
-    if ('formula' in patch) this.pricer = new Pricer(this.data, next.formula);
+    if ('formula' in patch || 'ownParts' in patch) this.pricer = this.makePricer();
     if (opts.redraw !== false) this.redraw();
     backupSettings();
   },
@@ -154,7 +160,7 @@ const app = {
 
 // Для комментария заказа: «поставщик — деталь цена р.» и «; проклейка: …»
 function supName(k) {
-  return (app.data.suppliers[k] || {}).name || k;
+  return (app.pricer.data.suppliers[k] || {}).name || k;
 }
 
 function partNote(p) {
@@ -205,7 +211,7 @@ async function syncBackups() {
       const remote = await open(JSON.parse(rs.value), app.key);
       app.settings = withDefaults(remote);
       store.set('settings', app.settings);
-      app.pricer = new Pricer(app.data, app.settings.formula);
+      app.pricer = app.makePricer();
       app.redraw();
     } else if (app.settings.ts && (!rs || rs.ts < app.settings.ts)) {
       backupSettings();

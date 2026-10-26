@@ -15,13 +15,19 @@ const ORDER_COLS = {
   device: 'Устройство', model: 'Модель', problem: 'Неисправность', done: 'Что сделано', price: 'Цена для клиента',
   part: 'Запчасть', profit: 'Прибыль', prepay: 'Предоплата', due: 'К оплате', urgent: 'Срочно', status: 'Статус',
   issued: 'Дата выдачи', warranty: 'Гарантия до', refusal: 'Если отказ', comment: 'Комментарий', month: 'Месяц',
+  wfor: 'Гарантия по №',
 };
 const EXPENSE_COLS = { date: 'Дата', what: 'Что купил', cat: 'Категория', sum: 'Сумма', where: 'Где купил', comment: 'Комментарий' };
 const DATE_KEYS = ['date', 'issued', 'warranty', 'month'];
-const NUMBER_KEYS = ['num', 'price', 'part', 'profit', 'prepay', 'due', 'sum'];
+const NUMBER_KEYS = ['num', 'price', 'part', 'profit', 'prepay', 'due', 'sum', 'wfor'];
 const TEXT_KEYS = ['client', 'address', 'source', 'device', 'model', 'problem', 'done', 'urgent', 'status', 'refusal', 'comment', 'what', 'cat', 'where'];
 // Эти столбцы считает сама таблица
 const FORMULA_KEYS = ['profit', 'due', 'warranty', 'month'];
+// Этих столбцов в старой таблице может не быть: скрипт добавит их в конец, когда понадобятся
+const OPTIONAL_COLS = ['wfor'];
+// Гарантийные заказы нумеруются отдельно: Г1, Г2…
+const WARRANTY_PREFIX = 'Г';
+const VERSION = 2;
 
 function doGet(e) {
   // Просто открыть адрес в браузере — проверка, что скрипт развёрнут правильно. Данных без ключа не отдаём.
@@ -53,8 +59,8 @@ function respond_(req) {
 }
 
 const API_ = {
-  ping: function () { return { title: book_().getName(), lists: lists_(), version: 1 }; },
-  list: function () { return { title: book_().getName(), orders: readOrders_(), expenses: readExpenses_(), lists: lists_() }; },
+  ping: function () { return { title: book_().getName(), lists: lists_(), version: VERSION }; },
+  list: function () { return { title: book_().getName(), orders: readOrders_(), expenses: readExpenses_(), lists: lists_(), version: VERSION }; },
   batch: function (req) { return withLock_(function () { return (req.ops || []).map(runOp_); }); },
   kvGet: function (req) { return kvGet_(req.name); },
   kvSet: function (req) { return withLock_(function () { return kvSet_(req.name, req.value, req.ts); }); },
@@ -182,7 +188,7 @@ function runOp_(op) {
   };
   let res;
   try {
-    if (op.op === 'addOrder') res = addRow_(SHEET_ORDERS, ORDER_COLS, op.fields, isOrder_, true, pend[op.id], reserve);
+    if (op.op === 'addOrder') res = addRow_(SHEET_ORDERS, ORDER_COLS, op.fields, isOrder_, true, pend[op.id], reserve, op.warranty === true);
     else if (op.op === 'updateOrder') res = updateOrder_(op);
     else if (op.op === 'addExpense') res = addRow_(SHEET_EXPENSES, EXPENSE_COLS, op.fields, isExpense_, false, pend[op.id], reserve);
     else if (op.op === 'updateExpense') res = updateExpense_(op);
@@ -203,6 +209,29 @@ function runOp_(op) {
     }
   }
   return res;
+}
+
+// Номер гарантийного заказа «Г12» → 12, обычный номер → null
+function warrantyNum_(v) {
+  const m = /^\s*Г\s*(\d+)\s*$/i.exec(String(v === null || v === undefined ? '' : v));
+  return m ? Number(m[1]) : null;
+}
+
+// Номера сравниваем так: 12 и «12» — один заказ, «Г12» и «г 12» — один, 12 и «Г12» — разные
+function numKey_(v) {
+  const w = warrantyNum_(v);
+  if (w !== null) return WARRANTY_PREFIX + w;
+  const s = String(v === null || v === undefined ? '' : v).trim();
+  return s !== '' && !isNaN(Number(s)) ? String(Number(s)) : s;
+}
+
+function ensureCols_(sh, cols, spec, fields) {
+  Object.keys(fields || {}).forEach(function (k) {
+    if (cols[k] || !spec[k] || OPTIONAL_COLS.indexOf(k) < 0) return;
+    const c = sh.getLastColumn() + 1;
+    sh.getRange(1, c).setValue(spec[k]);
+    cols[k] = c;
+  });
 }
 
 function writeFields_(sh, row, cols, fields) {
@@ -231,10 +260,11 @@ function fillFormulas_(sh, row, cols) {
   });
 }
 
-function addRow_(name, spec, fields, isRow, numbered, reserved, reserve) {
+function addRow_(name, spec, fields, isRow, numbered, reserved, reserve, warranty) {
   const sh = sheet_(name);
   const cols = columns_(sh, spec);
   const f = Object.assign({}, fields);
+  ensureCols_(sh, cols, spec, f);
   let target = null;
   if (reserved) {
     target = reserved[0];
@@ -242,12 +272,15 @@ function addRow_(name, spec, fields, isRow, numbered, reserved, reserve) {
   } else {
     const rows = readRows_(sh, cols, function () { return true; });
     let maxNum = 0;
+    let maxWarranty = 0;
     rows.forEach(function (o) {
       if (numbered && typeof o.num === 'number' && o.num > maxNum) maxNum = o.num;
+      const w = numbered ? warrantyNum_(o.num) : null;
+      if (w !== null && w > maxWarranty) maxWarranty = w;
       if (target === null && !isRow(o)) target = o.row;
     });
     if (target === null) target = Math.max(sh.getLastRow(), 1) + 1;
-    if (numbered && (f.num === undefined || f.num === null || f.num === '')) f.num = maxNum + 1;
+    if (numbered && (f.num === undefined || f.num === null || f.num === '')) f.num = warranty ? WARRANTY_PREFIX + (maxWarranty + 1) : maxNum + 1;
     if (reserve) reserve(target, numbered ? f.num : null);
   }
   writeFields_(sh, target, cols, f);
@@ -259,13 +292,15 @@ function updateOrder_(op) {
   const sh = sheet_(SHEET_ORDERS);
   const cols = columns_(sh, ORDER_COLS);
   if (op.num === null || op.num === undefined || op.num === '') throw new Error('У заказа нет номера: обнови список и попробуй ещё раз');
+  const key = numKey_(op.num);
   let row = null;
-  if (op.row && cols.num && Number(sh.getRange(op.row, cols.num).getValue()) === Number(op.num)) row = op.row;
+  if (op.row && cols.num && numKey_(sh.getRange(op.row, cols.num).getValue()) === key) row = op.row;
   if (row === null) {
-    const found = readRows_(sh, cols, isOrder_).filter(function (o) { return Number(o.num) === Number(op.num); });
+    const found = readRows_(sh, cols, isOrder_).filter(function (o) { return numKey_(o.num) === key; });
     if (!found.length) throw new Error('Не нашёл заказ №' + op.num);
     row = found[0].row;
   }
+  ensureCols_(sh, cols, ORDER_COLS, op.fields);
   writeFields_(sh, row, cols, op.fields);
   return { row: row, num: op.num };
 }

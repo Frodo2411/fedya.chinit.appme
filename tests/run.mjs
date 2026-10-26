@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const imp = (f) => import(path.join(ROOT, f));
-const { Pricer, clientPrice, riskReserve, comboTotal, workFee, pyRound2, settingsWithDefaults, siteFile, ceilTo } = await imp('js/engine.js');
+const { Pricer, clientPrice, riskReserve, comboTotal, workFee, pyRound2, settingsWithDefaults, siteFile, ceilTo, withOwnParts, OWN } = await imp('js/engine.js');
 const RULES = await imp('js/rules.js');
 const { mapRow, siteIndex, items, tier, lineKey, kindOf, networkOk, BRAND_FAM } = RULES;
 const { ModelSearch } = await imp('js/search.js');
@@ -16,7 +16,7 @@ const { seal, open, deriveKeyBytes, randomBytes, fromB64 } = await imp('js/crypt
 const { decode, encode } = await imp('js/data.js');
 const { readXlsx } = await imp('js/xlsx.js');
 const { detect, buildImport, clientChanges, normStock } = await imp('js/importer.js');
-const { computed, summary, addMonths } = await imp('js/orders.js');
+const { computed, summary, addMonths, isWarranty } = await imp('js/orders.js');
 
 let passed = 0;
 const failures = [];
@@ -111,6 +111,31 @@ await test('выбор детали: наличие, брак, самый дор
   const c14 = pr.model('iPhone 14').services.c.opts[0];
   assert.equal(c14.cost, 41);
   assert.equal(c14.colours, 2);
+});
+
+await test('своя деталь: считается как из прайса, без правил про лазер и брак, попадает на сайт', () => {
+  const own = [
+    { id: 'o1', model: 'iPhone 11', svc: 'c', tier: 'copy', cost: 20, name: 'стекло с лазером, б/у пресс', date: '2026-10-26' },
+    { id: 'o2', model: 'Samsung Galaxy A52', svc: 'c', tier: 'orig_used', cost: 30, name: '', date: '2026-10-26' },
+    { id: 'o3', model: 'Samsung Galaxy A52', svc: 'd', tier: 'copy_oled', cost: 0, name: 'ноль не считаем', date: '2026-10-26' },
+  ];
+  const data = withOwnParts(DATA, own);
+  assert.equal(DATA.parts.length, 10, 'исходные данные не меняются');
+  assert.equal(withOwnParts(DATA, []), DATA);
+  const pr = new Pricer(data, { year: 2026 });
+  const c11 = pr.model('iPhone 11').services.c.opts;
+  assert.equal(c11.length, 1, 'iPhone 11: своя крышка видна, хоть модель с лазером');
+  assert.deepEqual([c11[0].sup, c11[0].cost, c11[0].ownId, c11[0].part], [OWN, 20, 'o1', 'стекло с лазером, б/у пресс']);
+  assert.equal(c11[0].price, clientPrice(pr.S, workFee(pr.S, 'c', MODELS[0]), 20, null).price);
+  assert.equal(pr.model('iPhone 11').services.d.opts[0].ownId, null);
+  const a52 = pr.model('Samsung Galaxy A52').services;
+  assert.equal(a52.c.opts[0].tier, 'orig_used');
+  assert.equal(a52.c.opts[0].part, 'цена вписана вручную');
+  assert.equal(a52.d.opts.length, 0, 'деталь за 0 р. не берём');
+  assert.equal(pr.data.suppliers[OWN].name, 'Своя деталь');
+  const text = siteFile(pr, 'Октябрь 2026');
+  assert.ok(text.includes('"c":[["copy",' + c11[0].price + ']]'));
+  assert.ok(!text.includes('Своя деталь') && !text.includes('пресс'));
 });
 
 await test('файл для сайта: только цены клиенту', () => {
@@ -608,7 +633,21 @@ await test('заказы: формулы таблицы', () => {
   assert.equal(computed({ price: null, part: 40, status: 'Отказ', refusal: 'Вернул' }, 3).profit, 0);
   assert.equal(computed({ price: null, part: 40, status: 'Отказ', refusal: 'Осталась у меня' }, 3).profit, -40);
   const s = summary([{ date: '2026-10-01', status: 'Выдан', price: 100, part: 40, issued: '2026-10-02' }], [{ date: '2026-10-03', sum: 15 }], '2026-10', 3);
-  assert.deepEqual(s, { taken: 1, issued: 1, revenue: 100, profit: 60, expenses: 15, net: 45 });
+  assert.deepEqual(s, { taken: 1, issued: 1, revenue: 100, profit: 60, expenses: 15, net: 45, warranty: 0, warrantyCost: 0 });
+});
+
+await test('гарантийные заказы: признак и итоги', () => {
+  assert.equal(isWarranty({ num: 'Г3' }), true);
+  assert.equal(isWarranty({ num: 'г 3' }), true);
+  assert.equal(isWarranty({ num: 3, warranty: '2027-01-01' }), false, '«Гарантия до» — не гарантийный заказ');
+  assert.equal(isWarranty({ num: null, warrantyOrder: true }), true, 'ещё не отправлен');
+  const orders = [
+    { num: 5, date: '2026-10-01', status: 'Выдан', price: 100, part: 40, issued: '2026-10-02' },
+    { num: 'Г1', date: '2026-10-20', status: 'Выдан', price: 0, part: 25, issued: '2026-10-21' },
+    { num: 'Г2', date: '2026-10-22', status: 'В работе', price: 0, part: 30 },
+  ];
+  const s = summary(orders, [], '2026-10', 4);
+  assert.deepEqual(s, { taken: 3, issued: 2, revenue: 100, profit: 35, expenses: 0, net: 35, warranty: 1, warrantyCost: 25 });
 });
 
 // --- Скрипт таблицы на макете
@@ -673,6 +712,32 @@ await test('Apps Script: ключ, список, запись, повтор, ф�
   gas.post({ op: 'kvSet', key: 'test-key', name: 'p', value: '+abc' + 'q'.repeat(50000), ts: 6 });
   assert.equal(gas.post({ op: 'kvGet', key: 'test-key', name: 'p' }).data.value.slice(0, 4), '+abc');
   assert.ok(fr > 0);
+  // гарантийные заказы: своя нумерация Г1, Г2…, обычная не сбивается; столбец «Гарантия по №» появляется сам
+  assert.equal(gas.post({ op: 'list', key: 'test-key' }).data.version, 2);
+  const nextNum = Math.max(...gas.post({ op: 'list', key: 'test-key' }).data.orders.map((o) => (typeof o.num === 'number' ? o.num : 0))) + 1;
+  const wr = gas.post({ op: 'batch', key: 'test-key', ops: [
+    { id: 'w1', op: 'addOrder', warranty: true, fields: { model: 'iPhone 11', client: 'Иван', phone: '291112233', wfor: 2, price: 0, part: 25 } },
+    { id: 'w2', op: 'addOrder', fields: { model: 'обычный' } },
+    { id: 'w3', op: 'addOrder', warranty: true, fields: { model: 'Redmi', client: 'Оля', phone: '293334455' } },
+  ] }).data;
+  assert.deepEqual(wr.map((r) => r.num), ['Г1', nextNum, 'Г2']);
+  const head2 = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  assert.equal(head2[head2.length - 1], 'Гарантия по №', 'столбец добавлен в конец');
+  assert.equal(sh.getRange(wr[0].row, head2.length).getValue(), 2);
+  const wl = gas.post({ op: 'list', key: 'test-key' }).data.orders;
+  const g1 = wl.find((o) => o.num === 'Г1');
+  assert.deepEqual([g1.wfor, g1.client, g1.price], [2, 'Иван', 0]);
+  const wu = gas.post({ op: 'batch', key: 'test-key', ops: [
+    { id: 'w4', op: 'updateOrder', num: 'Г1', row: wr[2].row, fields: { status: 'Выдан' } },
+    { id: 'w5', op: 'updateOrder', num: 'г 2', fields: { status: 'Готов' } },
+    { id: 'w6', op: 'updateOrder', num: 'Г9', fields: { status: 'Готов' } },
+  ] }).data;
+  assert.deepEqual(wu.map((r) => r.row), [wr[0].row, wr[2].row, undefined], 'правка по номеру Г, а не по строке');
+  assert.equal(wu[2].ok, false);
+  assert.equal(sh.getRange(wr[0].row, 17).getValue(), 'Выдан');
+  assert.equal(sh.getRange(2, 17).getValue(), 'Принят', 'заказ №1 не тронут правкой Г1');
+  const wrep = gas.post({ op: 'batch', key: 'test-key', ops: [{ id: 'w3', op: 'addOrder', warranty: true, fields: { model: 'Redmi' } }] }).data[0];
+  assert.deepEqual([wrep.repeat, wrep.num], [true, 'Г2'], 'повтор гарантийного не создаёт Г3');
   // заглушка ключа не работает
   const raw = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, '__KEY__');
   assert.equal(raw.post({ op: 'ping', key: '__KEY__' }).ok, false);
@@ -718,6 +783,24 @@ await test('очередь приложения: правка заказа во 
   const ex = book.getSheetByName('Расходы');
   assert.deepEqual([ex.getRange(2, 2).getValue(), ex.getRange(2, 4).getValue()], ['Флюс RMA', 12]);
   assert.equal(s.failed.length, 0);
+  // гарантийный: в очереди с признаком, в таблице — номер Г1; правка до отправки уходит в ту же строку
+  offline = true;
+  s.add('addOrder', { model: 'iPhone 11', client: 'Иван', phone: '375291112233', price: 0, wfor: 1 }, { warranty: true });
+  const wp = s.orders().find((o) => o.pendingId);
+  assert.equal(isWarranty(wp), true);
+  s.update('updateOrder', wp, { part: 25 });
+  offline = false;
+  s.again = true;
+  while (s.outbox.length || s.running) await (s.running || s.flush());
+  assert.equal(s.failed.length, 0);
+  const g = s.orders().find((o) => o.num === 'Г1');
+  assert.ok(g && isWarranty(g), 'после отправки номер Г1');
+  assert.equal(s.version, 2);
+  assert.deepEqual([sh.getRange(g.row, 1).getValue(), sh.getRange(g.row, 3).getValue()], ['Г1', 'iPhone 11']);
+  s.update('updateOrder', g, { status: 'Выдан' });
+  while (s.outbox.length || s.running) await (s.running || s.flush());
+  assert.equal(sh.getRange(g.row, 5).getValue(), 'Выдан');
+  assert.equal(sh.getRange(1, 1).getValue(), '№');
 });
 
 // --- Настоящий прайс: только с паролем
