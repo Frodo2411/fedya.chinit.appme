@@ -19,10 +19,10 @@ export const IN_REPAIR = ['Принят', 'Диагностика', 'Жду за
 const num = (v) => (typeof v === 'number' ? v : (v === null || v === undefined || v === '' ? 0 : Number(String(v).replace(',', '.')) || 0));
 const empty = (v) => v === null || v === undefined || v === '';
 
-// Гарантийный заказ: в таблице номер «Г1», «Г2»… (своя нумерация), ещё не отправленный — с признаком warrantyOrder.
-// (o.warranty — это «Гарантия до» из таблицы, не путать)
+// Гарантийный заказ: в таблице номер «Г1», «Г2»… (своя нумерация), ещё не отправленный — с признаком warrantyOrder,
+// записанный старым скриптом с обычным номером — по «Гарантия по №». (o.warranty — это «Гарантия до», не путать)
 export function isWarranty(o) {
-  return !!o.warrantyOrder || /^\s*Г/i.test(String(o.num ?? ''));
+  return !!o.warrantyOrder || /^\s*Г/i.test(String(o.num ?? '')) || (o.wfor !== null && o.wfor !== undefined && o.wfor !== '');
 }
 
 export function monthOf(dateStr) {

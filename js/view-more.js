@@ -7,9 +7,10 @@ import { openImport } from './import-flow.js';
 import { withRate, oddRate } from './importer.js';
 import { monthTitle } from './ui.js';
 import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteKey } from './site-publish.js';
+import { SCRIPT_VERSION } from './sheet.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-10-26.6';
+export const APP_VERSION = '2026-10-27.1';
 
 export function createMoreView(app) {
   const root = h('div');
@@ -294,6 +295,10 @@ function openFormula(app) {
 export function openSheetSetup(app) {
   const urlInput = h('input', { class: 'input', type: 'url', placeholder: 'https://script.google.com/macros/s/…/exec', value: (app.sheet.cfg && app.sheet.cfg.url) || '', autocomplete: 'off', autocapitalize: 'off', spellcheck: false });
   const status = h('div', { class: 'small', style: 'margin-top:10px;min-height:22px' });
+  // Что подключено сейчас: версия скрипта и конец адреса — на телефоне и компьютере должны совпадать
+  const urlTail = (u) => '…' + String(u || '').replace(/\/exec\/?$/, '').slice(-8) + '/exec';
+  const versionLine = (v) => (v === null || v === undefined ? '' : ' · скрипт версии ' + v + (v < SCRIPT_VERSION ? ' — старый, нужна ' + SCRIPT_VERSION + ': обнови код и разверни новую версию' : ''));
+  if (app.sheet.connected) fill(status, h('span', { style: app.sheet.version !== null && app.sheet.version < SCRIPT_VERSION ? 'color:var(--accent)' : null, text: 'Сейчас подключено: адрес ' + urlTail(app.sheet.cfg.url) + versionLine(app.sheet.version) }));
   // Код загружаем заранее: на айфоне копировать можно только сразу в обработчике нажатия, без ожидания сети
   let code = null;
   const copyBtn = h('button', { class: 'btn small primary', text: 'Загружаю код…', disabled: true });
@@ -312,7 +317,7 @@ export function openSheetSetup(app) {
       const info = await app.sheet.call('ping', {}, cfg);
       app.sheet.configure(cfg);
       await app.sheet.load();
-      status.textContent = 'Подключено: ' + info.title;
+      fill(status, h('span', { style: (info.version || 1) < SCRIPT_VERSION ? 'color:var(--accent)' : null, text: 'Подключено: ' + info.title + ' · адрес ' + urlTail(url) + versionLine(info.version || 1) }));
       toast('Таблица подключена');
       app.afterSheetConnected();
       app.redraw();
@@ -344,7 +349,7 @@ export function openSheetSetup(app) {
       h('li', {}, 'Скопируй ', h('b', { text: 'URL веб-приложения' }), ' (заканчивается на /exec) и вставь сюда. На телефоне вставь тот же адрес: пришли его себе в мессенджер.')),
     field('Адрес веб-приложения', urlInput),
     status,
-    h('div', { class: 'tiny faint', style: 'margin-top:14px', text: 'Без ключа скрипт ничего не отдаёт. Данные таблицы идут напрямую между телефоном и Google, на GitHub ничего не попадает. Если поменяешь код скрипта, разверни новую версию: Развертывание → Управление развертываниями → изменить → Новая версия.' }),
+    h('div', { class: 'tiny faint', style: 'margin-top:14px', text: 'Без ключа скрипт ничего не отдаёт. Данные таблицы идут напрямую между телефоном и Google, на GitHub ничего не попадает. Если поменяешь код скрипта, разверни новую версию: Развертывание → Управление развертываниями → изменить → Новая версия (не «Новое развертывание» — у него будет другой адрес). На телефоне и на компьютере адрес скрипта должен быть один и тот же: сравни концовку адреса выше.' }),
     app.sheet.connected ? h('button', { class: 'btn small danger', style: 'margin-top:16px', text: 'Отключить таблицу на этом телефоне', onclick: () => { if (confirm('Отключить таблицу на этом телефоне? В самой таблице ничего не удалится.')) { app.sheet.configure(null); sheet.close(); app.redraw(); } } }) : null,
   );
   const sheet = openSheet('Google Таблица', body, [

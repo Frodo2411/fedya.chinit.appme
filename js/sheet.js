@@ -6,6 +6,8 @@ import { store, newId } from './store.js';
 import { DEFAULT_LISTS } from './orders.js';
 
 const blank = (v) => (v === '' || v === undefined ? null : v);
+// Версия скрипта таблицы, которая нужна приложению (apps-script/Code.gs, VERSION): 3 — гарантийные заказы Г1, Г2…
+export const SCRIPT_VERSION = 3;
 
 export class SheetSync {
   constructor(onChange) {
@@ -29,7 +31,7 @@ export class SheetSync {
     return { ...DEFAULT_LISTS, ...((this.cache && this.cache.lists) || {}) };
   }
 
-  // Версия скрипта таблицы: со 2-й он нумерует гарантийные заказы отдельно (Г1, Г2…). null — список ещё не загружен
+  // Версия скрипта таблицы: с 3-й он нумерует гарантийные заказы отдельно (Г1, Г2…) и при формуле в «№». null — список ещё не загружен
   get version() {
     return this.cache ? this.cache.version || 1 : null;
   }

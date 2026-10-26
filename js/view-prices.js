@@ -5,6 +5,7 @@ import { SERVICES, SITE_SERVICES, ORDER, OWN, clientPrice, riskReserve, comboTot
 import { store, newId, today } from './store.js';
 import { telHref } from './view-orders.js';
 import { cartQty } from './cart.js';
+import { partNotes } from './part-notes.js';
 
 // Заметка «как заказать»: @бот → Telegram, адрес сайта и телефон — тоже нажимаются
 export function linkify(text) {
@@ -338,12 +339,13 @@ export function createPricesView(app) {
       h('span', { class: 'pname', text: p.part }),
       !p.override && o.colours > 1 ? h('span', { class: 'tiny faint', text: 'Цветов: ' + o.colours + ', цена по самому дорогому' }) : null),
       siteButton(p.sup, p.part),
+      notesBlock(partNotes(p.part, svc, entry.model, o.tier)),
       o.ownId && !p.override ? ownLine(entry, svc, o.ownId) : null,
       note ? h('div', { class: 'small muted', style: 'margin-top:8px' }, 'Как заказать: ', linkify(note)) : null,
       glue.items.map((g) => glueRow(g, entry.model)),
       o.alt && !p.override ? h('div', { class: 'alt' }, 'Второй поставщик: ', h('b', { text: supName(o.alt.sup) + ' — ' + money(o.alt.cost) }), ' ', stockBadge(o.alt.sup, o.alt.stock),
         siteButton(o.alt.sup, o.alt.part, true),
-        h('div', { class: 'tiny faint break', text: o.alt.part })) : null,
+        h('div', { class: 'tiny faint break', text: o.alt.part }), notesTags(partNotes(o.alt.part, svc, entry.model, o.tier))) : null,
       h('div', { class: 'sfline', text: sfText }),
       o.hidden ? h('div', { class: 'tiny', style: 'color:var(--accent);margin-top:6px', text: 'Скрыт: не дешевле варианта получше' }) : null,
       h('div', { class: 'actions wrap' },
@@ -365,11 +367,22 @@ export function createPricesView(app) {
           return h('div', { class: 'other' },
             h('div', { class: 'grow' },
               h('div', { class: 'small' }, h('b', { text: supName(r.sup) + ' · ' + money(r.cost) }), ' ', stockBadge(r.sup, r.stock)),
-              h('div', { class: 'tiny muted break', text: r.name })),
+              h('div', { class: 'tiny muted break', text: r.name }),
+              notesTags(partNotes(r.name, svc, entry.model, r.tier))),
             chosen ? h('span', { class: 'small on', text: 'выбрана' })
               : h('button', { class: 'btn small', text: 'Выбрать', onclick: () => { st.overrides.set(key, r); draw(); } }));
         })) : null);
     return card;
+  }
+
+  // Что значат слова в названии детали (для мастера): в карточке — с пояснением, в «Все детали» — метками
+  function notesBlock(list) {
+    if (!list.length) return null;
+    return h('div', { class: 'pnotes' }, list.map((x) => h('div', { class: 'pnote' + (x.warn ? ' warn' : '') }, h('b', { text: x.tag }), ' — ' + x.text)));
+  }
+
+  function notesTags(list) {
+    return list.length ? h('div', { class: 'ptags' }, list.map((x) => h('span', { class: 'ptag' + (x.warn ? ' warn' : ''), title: x.text, text: x.tag }))) : null;
   }
 
   // Своя деталь в карточке: когда вписана и кнопка «Изменить»

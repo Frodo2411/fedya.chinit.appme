@@ -641,6 +641,7 @@ await test('гарантийные заказы: признак и итоги', 
   assert.equal(isWarranty({ num: 'г 3' }), true);
   assert.equal(isWarranty({ num: 3, warranty: '2027-01-01' }), false, '«Гарантия до» — не гарантийный заказ');
   assert.equal(isWarranty({ num: null, warrantyOrder: true }), true, 'ещё не отправлен');
+  assert.equal(isWarranty({ num: 66, wfor: 58 }), true, 'записан старым скриптом с обычным номером');
   const orders = [
     { num: 5, date: '2026-10-01', status: 'Выдан', price: 100, part: 40, issued: '2026-10-02' },
     { num: 'Г1', date: '2026-10-20', status: 'Выдан', price: 0, part: 25, issued: '2026-10-21' },
@@ -713,7 +714,7 @@ await test('Apps Script: ключ, список, запись, повтор, ф�
   assert.equal(gas.post({ op: 'kvGet', key: 'test-key', name: 'p' }).data.value.slice(0, 4), '+abc');
   assert.ok(fr > 0);
   // гарантийные заказы: своя нумерация Г1, Г2…, обычная не сбивается; столбец «Гарантия по №» появляется сам
-  assert.equal(gas.post({ op: 'list', key: 'test-key' }).data.version, 2);
+  assert.equal(gas.post({ op: 'list', key: 'test-key' }).data.version, 3);
   const nextNum = Math.max(...gas.post({ op: 'list', key: 'test-key' }).data.orders.map((o) => (typeof o.num === 'number' ? o.num : 0))) + 1;
   const wr = gas.post({ op: 'batch', key: 'test-key', ops: [
     { id: 'w1', op: 'addOrder', warranty: true, fields: { model: 'iPhone 11', client: 'Иван', phone: '291112233', wfor: 2, price: 0, part: 25 } },
@@ -741,6 +742,47 @@ await test('Apps Script: ключ, список, запись, повтор, ф�
   // заглушка ключа не работает
   const raw = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, '__KEY__');
   assert.equal(raw.post({ op: 'ping', key: '__KEY__' }).ok, false);
+});
+
+await test('Apps Script: номер «№» считает формула — гарантийный всё равно Г1, правки находят его', async () => {
+  const { makeBook, loadScript } = await import('./gas-mock.mjs');
+  const cell = (v, f = '') => ({ v, f, fmt: '' });
+  const head = ['№', 'Дата приёма', 'Клиент', 'Модель', 'Статус', 'Неисправность'];
+  // как в таблице мастера: в «№» формула «предыдущий номер + 1», в готовых строках уже посчитано
+  const numF = (r) => '=IF(B' + r + '="","",MAX($A$1:A' + (r - 1) + ')+1)';
+  const rows = [head.map((x) => cell(x))];
+  for (let r = 2; r <= 8; r++) {
+    const filled = r <= 3;
+    rows.push([cell(filled ? r - 1 : '', numF(r)), cell(filled ? { date: '2026-10-0' + r } : ''), cell(filled ? 'Клиент ' + r : ''), cell(filled ? 'iPhone 11' : ''), cell(filled ? 'Выдан' : ''), cell('')]);
+  }
+  const book = makeBook({ 'Заказы': rows, 'Расходы': [['Дата', 'Что купил', 'Сумма, р.'].map((x) => cell(x))], 'Настройки': [[cell('Настройки')]] });
+  const gas = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, 'k');
+  const sh = book.getSheetByName('Заказы');
+  const r = gas.post({ op: 'batch', key: 'k', ops: [
+    { id: 'w1', op: 'addOrder', warranty: true, fields: { date: '2026-10-26', client: 'Пётр', model: 'iPhone 13', wfor: 2 } },
+    { id: 'w2', op: 'updateOrder', ref: 'w1', num: null, fields: { status: 'Принят' } },
+  ] }).data;
+  assert.deepEqual([r[0].ok, r[0].num, r[1].ok], [true, 'Г1', true], 'правка по ref сразу после добавления');
+  assert.equal(sh.getRange(r[0].row, 1).getValue(), 'Г1', 'в «№» записан Г1 поверх формулы');
+  assert.equal(sh.getRange(r[0].row, 1).getFormula(), '');
+  assert.equal(sh.getRange(r[0].row, 5).getValue(), 'Принят');
+  // правка позже, по номеру
+  const u = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'w3', op: 'updateOrder', num: 'Г1', row: r[0].row, fields: { status: 'Готов' } }] }).data[0];
+  assert.equal(u.ok, true, u.error);
+  assert.equal(sh.getRange(r[0].row, 5).getValue(), 'Готов');
+  // обычный заказ формулу в «№» не трогает
+  const n = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'n1', op: 'addOrder', fields: { date: '2026-10-26', model: 'Redmi' } }] }).data[0];
+  assert.ok(sh.getRange(n.row, 1).getFormula().startsWith('=IF('), 'формула номера у обычного заказа на месте');
+  // гарантийный, записанный старым скриптом поверх формулы (там обычный номер): повтор правки по ref чинит номер
+  sh.cell(n.row, 1).v = 4; // формула на месте, посчитала обычный номер
+  const props = gas.props;
+  const done = JSON.parse(props.get('done'));
+  done.old1 = [n.row, 'Г2'];
+  props.set('done', JSON.stringify(done));
+  const fix = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'retry1', op: 'updateOrder', ref: 'old1', num: 'Г2', row: n.row, fields: { status: 'Принят' } }] }).data[0];
+  assert.equal(fix.ok, true, fix.error);
+  assert.deepEqual([sh.getRange(n.row, 1).getValue(), sh.getRange(n.row, 5).getValue()], ['Г2', 'Принят'], '«Повторить» после обновления скрипта чинит номер');
+  assert.equal(gas.post({ op: 'list', key: 'k' }).data.version, 3);
 });
 
 await test('очередь приложения: правка заказа во время отправки, из открытой формы, две правки расхода', async () => {
@@ -795,7 +837,7 @@ await test('очередь приложения: правка заказа во 
   assert.equal(s.failed.length, 0);
   const g = s.orders().find((o) => o.num === 'Г1');
   assert.ok(g && isWarranty(g), 'после отправки номер Г1');
-  assert.equal(s.version, 2);
+  assert.equal(s.version, 3);
   assert.deepEqual([sh.getRange(g.row, 1).getValue(), sh.getRange(g.row, 3).getValue()], ['Г1', 'iPhone 11']);
   s.update('updateOrder', g, { status: 'Выдан' });
   while (s.outbox.length || s.running) await (s.running || s.flush());
@@ -919,6 +961,31 @@ await test('детали заказа для корзины: из коммент
   assert.deepEqual(names({ model: 'iPhone 11', problem: 'Замена аккумулятора (копия)' }), ['E: Аккумулятор iPhone 11 - копия (iPhone 11, b/copy)'], '«(копия)» — не «(копия усиленная)»');
   assert.deepEqual(names({ model: 'iPhone 11', problem: 'Разбит дисплей' }), [], 'своими словами — не угадываем');
   assert.deepEqual(names({ model: 'Nokia 3310', problem: 'Замена дисплея (копия ЖК (In-Cell, TFT))' }), []);
+});
+
+await test('пояснения к деталям для мастера: что значат слова в названии и что будет на этой модели', async () => {
+  const { partNotes } = await imp('js/part-notes.js');
+  const tags = (n, svc, model, t) => partNotes(n, svc, model, t).map((x) => (x.warn ? '!' : '') + x.tag);
+  assert.deepEqual(tags('LCD для iPhone12 Pro Max (Hard Touch) DD 60Гц', 'd', 'iPhone 12 Pro Max', 'copy_oled'), ['Hard OLED', '!будет «Неизвестная деталь»', 'DD']);
+  assert.deepEqual(tags('Дисплей iPhone 12 Pro Max - Soft OLED (Full HD) (площадка под IC)', 'd', 'iPhone 12 Pro Max', 'copy_oled'), ['Soft OLED', 'Full HD', 'площадка под IC']);
+  assert.deepEqual(tags('Дисплей iPhone 12 Pro Max - JCID (Soft OLED, Full HD) (с верификацией = с привязкой без ошибки)', 'd', 'iPhone 12 Pro Max', 'copy_oled'),
+    ['Soft OLED', 'Full HD', 'с верификацией', 'JCID']);
+  assert.deepEqual(tags('LCD для iPhone12 Pro Max (матрица orig) 120Гц', 'd', 'iPhone 12 Pro Max', 'orig_new'), ['120 Гц', '!матрица orig']);
+  assert.deepEqual(tags('LCD для iPhone11 (матрица orig) новый', 'd', 'iPhone 11', 'orig_new'), [], 'с уточнением «новый» — понятно');
+  assert.deepEqual(tags('LCD для iPhone13 Pro (матрица orig) заменено стекло', 'd', 'iPhone 13 Pro', 'orig_reglass'), ['переклей']);
+  assert.deepEqual(tags('LCD для iPhone13 Pro (in-cell) ZY 60Гц', 'd', 'iPhone 13 Pro', 'copy_lcd').slice(0, 2), ['ЖК', '!60 Гц']);
+  assert.deepEqual(tags('Дисплей iPhone 13 Pro - JCID (Soft OLED, 60Гц) (площадка под IC)', 'd', 'iPhone 13 Pro', 'copy_oled'), ['Soft OLED', '!60 Гц', 'площадка под IC', 'JCID']);
+  assert.deepEqual(tags('Дисплей iPhone 12 Pro Max - In-Cell (HD Plus) (площадка под IC)', 'd', 'iPhone 12 Pro Max', 'copy_lcd'), ['ЖК', 'HD Plus', 'площадка под IC']);
+  assert.ok(partNotes('Дисплей iPhone 12 Pro Max - In-Cell (стандарт)', 'd', 'iPhone 12 Pro Max', 'copy_lcd')[0].text.includes('у оригинала OLED'));
+  assert.ok(!partNotes('Дисплей iPhone 11 - In-Cell', 'd', 'iPhone 11', 'copy_lcd')[0].text.includes('у оригинала OLED'), 'у 11 оригинал ЖК');
+  assert.deepEqual(tags('Дисплей iPhone 12 Pro Max - OR (Снятый, заменено ТОЛЬКО стекло)', 'd', 'iPhone 12 Pro Max', 'orig_reglass'), ['переклей: только стекло']);
+  assert.deepEqual(tags('Дисплей Samsung A52 - OLED', 'd', 'Samsung Galaxy A52', 'copy_oled'), ['OLED'], 'не айфон — без «Неизвестной детали»');
+  assert.deepEqual(tags('Аккумулятор для iPhone11 3500 mAh усиленный', 'b', 'iPhone 11', 'copy_boost'), ['усиленная', '3500 мА·ч', '!будет «Неизвестная деталь»']);
+  assert.deepEqual(tags('Аккумулятор iPhone 11 - Genuine (с верификацией)', 'b', 'iPhone 11', 'verified'), ['без ошибки']);
+  assert.deepEqual(tags('Аккумулятор iPhone 8 - копия', 'b', 'iPhone 8', 'copy'), [], 'у iPhone 8 сообщения нет');
+  assert.deepEqual(tags('Заднее стекло для iPhone14 + стекло камеры + магнит MagSafe', 'c', 'iPhone 14', 'copy'), ['со стеклом камеры', 'MagSafe']);
+  assert.deepEqual(tags('Дисплей Apple Watch 4 (40 мм) - ОРИГИНАЛ (под заказ до 7дн.)', 'd', 'Apple Watch', 'orig_new'), ['!под заказ']);
+  assert.deepEqual(tags('Дисплей Samsung A14 5G - ОРИГИНАЛ (SP) = пожизненная гарантия', 'd', 'Samsung Galaxy A14 5G', 'orig_new'), ['пожизненная гарантия']);
 });
 
 await test('версия в «Ещё» совпадает с выпуском в sw.js', () => {

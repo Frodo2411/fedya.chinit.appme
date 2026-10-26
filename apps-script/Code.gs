@@ -27,7 +27,8 @@ const FORMULA_KEYS = ['profit', 'due', 'warranty', 'month'];
 const OPTIONAL_COLS = ['wfor'];
 // Гарантийные заказы нумеруются отдельно: Г1, Г2…
 const WARRANTY_PREFIX = 'Г';
-const VERSION = 2;
+// 3 — номер гарантийного пишется и поверх формулы в «№»
+const VERSION = 3;
 
 function doGet(e) {
   // Просто открыть адрес в браузере — проверка, что скрипт развёрнут правильно. Данных без ключа не отдаём.
@@ -135,8 +136,9 @@ function readRows_(sh, cols, isRow) {
   return out;
 }
 
-function isOrder_(o) { return o.num !== null || o.date !== null || o.model !== null || o.client !== null || o.problem !== null; }
-function isExpense_(o) { return o.date !== null || o.what !== null || o.sum !== null; }
+// != null: столбца может не быть (тогда значение undefined) — пустая строка остаётся пустой
+function isOrder_(o) { return o.num != null || o.date != null || o.model != null || o.client != null || o.problem != null; }
+function isExpense_(o) { return o.date != null || o.what != null || o.sum != null; }
 
 function readOrders_() { const sh = sheet_(SHEET_ORDERS); return readRows_(sh, columns_(sh, ORDER_COLS), isOrder_); }
 function readExpenses_() { const sh = sheet_(SHEET_EXPENSES); return readRows_(sh, columns_(sh, EXPENSE_COLS), isExpense_); }
@@ -238,9 +240,11 @@ function writeFields_(sh, row, cols, fields) {
   const width = sh.getLastColumn();
   const formulas = sh.getRange(row, 1, 1, width).getFormulas()[0];
   Object.keys(fields || {}).forEach(function (k) {
-    // формулу не трогаем; но в текстовом столбце «формула» — это ошибочно сохранённый текст, его можно перезаписать
+    // формулу не трогаем; но в текстовом столбце «формула» — это ошибочно сохранённый текст, его можно перезаписать.
+    // Номер гарантийного (Г1…) пишем и поверх формулы в «№»: формула дала бы обычный номер
     if (!cols[k] || FORMULA_KEYS.indexOf(k) >= 0) return;
-    if (formulas[cols[k] - 1] && TEXT_KEYS.indexOf(k) < 0 && k !== 'phone') return;
+    const warrantyNumber = k === 'num' && warrantyNum_(fields[k]) !== null;
+    if (formulas[cols[k] - 1] && TEXT_KEYS.indexOf(k) < 0 && k !== 'phone' && !warrantyNumber) return;
     const cell = sh.getRange(row, cols[k]);
     const value = fromJson_(k, fields[k]);
     cell.setValue(value);
@@ -293,14 +297,19 @@ function updateOrder_(op) {
   const cols = columns_(sh, ORDER_COLS);
   if (op.num === null || op.num === undefined || op.num === '') throw new Error('У заказа нет номера: обнови список и попробуй ещё раз');
   const key = numKey_(op.num);
+  const warranty = warrantyNum_(op.num) !== null;
+  const at = op.row && cols.num ? sh.getRange(op.row, cols.num) : null;
   let row = null;
-  if (op.row && cols.num && numKey_(sh.getRange(op.row, cols.num).getValue()) === key) row = op.row;
+  if (at && numKey_(at.getValue()) === key) row = op.row;
+  // гарантийный, добавленный скриптом версии 2: в «№» осталась формула с обычным номером, строку знаем по журналу
+  else if (at && op.byRef && warranty && at.getFormula()) row = op.row;
   if (row === null) {
     const found = readRows_(sh, cols, isOrder_).filter(function (o) { return numKey_(o.num) === key; });
     if (!found.length) throw new Error('Не нашёл заказ №' + op.num);
     row = found[0].row;
   }
   ensureCols_(sh, cols, ORDER_COLS, op.fields);
+  if (warranty && numKey_(sh.getRange(row, cols.num).getValue()) !== key) sh.getRange(row, cols.num).setValue(op.num);
   writeFields_(sh, row, cols, op.fields);
   return { row: row, num: op.num };
 }

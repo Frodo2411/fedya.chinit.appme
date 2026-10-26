@@ -3,6 +3,7 @@
 import { h, fill, icon, money, fmtDate, toast, openSheet, field, select, chips, parseNum } from './ui.js';
 import { ACTIVE, computed, isWarranty } from './orders.js';
 import { store, today } from './store.js';
+import { SCRIPT_VERSION } from './sheet.js';
 import { SERVICES, ORDER } from './engine.js';
 import { REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
 
@@ -180,7 +181,12 @@ export function createOrdersView(app) {
     else syncText = s.cache ? 'Обновлено в ' + new Date(s.cache.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'Ещё не загружено';
     fill(syncBox, h('div', { class: 'grow' }, syncText),
       h('button', { class: 'btn small', 'aria-label': 'Обновить', disabled: s.busy, onclick: () => s.refresh() }, icon('refresh')));
-    fill(failedBox, s.failed.map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
+    const old = s.version !== null && s.version < SCRIPT_VERSION;
+    fill(failedBox, old ? h('div', { class: 'banner warn', style: 'margin-bottom:10px' },
+      h('b', { text: 'Скрипт таблицы на этом устройстве старый ' }), '(версия ' + s.version + ', нужна ' + SCRIPT_VERSION + '): гарантийные заказы Г1, Г2… не запишутся и не исправятся. '
+        + 'Обнови код скрипта и проверь, что на телефоне и на компьютере один и тот же адрес скрипта.',
+      h('div', { style: 'margin-top:8px' }, h('button', { class: 'btn small', text: 'Открыть «Google Таблица»', onclick: () => app.openSheetSetup() }))) : null,
+    s.failed.map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
       h('div', {}, h('b', { text: 'Не записалось в таблицу: ' }), describeOp(f), ' — ', f.error),
       h('div', { class: 'row', style: 'margin-top:8px' },
         h('button', { class: 'btn small', text: 'Повторить', onclick: () => { s.dropFailed(f.id); s.outbox.push({ ...f, error: undefined }); s.save(); s.flush(); } }),
@@ -292,8 +298,9 @@ export function openOrderForm(app, order, prefill) {
       model ? h('button', { class: 'btn small', style: found.length ? 'margin-top:12px' : null, text: 'Цены: ' + model, onclick: () => { sheet.close(); app.showModel(model); } }) : null);
   }
 
-  // Скрипт таблицы до гарантии нумеровал бы такой заказ как обычный
-  const oldScript = () => isNew && isWarranty(o) && app.sheet.connected && app.sheet.version !== null && app.sheet.version < 2;
+  // Старый скрипт таблицы новый гарантийный заказ записал бы с обычным номером, а заказ «Г…» не нашёл бы при правке
+  const oldScript = () => (isNew ? isWarranty(o) : /^\s*Г/i.test(String(o.num ?? '')))
+    && app.sheet.connected && app.sheet.version !== null && app.sheet.version < SCRIPT_VERSION;
 
   function clientFields(required) {
     const mark = required ? ' *' : '';
@@ -312,7 +319,7 @@ export function openOrderForm(app, order, prefill) {
       isNew ? h('div', { style: 'margin-top:8px' }, chips([{ value: 'order', label: 'Заказ' }, { value: 'warranty', label: 'Гарантия' }],
         w ? 'warranty' : 'order', (v) => setWarranty(v === 'warranty'))) : null,
       oldScript() ? h('div', { class: 'banner warn', style: 'margin-top:12px' },
-        h('b', { text: 'Обнови скрипт таблицы. ' }), 'Старый скрипт даст гарантийному заказу обычный номер, а не Г1, Г2… ',
+        h('b', { text: 'Обнови скрипт таблицы. ' }), 'На этом устройстве скрипт версии ' + app.sheet.version + ', нужна ' + SCRIPT_VERSION + ': гарантийный заказ не запишется как Г1, Г2… и не исправится. ',
         '«Ещё → Google Таблица» → «Скопировать код скрипта» → вставь в Apps Script вместо старого → «Сохранить» → Развертывание → Управление развертываниями → карандаш → Версия: «Новая версия» → Развернуть.',
         h('div', { class: 'row wrap', style: 'margin-top:10px' },
           h('button', { class: 'btn small', text: 'Открыть «Google Таблица»', onclick: () => app.openSheetSetup() }),
@@ -384,7 +391,7 @@ export function openOrderForm(app, order, prefill) {
       if (o.phone) o.phone = normPhone(o.phone);
       if (w && (!String(o.client || '').trim() || !String(o.phone || '').trim())) { toast('Для гарантии заполни имя и телефон клиента'); return; }
       if (w && String(o.phone).replace(/\D/g, '').length < 7) { toast('Проверь телефон клиента'); return; }
-      if (oldScript()) { toast('Сначала обнови скрипт таблицы: иначе заказ получит обычный номер', 4000); return; }
+      if (oldScript()) { toast('Сначала обнови скрипт таблицы: на этом устройстве он старый (версия ' + app.sheet.version + ')', 4000); return; }
       if (isNew) {
         const fields = {};
         for (const k of EDITABLE) if (o[k] !== null && o[k] !== undefined && o[k] !== '') fields[k] = o[k];
