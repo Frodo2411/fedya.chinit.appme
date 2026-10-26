@@ -803,6 +803,40 @@ await test('очередь приложения: правка заказа во 
   assert.equal(sh.getRange(1, 1).getValue(), '№');
 });
 
+await test('корзина: +1 к той же детали, по поставщикам, цена из нынешнего прайса, замена поставщика', async () => {
+  const { cartAdd, cartReplace, cartQty, cartCount, cartGroups, cartText } = await imp('js/cart.js');
+  const d11 = { sup: 'E', name: 'Дисплей iPhone 11 - In-Cell', cost: 40, model: 'iPhone 11', svc: 'd', tier: 'copy_lcd', use: 'iPhone 11 · дисплей' };
+  let c = cartAdd([], d11);
+  c = cartAdd(c, { ...d11, use: 'iPhone 11 · дисплей (второй заказ)' });
+  c = cartAdd(c, { sup: 'P', name: 'Дисплей iPhone 11 - Original (снятый)', cost: 90, model: 'iPhone 11', svc: 'd', tier: 'orig_used' });
+  c = cartAdd(c, { sup: 'E', name: 'Аккумулятор iPhone 11 - копия', cost: 25 });
+  c = cartAdd(c, { sup: 'E', name: 'Пропавшая позиция', cost: 7 });
+  assert.equal(c.length, 4);
+  assert.equal(cartQty(c, 'E', d11.name), 2);
+  assert.deepEqual(c[0].uses, ['iPhone 11 · дисплей', 'iPhone 11 · дисплей (второй заказ)']);
+  const data = { ...DATA, parts: DATA.parts.map((p) => (p.name === 'Аккумулятор iPhone 11 - копия' ? { ...p, cost: 27 } : p)) };
+  const g = cartGroups(c, data);
+  assert.deepEqual(g.map((x) => x.sup), ['P', 'E'], 'основной поставщик (rank 0) первым');
+  assert.deepEqual([g[1].left, g[1].total], [3, 2 * 40 + 27 + 7], 'цена аккумулятора уже новая, пропавшая — из корзины');
+  assert.equal(g[1].items.find((x) => x.name === 'Пропавшая позиция').gone, true);
+  assert.equal(g[0].items[0].stock, 'В наличии');
+  // куплено: не считается в «осталось» и в списке для поставщика
+  c = c.map((x) => (x.name === 'Пропавшая позиция' ? { ...x, done: true } : x));
+  assert.equal(cartCount(c), 3);
+  const ge = cartGroups(c, data)[1];
+  assert.deepEqual([ge.left, ge.total], [2, 107]);
+  assert.equal(cartText('Первый', ge.items), 'Первый:\n• Дисплей iPhone 11 - In-Cell — 2 шт.\n• Аккумулятор iPhone 11 - копия — 1 шт.');
+  // другой поставщик: количество и «для чего» остаются; если такая деталь уже есть — складываются
+  const id = c.find((x) => x.name === d11.name).id;
+  const r = cartReplace(c, id, { sup: 'P', name: 'Дисплей iPhone 11 - Original (снятый)', cost: 90 });
+  assert.equal(r.length, 3);
+  assert.equal(cartQty(r, 'P', 'Дисплей iPhone 11 - Original (снятый)'), 3);
+  assert.equal(cartQty(r, 'E', d11.name), 0);
+  assert.ok(r.find((x) => x.sup === 'P').uses.includes('iPhone 11 · дисплей (второй заказ)'));
+  // повторное добавление купленной детали — снова «купить»
+  assert.equal(cartAdd(c, { sup: 'E', name: 'Пропавшая позиция', cost: 7 }).find((x) => x.name === 'Пропавшая позиция').done, false);
+});
+
 await test('версия в «Ещё» совпадает с выпуском в sw.js', () => {
   const sw = /const VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'))[1];
   const app = /export const APP_VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'js/view-more.js'), 'utf8'))[1];

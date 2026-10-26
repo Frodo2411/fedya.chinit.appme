@@ -4,6 +4,7 @@ import { h, fill, icon, money, toast, copyText, openSheet, field, select, parseN
 import { SERVICES, SITE_SERVICES, ORDER, OWN, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, workFee, sfKey, GLUE_NAME } from './engine.js';
 import { store, newId, today } from './store.js';
 import { telHref } from './view-orders.js';
+import { cartQty } from './cart.js';
 
 // Заметка «как заказать»: @бот → Telegram, адрес сайта и телефон — тоже нажимаются
 export function linkify(text) {
@@ -19,6 +20,15 @@ export function linkify(text) {
   }
   out.push(text.slice(last));
   return out;
+}
+
+// Наличие у поставщика: без данных о наличии — «уточнить», своя деталь — «своя цена»
+export function supplierStock(app, sup, stock) {
+  if (sup === OWN) return h('span', { class: 'badge info', text: 'своя цена' });
+  const s = app.data.suppliers[sup];
+  if (!s || !s.stock) return h('span', { class: 'badge warn', text: 'уточнить наличие' });
+  if (stock === 'В наличии') return h('span', { class: 'badge good', text: 'в наличии' });
+  return h('span', { class: 'badge bad', text: (stock || 'нет в наличии').toLowerCase() });
 }
 
 export const SVC = {
@@ -224,12 +234,19 @@ export function createPricesView(app) {
   }
 
   function stockBadge(sup, stock) {
-    if (sup === OWN) return h('span', { class: 'badge info', text: 'своя цена' });
-    const s = app.data.suppliers[sup];
-    if (!s || !s.stock) return h('span', { class: 'badge warn', text: 'уточнить наличие' });
-    if (stock === 'В наличии') return h('span', { class: 'badge good', text: 'в наличии' });
-    return h('span', { class: 'badge bad', text: (stock || 'нет в наличии').toLowerCase() });
+    return supplierStock(app, sup, stock);
   }
+
+  // В корзину: та же деталь ещё раз — +1 штука
+  function toCart(items) {
+    const n = app.addToCart(items);
+    toast(Array.isArray(items) ? 'В корзине: ' + items.length + ' дет.' : n > 1 ? 'В корзине уже ' + n + ' шт.' : 'Добавил в корзину');
+  }
+
+  const partForCart = (entry, svc, o, p) => ({
+    sup: p.sup, name: p.part, cost: p.cost, model: entry.model, svc, tier: o.tier,
+    use: entry.model + ' · ' + lcFirst(SVC[svc]) + ' (' + lcFirst(VAR_APP[o.tier]) + ')',
+  });
 
   function supName(key) {
     const s = app.pricer.data.suppliers[key];
@@ -237,9 +254,7 @@ export function createPricesView(app) {
   }
 
   function supSite(key) {
-    const s = app.data.suppliers[key] || {};
-    const r = (app.repoData && app.repoData.suppliers[key]) || {};
-    return (s.site !== undefined ? s.site : r.site) || null; // пустая строка — сайт убрали
+    return app.supplierSite(key);
   }
 
   // Одно нажатие: название детали в буфер и сайт поставщика в новой вкладке — останется вставить в поиск
@@ -254,7 +269,7 @@ export function createPricesView(app) {
   }
 
   // Проклейка к ремонту: что взять и где; на цену клиенту не влияет, только на заработок
-  function glueRow(g) {
+  function glueRow(g, model) {
     if (g.fallback) return h('div', { class: 'glue' }, h('span', { class: 'small', text: 'Проклейка: ' + money(g.cost) }), h('span', { class: 'tiny faint', text: ' · ' + g.name }));
     return h('div', { class: 'glue' },
       h('button', {
@@ -263,7 +278,11 @@ export function createPricesView(app) {
       },
       h('span', { class: 'small' }, 'Проклейка ' + GLUE_NAME[g.type] + ': ', h('b', { text: money(g.cost) }), g.pack ? h('span', { class: 'faint', text: ' (штука из набора)' }) : null),
       h('span', { class: 'tiny muted break', style: 'display:block', text: supName(g.sup) + ' · ' + g.name })),
-      h('span', { class: 'glue-side' }, stockBadge(g.sup, g.stock), siteButton(g.sup, g.name, true)));
+      h('span', { class: 'glue-side' }, stockBadge(g.sup, g.stock), siteButton(g.sup, g.name, true),
+        h('button', {
+          class: 'link', style: 'padding:2px 0', text: cartQty(app.settings.cart, g.sup, g.name) ? '✓ в корзине' : 'в корзину',
+          onclick: () => toCart({ sup: g.sup, name: g.name, cost: g.cost, model, glue: g.type, use: model + ' · проклейка ' + GLUE_NAME[g.type] }),
+        })));
   }
 
   function variantCard(entry, svc, o) {
@@ -273,6 +292,7 @@ export function createPricesView(app) {
     const glue = app.pricer.glueFor(entry.model, svc);
     const earn = p.price - p.cost - glue.total;
     const others = app.pricer.partsFor(entry.model, svc, o.tier);
+    const inCart = cartQty(app.settings.cart, p.sup, p.part);
     const note = (app.settings.supplierNotes || {})[p.sup];
     let sfText = null;
     if (p.smartfix) {
@@ -301,7 +321,7 @@ export function createPricesView(app) {
       siteButton(p.sup, p.part),
       o.ownId && !p.override ? ownLine(entry, svc, o.ownId) : null,
       note ? h('div', { class: 'small muted', style: 'margin-top:8px' }, 'Как заказать: ', linkify(note)) : null,
-      glue.items.map((g) => glueRow(g)),
+      glue.items.map((g) => glueRow(g, entry.model)),
       o.alt && !p.override ? h('div', { class: 'alt' }, 'Второй поставщик: ', h('b', { text: supName(o.alt.sup) + ' — ' + money(o.alt.cost) }), ' ', stockBadge(o.alt.sup, o.alt.stock),
         siteButton(o.alt.sup, o.alt.part, true),
         h('div', { class: 'tiny faint break', text: o.alt.part })) : null,
@@ -313,6 +333,9 @@ export function createPricesView(app) {
           class: 'btn small' + (st.combo.get(svc) === o.tier ? ' on' : ''),
           onclick: () => { if (st.combo.get(svc) === o.tier) st.combo.delete(svc); else st.combo.set(svc, o.tier); draw(); },
         }, st.combo.get(svc) === o.tier ? '✓ В комплексе' : 'В комплекс'),
+        h('button', {
+          class: 'btn small' + (inCart ? ' on' : ''), onclick: () => toCart(partForCart(entry, svc, o, p)),
+        }, inCart ? '✓ В корзине · ' + inCart : 'В корзину'),
         h('button', {
           class: 'btn small', onclick: () => { if (st.open.has(key)) st.open.delete(key); else st.open.add(key); draw(); },
         }, (st.open.has(key) ? 'Скрыть детали' : 'Все детали · ' + others.length))),
@@ -403,6 +426,7 @@ export function createPricesView(app) {
           onclick: () => (items.length === 1 ? app.newOrderFromPrice(entry, items[0].svc, items[0].o, items[0].p) : app.newOrderFromCombo(entry, items, t)),
         }, 'Записать заказ'),
         h('button', { class: 'btn small', onclick: async () => { if (await copyText(comboText(entry))) toast('Комплекс скопирован'); } }, icon('copy'), 'Скопировать клиенту'),
+        h('button', { class: 'btn small', text: 'Всё в корзину', onclick: () => toCart(items.map((x) => partForCart(entry, x.svc, x.o, x.p))) }),
         h('button', { class: 'btn small', text: 'Очистить', onclick: () => { st.combo.clear(); draw(); } })));
   }
 

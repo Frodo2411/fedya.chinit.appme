@@ -12,9 +12,11 @@ import { createPricesView, REPAIR, VAR_APP, lcFirst } from './view-prices.js';
 import { createOrdersView, openOrderForm } from './view-orders.js';
 import { createSummaryView } from './view-summary.js';
 import { createMoreView, openSheetSetup } from './view-more.js';
+import { createCartView } from './view-cart.js';
+import { cartAdd, cartQty, cartCount } from './cart.js';
 
-// ownParts — свои детали (цену вписал сам), см. withOwnParts в engine.js
-const DEFAULT_SETTINGS = { clientFooter: 'Гарантия на работу 4 месяца.', clientHints: true, supplierNotes: {}, formula: null, ownParts: [], ts: 0 };
+// ownParts — свои детали (цену вписал сам), см. withOwnParts в engine.js; cart — корзина (cart.js)
+const DEFAULT_SETTINGS = { clientFooter: 'Гарантия на работу 4 месяца.', clientHints: true, supplierNotes: {}, formula: null, ownParts: [], cart: [], ts: 0 };
 // Гарантия стала 4 месяца: прежнюю строку по умолчанию заменяем, свою строку мастера не трогаем
 const OLD_FOOTER = 'Гарантия на работу 3 месяца.';
 function withDefaults(s) {
@@ -86,6 +88,23 @@ const app = {
         + 'Детали: ' + items.map((x) => partNote(x.p)).join('; ') + glueNote(glue),
     });
     if (!this.sheet.connected) toast('Таблица не подключена: заказ уйдёт в неё после подключения', 4000);
+  },
+
+  // Корзина: деталь или список деталей к покупке. Возвращает, сколько штук (последней) детали теперь в корзине
+  addToCart(items) {
+    const list = [].concat(items);
+    let cart = this.settings.cart || [];
+    for (const it of list) cart = cartAdd(cart, it);
+    this.saveSettings({ cart });
+    const last = list[list.length - 1];
+    return cartQty(cart, last.sup, last.name);
+  },
+
+  // Сайт поставщика: свой (из «⋯» у поставщика) или из общего прайса; пустая строка — сайт убрали
+  supplierSite(key) {
+    const s = this.data.suppliers[key] || {};
+    const r = (this.repoData && this.repoData.suppliers[key]) || {};
+    return (s.site !== undefined ? s.site : r.site) || null;
   },
 
   openSheetSetup() {
@@ -245,7 +264,7 @@ async function syncBackups() {
 }
 
 // --- Оболочка
-const TABS = [['prices', 'Цены', 'tag'], ['orders', 'Заказы', 'list'], ['summary', 'Итоги', 'chart'], ['more', 'Ещё', 'more']];
+const TABS = [['prices', 'Цены', 'tag'], ['cart', 'Корзина', 'cart'], ['orders', 'Заказы', 'list'], ['summary', 'Итоги', 'chart'], ['more', 'Ещё', 'more']];
 const scrolls = {};
 let tabbar = null;
 let mainEl = null;
@@ -253,11 +272,13 @@ let mainEl = null;
 function drawTabbar() {
   if (!tabbar) return;
   const pending = app.sheet.outbox.length + app.sheet.failed.length;
+  const toBuy = cartCount(app.settings.cart);
   // название с логотипом — только в меню слева на компьютере
   fill(tabbar, h('div', { class: 'brand' }, h('img', { src: 'icons/icon-180.png', alt: '' }), 'Федя чинит'), ...TABS.map(([id, label, ic]) => h('button', {
     class: 'tab' + (app.tab === id ? ' on' : ''), 'aria-label': label, 'aria-current': app.tab === id ? 'page' : null,
     onclick: () => switchTab(id),
-  }, icon(ic), label, id === 'orders' && pending ? h('span', { class: 'dot', text: String(pending) }) : null)));
+  }, icon(ic), label, id === 'orders' && pending ? h('span', { class: 'dot', text: String(pending) }) : null,
+  id === 'cart' && toBuy ? h('span', { class: 'dot cart', text: String(toBuy) }) : null)));
 }
 
 function switchTab(id) {
@@ -282,6 +303,7 @@ function startUI() {
   });
   app.views = {
     prices: createPricesView(app),
+    cart: createCartView(app),
     orders: createOrdersView(app),
     summary: createSummaryView(app),
     more: createMoreView(app),
@@ -298,12 +320,15 @@ function startUI() {
     syncBackups();
   }
   // Вернулся в приложение или появилась сеть: отправить очередь, а если список устарел или была ошибка — перечитать
+  let backupsAt = Date.now();
   const syncNow = () => {
     if (!app.sheet.connected) return;
     const stale = !app.sheet.cache || Date.now() - app.sheet.cache.at > 60000;
     if (app.sheet.error || stale) app.sheet.refresh();
     else app.sheet.flush();
-    if (store.get('prices.push')) pushPrices();
+    // настройки и корзина могли поменяться на другом устройстве (телефон ↔ компьютер)
+    if (Date.now() - backupsAt > 30000) { backupsAt = Date.now(); syncBackups(); }
+    else if (store.get('prices.push')) pushPrices();
   };
   window.addEventListener('online', syncNow);
   document.addEventListener('visibilitychange', () => {
