@@ -803,6 +803,13 @@ await test('очередь приложения: правка заказа во 
   assert.equal(sh.getRange(1, 1).getValue(), '№');
 });
 
+await test('версия в «Ещё» совпадает с выпуском в sw.js', () => {
+  const sw = /const VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'))[1];
+  const app = /export const APP_VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'js/view-more.js'), 'utf8'))[1];
+  assert.equal(app, sw);
+  assert.match(sw, /^\d{4}-\d{2}-\d{2}\.\d+$/);
+});
+
 // --- Настоящий прайс: только с паролем
 if (process.env.FC_PASSWORD) {
   await test('data/prices.enc открывается паролем', async () => {

@@ -8,7 +8,8 @@ import { withRate, oddRate } from './importer.js';
 import { monthTitle } from './ui.js';
 import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteKey } from './site-publish.js';
 
-export const APP_VERSION = '1.0.0';
+// Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
+export const APP_VERSION = '2026-10-26.2';
 
 export function createMoreView(app) {
   const root = h('div');
@@ -76,7 +77,7 @@ export function createMoreView(app) {
 
       h('div', { class: 'card' },
         h('h3', { text: 'Приложение' }),
-        h('div', { class: 'small muted', text: 'Версия ' + APP_VERSION + '. Данные прайса от ' + fmtDate(app.data.priceDate) + ', SmartFix от ' + fmtDate(app.data.sfDate) + '.' }),
+        h('div', { class: 'small muted', text: 'Версия от ' + fmtDate(APP_VERSION.split('.')[0]) + ' (выпуск ' + APP_VERSION.split('.')[1] + '). Данные прайса от ' + fmtDate(app.data.priceDate) + ', SmartFix от ' + fmtDate(app.data.sfDate) + '.' }),
         h('div', { class: 'row wrap', style: 'margin-top:12px' },
           h('button', { class: 'btn small', text: 'Проверить обновление', onclick: () => app.checkUpdate() }),
           h('button', { class: 'btn small danger', text: 'Забыть пароль', onclick: () => { if (confirm('Выйти? Пароль придётся ввести заново.')) app.logout(); } }))),
