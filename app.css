@@ -143,7 +143,21 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 .item .chev { color: var(--faint); margin-left: auto; flex: none; }
 
 /* --- модель */
-.topbar { display: flex; align-items: center; gap: 6px; margin: 4px 0 2px; }
+/* «‹ Поиск» всегда под рукой: строка закреплена сверху, в ней появляется название модели, когда заголовок уехал */
+.topbar {
+  position: sticky; top: 0; z-index: 6; display: flex; align-items: center; gap: 6px;
+  margin: calc(-8px - var(--safe-t)) 0 2px; padding: calc(var(--safe-t) + 10px) 0 4px; background: var(--bg);
+}
+.topbar.stuck { border-bottom: 1px solid var(--line); }
+.tb-title { flex: 1; min-width: 0; font-weight: 700; text-align: center; padding-right: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0; transition: opacity 0.15s; }
+.topbar.stuck .tb-title { opacity: 1; }
+/* свайп от левого края: экран модели едет за пальцем */
+.model-screen, .model-screen + .dock { transition: transform 0.16s ease-out; }
+.swiping .model-screen, .swiping .model-screen + .dock { transition: none; }
+.swiping .model-screen { background: var(--bg); box-shadow: -12px 0 28px rgba(0, 0, 0, 0.55); }
+.variants { display: grid; gap: 12px; }
+.variants > .card + .card { margin-top: 0; }
+.combo { margin-bottom: 12px; }
 .back { border: 0; background: none; color: var(--accent); font-weight: 650; font-size: 17px; min-height: 44px; padding: 0 8px 0 0; display: inline-flex; align-items: center; gap: 2px; }
 .back svg { width: 22px; height: 22px; }
 .repairs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 16px; }
@@ -205,6 +219,9 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 
 /* --- заказы */
 .order .num { font-weight: 800; color: var(--muted); font-variant-numeric: tabular-nums; }
+.order .num.w { color: var(--violet); }
+/* значки двух строк (гарантия над статусом) не слипаются */
+.order .row + .row { margin-top: 6px; }
 .order .model { font-weight: 700; }
 .order .prob { font-size: 14.5px; color: var(--muted); margin-top: 2px; }
 .order .price { font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -235,11 +252,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; font-varian
 
 /* --- окно поверх */
 .sheet { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: flex; flex-direction: column; animation: up 0.18s ease-out; }
+.sheet-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 @keyframes up { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 .sheet-head { display: flex; align-items: center; gap: 8px; padding: calc(var(--safe-t) + 8px) 12px 8px 16px; border-bottom: 1px solid var(--line); }
 .sheet-head h3 { margin: 0; font-size: 18px; flex: 1; min-width: 0; }
 .sheet-head .x { border: 0; background: var(--surface-2); width: 44px; height: 44px; border-radius: 22px; font-size: 20px; color: var(--muted); }
-.sheet-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 16px 24px; }
+.sheet-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 16px 24px; }
 .sheet-foot { padding: 10px 16px calc(var(--safe-b) + 10px); border-top: 1px solid var(--line); display: flex; gap: 8px; background: var(--bg); }
 .sheet-foot .btn { flex: 1; }
 
@@ -268,3 +286,54 @@ details > summary::-webkit-details-marker { display: none; }
 .lock .err { color: var(--bad); margin-top: 10px; min-height: 22px; }
 .spin { display: inline-block; width: 18px; height: 18px; border: 2.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: r 0.7s linear infinite; }
 @keyframes r { to { transform: rotate(360deg); } }
+
+/* --- мышь: подсветка под курсором */
+@media (hover: hover) {
+  .item:hover { background: var(--surface-2); }
+  .btn:hover:not(:disabled), .repair:hover, .chip:hover, .part:hover { border-color: var(--faint); }
+  .btn.primary:hover:not(:disabled) { border-color: var(--accent); filter: brightness(1.07); }
+  .repair.on:hover, .chip.on:hover, .btn.on:hover { border-color: var(--accent); }
+  .tab:hover { color: var(--text); }
+  .tab.on:hover { color: var(--accent); }
+  .link:hover { text-decoration: underline; }
+  .tbl tbody tr:hover td { background: var(--surface-2); cursor: pointer; }
+}
+
+/* --- компьютер: меню слева, содержимое шире, окна по центру */
+.brand { display: none; }
+@media (min-width: 900px) {
+  :root { --side: 232px; }
+  .screen { max-width: none; min-height: 100vh; margin: 0 0 0 var(--side); padding: 24px 40px 120px; }
+  .screen > * { max-width: var(--content, 1080px); margin-left: auto; margin-right: auto; }
+  .view-orders, .view-summary, .view-more { --content: 880px; }
+
+  .tabbar {
+    top: 0; right: auto; width: var(--side); height: auto; padding: 20px 12px;
+    display: flex; flex-direction: column; gap: 4px; border-top: 0; border-right: 1px solid var(--line); background: var(--bg);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 20px; font-weight: 800; font-size: 16px; }
+  .brand img { width: 34px; height: 34px; border-radius: 9px; }
+  .tab { flex: none; flex-direction: row; justify-content: flex-start; gap: 12px; height: 46px; padding: 0 14px; border-radius: 12px; font-size: 16px; }
+  .tab svg { width: 22px; height: 22px; }
+  .tab.on { background: rgba(255, 178, 36, 0.1); }
+  .tab .dot { position: static; margin-left: auto; }
+
+  .dock { left: var(--side); bottom: 0; padding: 12px 40px 18px; }
+  .fab { bottom: 28px; right: max(28px, calc((100vw - var(--side) - var(--content, 880px)) / 2)); }
+
+  .sheet { background: rgba(0, 0, 0, 0.6); align-items: center; justify-content: center; padding: 32px; animation: fade 0.15s ease-out; }
+  .sheet-panel {
+    flex: none; width: min(680px, 100%); max-height: 100%; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 20px; overflow: hidden; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); animation: up 0.18s ease-out;
+  }
+  .sheet-head { padding: 12px 12px 12px 22px; }
+  .sheet-body { padding: 8px 22px 24px; }
+  .sheet-foot { padding: 12px 22px; }
+
+  .repairs { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .variants { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tiles.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .toast { top: 20px; }
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }

@@ -253,7 +253,8 @@ let mainEl = null;
 function drawTabbar() {
   if (!tabbar) return;
   const pending = app.sheet.outbox.length + app.sheet.failed.length;
-  fill(tabbar, ...TABS.map(([id, label, ic]) => h('button', {
+  // название с логотипом — только в меню слева на компьютере
+  fill(tabbar, h('div', { class: 'brand' }, h('img', { src: 'icons/icon-180.png', alt: '' }), 'Федя чинит'), ...TABS.map(([id, label, ic]) => h('button', {
     class: 'tab' + (app.tab === id ? ' on' : ''), 'aria-label': label, 'aria-current': app.tab === id ? 'page' : null,
     onclick: () => switchTab(id),
   }, icon(ic), label, id === 'orders' && pending ? h('span', { class: 'dot', text: String(pending) }) : null)));
@@ -285,6 +286,7 @@ function startUI() {
     summary: createSummaryView(app),
     more: createMoreView(app),
   };
+  for (const [name, v] of Object.entries(app.views)) v.el.classList.add('view-' + name);
   mainEl = h('main', { class: 'screen' }, Object.values(app.views).map((v) => v.el));
   tabbar = h('nav', { class: 'tabbar', 'aria-label': 'Разделы' });
   fill(document.body, mainEl, tabbar);

@@ -86,7 +86,9 @@ export function createPricesView(app) {
   const searchScreen = h('div', {},
     h('div', { class: 'searchbar' }, h('div', { class: 'search-wrap' }, input, clear)),
     results);
-  const modelScreen = h('div');
+  const modelScreen = h('div', { class: 'model-screen' });
+  // «Скопировать клиенту» — отдельно от экрана модели: у сдвинутого свайпом экрана fixed-кнопки съехали бы вниз
+  const dock = h('div', { class: 'dock' });
 
   function drawResults() {
     clear.hidden = !st.q;
@@ -115,7 +117,13 @@ export function createPricesView(app) {
       h('span', { class: 'chev', html: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 5 7 7-7 7"/></svg>' }));
   }
 
-  function openModel(name) {
+  // push: false — модель открыта из истории браузера (кнопка «вперёд»), новый шаг не нужен
+  function openModel(name, push = true) {
+    if (push) {
+      const state = { fcModel: name };
+      if (history.state && history.state.fcModel) history.replaceState(state, '');
+      else history.pushState(state, '');
+    }
     st.model = name;
     st.combo = new Map();
     st.overrides.clear();
@@ -133,7 +141,79 @@ export function createPricesView(app) {
   function closeModel() {
     st.model = null;
     draw();
+    shift(0);
     window.scrollTo(0, 0);
+  }
+
+  // Назад к поиску: открытая модель — шаг в истории браузера, его и снимаем (закроет popstate)
+  function back() {
+    if (history.state && history.state.fcModel) history.back();
+    else closeModel();
+  }
+
+  // Кнопка «назад» браузера и мыши, жест Safari, «назад» на Android, Esc на компьютере — к поиску
+  if (history.state && history.state.fcModel) history.replaceState(null, ''); // после перезагрузки открыт поиск
+  window.addEventListener('popstate', (ev) => {
+    const name = ev.state && ev.state.fcModel;
+    if (name && app.pricer.byName.has(name)) { if (st.model !== name) openModel(name, false); }
+    else if (st.model) closeModel();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && st.model && !root.hidden && !document.querySelector('.sheet')) back();
+  });
+
+  // Свайп от левого края экрана — назад к поиску, как в приложениях айфона. У веб-приложения на экране «Домой» такого
+  // жеста нет, поэтому делаем свой; в Safari браузер листает историю сам (popstate выше), там свой не включаем
+  const EDGE = 28;
+  const standalone = navigator.standalone === true || (!!window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  let drag = null;
+  function shift(x) {
+    for (const el of [modelScreen, dock]) el.style.transform = x ? 'translateX(' + x + 'px)' : '';
+  }
+  document.addEventListener('touchstart', (ev) => {
+    drag = null;
+    if (!standalone || !st.model || root.hidden || ev.touches.length !== 1 || document.querySelector('.sheet')) return;
+    const t = ev.touches[0];
+    if (t.clientX <= EDGE) drag = { x: t.clientX, y: t.clientY, dx: 0, on: false, at: Date.now() };
+  }, { passive: true });
+  document.addEventListener('touchmove', (ev) => {
+    if (!drag) return;
+    const t = ev.touches[0];
+    const dx = t.clientX - drag.x;
+    const dy = t.clientY - drag.y;
+    if (!drag.on) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { drag = null; return; } // листает вверх-вниз
+      if (dx < 10) return;
+      drag.on = true;
+      root.classList.add('swiping');
+    }
+    ev.preventDefault();
+    drag.dx = Math.max(0, dx);
+    shift(drag.dx);
+  }, { passive: false });
+  // отпустил дальше трети экрана или резко смахнул — назад, иначе экран возвращается на место
+  const release = (cancel) => {
+    const d = drag;
+    drag = null;
+    if (!d || !d.on) return;
+    root.classList.remove('swiping');
+    const fast = d.dx > 40 && d.dx / Math.max(1, Date.now() - d.at) > 0.6;
+    if (!cancel && (d.dx > window.innerWidth / 3 || fast)) {
+      shift(window.innerWidth);
+      setTimeout(back, 160);
+    } else shift(0);
+  };
+  document.addEventListener('touchend', () => release(false));
+  document.addEventListener('touchcancel', () => release(true));
+
+  // Название модели в закреплённой строке «‹ Поиск» появляется, когда большой заголовок уехал под неё
+  let titleWatch = null;
+  function watchTitle(bar, title) {
+    if (titleWatch) titleWatch.disconnect();
+    if (!('IntersectionObserver' in window)) return;
+    titleWatch = new IntersectionObserver(([en]) => bar.classList.toggle('stuck', !en.isIntersecting && en.boundingClientRect.top < 80),
+      { rootMargin: '-64px 0px 0px 0px' });
+    titleWatch.observe(title);
   }
 
   function priceOf(entry, svc, o) {
@@ -358,9 +438,11 @@ export function createPricesView(app) {
     const hidden = svcData.opts.filter((o) => o.hidden);
     const noParts = SERVICES.every((svc) => !e.services[svc].opts.length);
     const coefs = 'сложность ×' + String(diffCoef(S, e)).replace('.', ',') + ', новизна ×' + String(noveltyCoef(S, e)).replace('.', ',');
+    const title = h('h1', { text: e.model });
+    const bar = h('div', { class: 'topbar' }, h('button', { class: 'back', onclick: back }, icon('back'), 'Поиск'), h('span', { class: 'tb-title', text: e.model }));
     fill(modelScreen, 
-      h('div', { class: 'topbar' }, h('button', { class: 'back', onclick: closeModel }, icon('back'), 'Поиск')),
-      h('h1', { text: e.model }),
+      bar,
+      title,
       h('div', { class: 'small muted', text: [e.year ? e.year + ' г.' : null, 'iFixit ' + (e.ifixit ?? 'нет оценки'), coefs].filter(Boolean).join(' · ') }),
       // ремонты сайта — всегда, остальные — только если есть детали
       h('div', { class: 'repairs' }, SERVICES.filter((svc) => SITE_SERVICES.includes(svc) || e.services[svc].opts.length).map((svc) => {
@@ -373,23 +455,24 @@ export function createPricesView(app) {
         }, h('span', { class: 'name', text: SVC[svc] }), h('span', { class: 'from', text: from ? 'от ' + from + ' р.' : 'нет деталей' }));
       })),
       comboCard(e),
-      visible.length ? visible.map((o) => variantCard(e, st.svc, o)) : emptyState(e, st.svc, noParts),
+      visible.length ? h('div', { class: 'variants' }, visible.map((o) => variantCard(e, st.svc, o))) : emptyState(e, st.svc, noParts),
       visible.length ? h('button', { class: 'link', style: 'margin-top:8px;display:block', text: '+ Своя деталь (не из прайса)', onclick: () => openOwnPart(app, e, st.svc, null) }) : null,
       hidden.length ? h('button', { class: 'link', style: 'margin-top:8px', onclick: () => { st.showHidden = !st.showHidden; draw(); } },
         st.showHidden ? 'Не показывать скрытые варианты' : 'Скрытые варианты: ' + hidden.length + ' (не дешевле варианта получше)') : null,
-      st.showHidden ? hidden.map((o) => variantCard(e, st.svc, o)) : null,
+      st.showHidden ? h('div', { class: 'variants', style: 'margin-top:12px' }, hidden.map((o) => variantCard(e, st.svc, o))) : null,
       h('div', { class: 'small faint', style: 'margin-top:14px', text: 'Работа ' + svcData.work + ' р. Цена = (работа + деталь) / (1 − ' + String(S.tax).replace('.', ',') + '), округление до ' + S.round + ' р., сверка с SmartFix.' }),
-      h('div', { class: 'dock' }, h('div', { class: 'inner' },
-        h('button', {
-          class: 'btn primary', disabled: !visible.length,
-          onclick: async () => { if (await copyText(clientText(e, [st.svc]))) toast('Текст для клиента скопирован'); },
-        }, icon('copy'), 'Скопировать клиенту'),
-        h('button', {
-          class: 'btn', 'aria-label': 'Скопировать все ремонты',
-          onclick: async () => { if (await copyText(clientText(e, SERVICES))) toast('Все ремонты скопированы'); },
-        }, 'Все'))),
     );
-    fill(root, modelScreen);
+    fill(dock, h('div', { class: 'inner' },
+      h('button', {
+        class: 'btn primary', disabled: !visible.length,
+        onclick: async () => { if (await copyText(clientText(e, [st.svc]))) toast('Текст для клиента скопирован'); },
+      }, icon('copy'), 'Скопировать клиенту'),
+      h('button', {
+        class: 'btn', 'aria-label': 'Скопировать все ремонты',
+        onclick: async () => { if (await copyText(clientText(e, SERVICES))) toast('Все ремонты скопированы'); },
+      }, 'Все')));
+    fill(root, modelScreen, dock);
+    watchTitle(bar, title);
   }
 
   function fmt(d) {

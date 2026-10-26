@@ -100,7 +100,7 @@ export function createOrdersView(app) {
     const showPrice = o.price !== null && o.price !== undefined && o.price !== '' && !(w && Number(o.price) === 0);
     return h('button', { class: 'item order', onclick: () => openOrderForm(app, o) },
       h('div', { class: 'grow' },
-        h('div', { class: 'row' }, h('span', { class: 'num', text: o.num ? '№' + o.num : '…' }), h('span', { class: 'model grow', text: o.model || o.device || 'Без модели' }),
+        h('div', { class: 'row' }, h('span', { class: 'num' + (w ? ' w' : ''), text: o.num ? '№' + o.num : '…' }), h('span', { class: 'model grow', text: o.model || o.device || 'Без модели' }),
           w ? h('span', { class: 'badge violet', text: 'гарантия' }) : null,
           showPrice ? h('span', { class: 'price', text: money(o.price) }) : null),
         h('div', { class: 'row' }, h('div', { class: 'prob grow', text: o.problem || o.done || '' }), statusBadge(o.status)),

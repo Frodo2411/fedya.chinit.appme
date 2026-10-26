@@ -102,18 +102,25 @@ export async function copyText(text) {
   }
 }
 
-// Окно на весь экран поверх приложения
+// Окно поверх приложения: на телефоне на весь экран, на компьютере — по центру. Esc закрывает верхнее окно.
 export function openSheet(title, body, foot, opts = {}) {
   const close = () => {
     if (!el.isConnected) return;
     el.remove();
+    document.removeEventListener('keydown', onKey);
     if (opts.onClose) opts.onClose();
   };
+  const onKey = (e) => {
+    const all = document.querySelectorAll('.sheet');
+    if (e.key === 'Escape' && all[all.length - 1] === el) close();
+  };
   const el = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-    h('div', { class: 'sheet-head' }, h('h3', { text: title }), h('button', { class: 'x', 'aria-label': 'Закрыть', text: '✕', onclick: () => close() })),
-    h('div', { class: 'sheet-body' }, body),
-    foot ? h('div', { class: 'sheet-foot' }, foot) : null);
+    h('div', { class: 'sheet-panel' },
+      h('div', { class: 'sheet-head' }, h('h3', { text: title }), h('button', { class: 'x', 'aria-label': 'Закрыть', text: '✕', onclick: () => close() })),
+      h('div', { class: 'sheet-body' }, body),
+      foot ? h('div', { class: 'sheet-foot' }, foot) : null));
   document.body.append(el);
+  document.addEventListener('keydown', onKey);
   return { el, close };
 }
 

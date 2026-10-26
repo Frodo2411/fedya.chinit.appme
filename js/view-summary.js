@@ -43,7 +43,7 @@ export function createSummaryView(app) {
         'Гарантийных ремонтов: ', h('b', { text: String(s.warranty) }), ', запчасти на них ', h('b', { text: money(s.warrantyCost) }),
         ' — уже вычтены из прибыли.') : null,
       h('h2', { text: 'Сейчас' }),
-      h('div', { class: 'tiles' },
+      h('div', { class: 'tiles four' },
         tile('Обращений (ещё не принёс)', String(now.lead)), tile('В ремонте', String(now.repair)),
         tile('Готово, ждёт клиента', String(now.ready)), tile('Долгосрок', String(now.later))),
       h('div', { class: 'row', style: 'margin-top:22px' }, h('h2', { class: 'grow', style: 'margin:0', text: 'Расходы за ' + monthTitle(st.month, false) }),
