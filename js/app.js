@@ -15,8 +15,9 @@ import { createMoreView, openSheetSetup } from './view-more.js';
 import { createCartView } from './view-cart.js';
 import { cartAdd, cartQty, cartCount } from './cart.js';
 
-// ownParts — свои детали (цену вписал сам), см. withOwnParts в engine.js; cart — корзина (cart.js)
-const DEFAULT_SETTINGS = { clientFooter: 'Гарантия на работу 4 месяца.', clientHints: true, supplierNotes: {}, formula: null, ownParts: [], cart: [], ts: 0 };
+// ownParts — свои детали (цену вписал сам), см. withOwnParts в engine.js; cart — корзина (cart.js),
+// cartGlue — класть в корзину проклейку вместе с деталью
+const DEFAULT_SETTINGS = { clientFooter: 'Гарантия на работу 4 месяца.', clientHints: true, supplierNotes: {}, formula: null, ownParts: [], cart: [], cartGlue: true, ts: 0 };
 // Гарантия стала 4 месяца: прежнюю строку по умолчанию заменяем, свою строку мастера не трогаем
 const OLD_FOOTER = 'Гарантия на работу 3 месяца.';
 function withDefaults(s) {
@@ -90,11 +91,13 @@ const app = {
     if (!this.sheet.connected) toast('Таблица не подключена: заказ уйдёт в неё после подключения', 4000);
   },
 
-  // Корзина: деталь или список деталей к покупке. Возвращает, сколько штук (последней) детали теперь в корзине
-  addToCart(items) {
+  // Корзина: деталь (или список деталей комплекса) к покупке. glues — нужные ей проклейки (у комплекса — список
+  // для каждой детали), кладутся вместе с ней, если не выключено. Возвращает, сколько штук детали теперь в корзине
+  addToCart(items, glues = []) {
     const list = [].concat(items);
+    const perItem = Array.isArray(items) ? glues : [glues];
     let cart = this.settings.cart || [];
-    for (const it of list) cart = cartAdd(cart, it);
+    list.forEach((it, i) => { cart = cartAdd(cart, it, this.settings.cartGlue === false ? [] : perItem[i] || []); });
     this.saveSettings({ cart });
     const last = list[list.length - 1];
     return cartQty(cart, last.sup, last.name);

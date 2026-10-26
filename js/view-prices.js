@@ -237,16 +237,20 @@ export function createPricesView(app) {
     return supplierStock(app, sup, stock);
   }
 
-  // В корзину: та же деталь ещё раз — +1 штука
-  function toCart(items) {
-    const n = app.addToCart(items);
-    toast(Array.isArray(items) ? 'В корзине: ' + items.length + ' дет.' : n > 1 ? 'В корзине уже ' + n + ' шт.' : 'Добавил в корзину');
+  // В корзину: та же деталь ещё раз — +1 штука. glues — проклейки к ней (положатся сами, если не выключено в корзине)
+  function toCart(items, glues) {
+    const n = app.addToCart(items, glues);
+    const withGlue = app.settings.cartGlue !== false && [].concat(glues || []).flat().length ? ' вместе с проклейкой' : '';
+    toast(Array.isArray(items) ? 'В корзине: ' + items.length + ' дет.' + withGlue : n > 1 ? 'В корзине уже ' + n + ' шт.' + withGlue : 'Добавил в корзину' + withGlue);
   }
 
   const partForCart = (entry, svc, o, p) => ({
     sup: p.sup, name: p.part, cost: p.cost, model: entry.model, svc, tier: o.tier,
     use: entry.model + ' · ' + lcFirst(SVC[svc]) + ' (' + lcFirst(VAR_APP[o.tier]) + ')',
   });
+  const glueForCart = (model, g) => ({ sup: g.sup, name: g.name, cost: g.cost, model, glue: g.type, use: model + ' · проклейка ' + GLUE_NAME[g.type] });
+  // проклейки, которые нужны ремонту (те же, что вычитаются из заработка); svc — ремонт или список (комплекс)
+  const gluesForCart = (model, svc) => app.pricer.glueFor(model, svc).items.filter((g) => !g.fallback).map((g) => glueForCart(model, g));
 
   function supName(key) {
     const s = app.pricer.data.suppliers[key];
@@ -281,7 +285,7 @@ export function createPricesView(app) {
       h('span', { class: 'glue-side' }, stockBadge(g.sup, g.stock), siteButton(g.sup, g.name, true),
         h('button', {
           class: 'link', style: 'padding:2px 0', text: cartQty(app.settings.cart, g.sup, g.name) ? '✓ в корзине' : 'в корзину',
-          onclick: () => toCart({ sup: g.sup, name: g.name, cost: g.cost, model, glue: g.type, use: model + ' · проклейка ' + GLUE_NAME[g.type] }),
+          onclick: () => toCart(glueForCart(model, g)),
         })));
   }
 
@@ -334,7 +338,7 @@ export function createPricesView(app) {
           onclick: () => { if (st.combo.get(svc) === o.tier) st.combo.delete(svc); else st.combo.set(svc, o.tier); draw(); },
         }, st.combo.get(svc) === o.tier ? '✓ В комплексе' : 'В комплекс'),
         h('button', {
-          class: 'btn small' + (inCart ? ' on' : ''), onclick: () => toCart(partForCart(entry, svc, o, p)),
+          class: 'btn small' + (inCart ? ' on' : ''), onclick: () => toCart(partForCart(entry, svc, o, p), gluesForCart(entry.model, svc)),
         }, inCart ? '✓ В корзине · ' + inCart : 'В корзину'),
         h('button', {
           class: 'btn small', onclick: () => { if (st.open.has(key)) st.open.delete(key); else st.open.add(key); draw(); },
@@ -395,6 +399,16 @@ export function createPricesView(app) {
     return out;
   }
 
+  // Комплекс в корзину: проклейка на весь комплекс (сторона вскрытия одна); каждая — к первой детали, которой она нужна
+  function comboToCart(entry, items) {
+    const glues = items.map(() => []);
+    for (const g of gluesForCart(entry.model, items.map((x) => x.svc))) {
+      const i = items.findIndex((x) => app.pricer.glueTypes(entry.model, x.svc).includes(g.glue));
+      glues[Math.max(0, i)].push(g);
+    }
+    toCart(items.map((x) => partForCart(entry, x.svc, x.o, x.p)), glues);
+  }
+
   function comboText(entry) {
     const items = comboItems(entry);
     const t = comboTotal(app.pricer.S, items);
@@ -426,7 +440,7 @@ export function createPricesView(app) {
           onclick: () => (items.length === 1 ? app.newOrderFromPrice(entry, items[0].svc, items[0].o, items[0].p) : app.newOrderFromCombo(entry, items, t)),
         }, 'Записать заказ'),
         h('button', { class: 'btn small', onclick: async () => { if (await copyText(comboText(entry))) toast('Комплекс скопирован'); } }, icon('copy'), 'Скопировать клиенту'),
-        h('button', { class: 'btn small', text: 'Всё в корзину', onclick: () => toCart(items.map((x) => partForCart(entry, x.svc, x.o, x.p))) }),
+        h('button', { class: 'btn small', text: 'Всё в корзину', onclick: () => comboToCart(entry, items) }),
         h('button', { class: 'btn small', text: 'Очистить', onclick: () => { st.combo.clear(); draw(); } })));
   }
 

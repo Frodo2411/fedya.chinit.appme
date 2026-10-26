@@ -9,7 +9,7 @@ import { monthTitle } from './ui.js';
 import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteKey } from './site-publish.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-10-26.4';
+export const APP_VERSION = '2026-10-26.5';
 
 export function createMoreView(app) {
   const root = h('div');

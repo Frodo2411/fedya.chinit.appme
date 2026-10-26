@@ -837,6 +837,66 @@ await test('корзина: +1 к той же детали, по поставщ�
   assert.equal(cartAdd(c, { sup: 'E', name: 'Пропавшая позиция', cost: 7 }).find((x) => x.name === 'Пропавшая позиция').done, false);
 });
 
+await test('корзина: проклейка кладётся вместе с деталью и идёт за её количеством', async () => {
+  const { cartAdd, cartSetQty, cartRemove, cartClearDone, cartReplace, cartQty } = await imp('js/cart.js');
+  const disp = { sup: 'E', name: 'Дисплей iPhone 14 - OLED', cost: 60, model: 'iPhone 14', svc: 'd', tier: 'copy_oled' };
+  const gd = { sup: 'P', name: 'Проклейка дисплея iPhone 14 - 2UUL (5шт)', cost: 10.7, model: 'iPhone 14', glue: 'gd' };
+  const gb = { sup: 'E', name: 'Проклейка батареи iPhone 14', cost: 3, model: 'iPhone 14', glue: 'gb' };
+  const bat = { sup: 'E', name: 'Аккумулятор iPhone 14', cost: 30, model: 'iPhone 14', svc: 'b', tier: 'copy' };
+  const glueLine = (c, g) => c.find((x) => x.glue && x.name === g.name);
+  let c = cartAdd([], disp, [gd]);
+  assert.deepEqual([c.length, cartQty(c, 'P', gd.name), glueLine(c, gd).need, glueLine(c, gd).per], [2, 1, 1, 5], 'дисплей + набор проклейки');
+  c = cartAdd(c, disp, [gd]);
+  assert.deepEqual([cartQty(c, 'E', disp.name), cartQty(c, 'P', gd.name), glueLine(c, gd).need], [2, 1, 2], 'второй дисплей — тот же набор на 5');
+  const did = c.find((x) => x.name === disp.name).id;
+  c = cartSetQty(c, did, 6);
+  assert.deepEqual([glueLine(c, gd).need, glueLine(c, gd).qty], [6, 2], '6 дисплеев — 2 набора');
+  c = cartSetQty(c, did, 3);
+  assert.deepEqual([glueLine(c, gd).need, glueLine(c, gd).qty], [3, 1]);
+  // аккумулятор со своей проклейкой (не набор): по штуке на аккумулятор
+  c = cartAdd(c, bat, [gb, gd]);
+  c = cartAdd(c, bat, [gb, gd]);
+  assert.deepEqual([cartQty(c, 'E', gb.name), glueLine(c, gd).need], [2, 5]);
+  // лишний набор вручную держится, пока нужное не изменится
+  c = cartSetQty(c, glueLine(c, gd).id, 2);
+  assert.equal(glueLine(c, gd).qty, 2);
+  // убрал дисплеи — их проклейка ушла, а проклейка аккумуляторов осталась
+  c = cartRemove(c, did);
+  assert.deepEqual([glueLine(c, gd).need, glueLine(c, gd).qty, cartQty(c, 'E', gb.name)], [2, 2, 2]);
+  const bid = c.find((x) => x.name === bat.name).id;
+  c = cartRemove(c, bid);
+  assert.deepEqual(c, [], 'убрал аккумуляторы — и проклеек больше нет');
+  // купленный дисплей убираю — его проклейка, если ещё не куплена, остаётся
+  c = cartAdd([], disp, [gd]);
+  c = c.map((x) => (x.name === disp.name ? { ...x, done: true } : x));
+  c = cartClearDone(c);
+  assert.deepEqual(c.map((x) => x.name), [gd.name]);
+  // купленную проклейку убрал — следующий дисплей кладёт новую, а не добавляет к старой нужде
+  c = cartAdd([], disp, [gd]);
+  c = c.map((x) => (x.glue ? { ...x, done: true } : x));
+  c = cartClearDone(c);
+  assert.deepEqual(c[0].glues, {}, 'дисплей больше не ведёт купленную проклейку');
+  c = cartSetQty(c, c[0].id, 2);
+  assert.equal(c.length, 1, 'увеличил дисплеи — купленная проклейка не возвращается');
+  // проклейку убрал крестиком — дисплей её не ведёт
+  c = cartAdd([], disp, [gd]);
+  c = cartRemove(c, glueLine(c, gd).id);
+  assert.deepEqual([c.length, c[0].glues], [1, {}]);
+  // другой поставщик дисплея: проклейка остаётся при нём
+  c = cartAdd([], disp, [gd]);
+  c = cartReplace(c, c.find((x) => x.name === disp.name).id, { sup: 'P', name: 'Дисплей iPhone 14 - OLED GX', cost: 65 });
+  c = cartRemove(c, c.find((x) => x.name === 'Дисплей iPhone 14 - OLED GX').id);
+  assert.deepEqual(c, [], 'проклейка ушла вместе с дисплеем от другого поставщика');
+  // проклейка вручную (кнопка у проклейки) и строка из прошлой версии без need
+  c = cartAdd([], gd);
+  c = cartAdd(c, gd);
+  assert.deepEqual([glueLine(c, gd).need, glueLine(c, gd).qty], [2, 1]);
+  const { cartText } = await imp('js/cart.js');
+  assert.equal(cartText('Второй', c), 'Второй:\n• Проклейка дисплея iPhone 14 - 2UUL (5шт) — 1 наб.');
+  const old = [{ id: 'x', sup: 'P', name: gd.name, cost: 10.7, qty: 2, glue: 'gd', uses: [], done: false }];
+  assert.equal(cartQty(cartAdd(old, disp, [gd]), 'P', gd.name), 3, 'старая строка: количество как было, +1');
+});
+
 await test('версия в «Ещё» совпадает с выпуском в sw.js', () => {
   const sw = /const VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'))[1];
   const app = /export const APP_VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'js/view-more.js'), 'utf8'))[1];

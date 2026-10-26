@@ -2,7 +2,7 @@
 // Добавляются кнопкой «В корзину» в «Ценах». Купленное отмечается галочкой.
 
 import { h, fill, icon, money, toast, copyText, openSheet } from './ui.js';
-import { cartGroups, cartText, cartCount, cartReplace } from './cart.js';
+import { cartGroups, cartText, cartCount, cartReplace, cartSetQty, cartRemove, cartClearDone } from './cart.js';
 import { OWN_NAME, OWN } from './engine.js';
 import { linkify, supplierStock } from './view-prices.js';
 
@@ -11,6 +11,9 @@ export function createCartView(app) {
   const cart = () => app.settings.cart || [];
   const save = (next) => app.saveSettings({ cart: next });
   const update = (id, patch) => save(cart().map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const glueSwitch = () => h('label', { class: 'switch', style: 'margin-top:4px' },
+    h('input', { type: 'checkbox', checked: app.settings.cartGlue !== false, onchange: (e) => app.saveSettings({ cartGlue: e.target.checked }, { redraw: false }) }),
+    h('span', { class: 'small', text: 'Класть проклейку в корзину вместе с деталью' }));
   const supName = (k) => {
     const s = app.pricer.data.suppliers[k];
     return (s && s.name) || (k === OWN ? OWN_NAME : 'Поставщика больше нет в прайсе');
@@ -45,16 +48,17 @@ export function createCartView(app) {
         }),
         h('div', { class: 'cart-meta tiny muted' },
           (x.uses || []).length ? h('span', { text: 'для ' + x.uses.join('; ') }) : null,
+          x.glue && x.per > 1 ? h('span', { text: 'в наборе ' + x.per + ' шт., нужно ' + x.need }) : null,
           x.gone ? h('span', { class: 'badge bad', text: 'нет в прайсе' }) : supplierStock(app, x.sup, x.stock)),
         h('div', { class: 'row', style: 'margin-top:8px' },
           h('div', { class: 'qty' },
-            h('button', { 'aria-label': 'Меньше', text: '−', disabled: x.qty <= 1, onclick: () => update(x.id, { qty: x.qty - 1 }) }),
-            h('span', { text: x.qty + ' шт.' }),
-            h('button', { 'aria-label': 'Больше', text: '+', onclick: () => update(x.id, { qty: x.qty + 1 }) })),
+            h('button', { 'aria-label': 'Меньше', text: '−', disabled: x.qty <= 1, onclick: () => save(cartSetQty(cart(), x.id, x.qty - 1)) }),
+            h('span', { text: x.qty + (x.glue && x.per > 1 ? ' наб.' : ' шт.') }),
+            h('button', { 'aria-label': 'Больше', text: '+', onclick: () => save(cartSetQty(cart(), x.id, x.qty + 1)) })),
           alts > 1 ? h('button', { class: 'link', text: 'Другой поставщик', onclick: () => openSwap(x) }) : null,
           h('span', { class: 'grow' }),
           h('b', { class: 'nowrap', text: money(Math.round((x.cost || 0) * x.qty * 100) / 100) }),
-          h('button', { class: 'cart-x', 'aria-label': 'Убрать из корзины', text: '✕', onclick: () => save(cart().filter((y) => y.id !== x.id)) }))));
+          h('button', { class: 'cart-x', 'aria-label': 'Убрать из корзины', text: '✕', onclick: () => save(cartRemove(cart(), x.id)) }))));
   }
 
   function group(g) {
@@ -77,7 +81,8 @@ export function createCartView(app) {
     const items = cart();
     if (!items.length) {
       fill(root, h('h1', { text: 'Корзина' }),
-        h('div', { class: 'empty' }, 'Корзина пустая.', h('br'), 'В «Ценах» у детали нажми «В корзину» — здесь будет видно, что у какого поставщика купить.'));
+        h('div', { class: 'empty' }, 'Корзина пустая.', h('br'), 'В «Ценах» у детали нажми «В корзину» — здесь будет видно, что у какого поставщика купить.'),
+        glueSwitch());
       return;
     }
     const groups = cartGroups(items, app.pricer.data);
@@ -94,10 +99,11 @@ export function createCartView(app) {
             if (await copyText(text)) toast('Вся корзина скопирована');
           },
         }, icon('copy'), 'Скопировать всё') : null,
-        bought ? h('button', { class: 'btn small', text: 'Убрать купленное · ' + bought, onclick: () => save(items.filter((x) => !x.done)) }) : null,
+        bought ? h('button', { class: 'btn small', text: 'Убрать купленное · ' + bought, onclick: () => save(cartClearDone(items)) }) : null,
         h('button', { class: 'btn small danger', text: 'Очистить', onclick: () => { if (confirm('Убрать из корзины всё?')) save([]); } })),
       groups.map(group),
-      h('div', { class: 'tiny faint', style: 'margin-top:12px', text: 'Цены и наличие — по последним прайсам. Нажми на название — оно скопируется, останется вставить в поиск на сайте поставщика. Корзина хранится вместе с настройками: при подключённой Google Таблице она одна и та же на телефоне и на компьютере.' }));
+      h('div', { style: 'margin-top:12px' }, glueSwitch()),
+      h('div', { class: 'tiny faint', style: 'margin-top:4px', text: 'Цены и наличие — по последним прайсам. Нажми на название — оно скопируется, останется вставить в поиск на сайте поставщика. Корзина хранится вместе с настройками: при подключённой Google Таблице она одна и та же на телефоне и на компьютере.' }));
   }
 
   return { el: root, draw };
