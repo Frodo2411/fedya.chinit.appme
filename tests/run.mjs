@@ -897,6 +897,30 @@ await test('корзина: проклейка кладётся вместе с 
   assert.equal(cartQty(cartAdd(old, disp, [gd]), 'P', gd.name), 3, 'старая строка: количество как было, +1');
 });
 
+await test('детали заказа для корзины: из комментария, по неисправности, комплекс', async () => {
+  const { orderCartItems } = await imp('js/view-orders.js');
+  const models = [...MODELS, { brand: 'iPhone', model: 'iPhone 11 Pro', year: 2019, ifixit: 6, sf: null, sfUrl: null }];
+  const parts = [...DATA.parts, P('E', 'Дисплей iPhone 11 Pro - In-Cell', 55, null, 'd', 'copy_lcd', ['iPhone 11 Pro'])];
+  const pr = new Pricer(withOwnParts({ ...DATA, models, parts }, [{ id: 'o1', model: 'iPhone 14', svc: 'c', tier: 'orig_used', cost: 30, name: 'Kufar' }]), { year: 2026 });
+  const names = (o) => orderCartItems(pr, o).map((x) => x.sup + ': ' + x.name + ' (' + x.model + ', ' + x.svc + '/' + x.tier + ')');
+  // как пишет «Записать заказ»
+  assert.deepEqual(names({ model: 'iPhone 11', comment: 'Деталь: Первый — Дисплей iPhone 11 - In-Cell 40 р.; проклейка: Второй — Проклейка 3 р.' }),
+    ['E: Дисплей iPhone 11 - In-Cell (iPhone 11, d/copy_lcd)']);
+  assert.deepEqual(names({ model: 'iPhone 11 Pro', comment: 'Деталь: Первый — Дисплей iPhone 11 Pro - In-Cell 55 р.' }),
+    ['E: Дисплей iPhone 11 Pro - In-Cell (iPhone 11 Pro, d/copy_lcd)'], 'не путает с «Дисплей iPhone 11 …»');
+  assert.deepEqual(names({ model: 'iPhone 14', comment: 'Деталь: Своя деталь — Kufar 30 р.' }), ['_own: Kufar (iPhone 14, c/orig_used)']);
+  // комплекс: обе детали, по порядку
+  assert.deepEqual(names({ model: 'iPhone 11', comment: 'Детали: Первый — Аккумулятор iPhone 11 - усиленная 24 р.; Второй — Дисплей iPhone 11 - Original (снятый) 90 р.' }),
+    ['E: Аккумулятор iPhone 11 - усиленная (iPhone 11, b/copy_boost)', 'P: Дисплей iPhone 11 - Original (снятый) (iPhone 11, d/orig_used)']);
+  // без комментария — по неисправности и модели (регистр любой): нынешняя деталь варианта
+  assert.deepEqual(names({ model: 'iphone 11', problem: 'Замена дисплея (оригинал, снятый)' }), ['P: Дисплей iPhone 11 - Original (снятый) (iPhone 11, d/orig_used)']);
+  assert.deepEqual(names({ model: 'iPhone 11', problem: 'Комплекс: замена дисплея (копия ЖК (In-Cell, TFT)), замена аккумулятора (копия усиленная)' }),
+    ['E: Аккумулятор iPhone 11 - усиленная (iPhone 11, b/copy_boost)', 'E: Дисплей iPhone 11 - In-Cell (iPhone 11, d/copy_lcd)']);
+  assert.deepEqual(names({ model: 'iPhone 11', problem: 'Замена аккумулятора (копия)' }), ['E: Аккумулятор iPhone 11 - копия (iPhone 11, b/copy)'], '«(копия)» — не «(копия усиленная)»');
+  assert.deepEqual(names({ model: 'iPhone 11', problem: 'Разбит дисплей' }), [], 'своими словами — не угадываем');
+  assert.deepEqual(names({ model: 'Nokia 3310', problem: 'Замена дисплея (копия ЖК (In-Cell, TFT))' }), []);
+});
+
 await test('версия в «Ещё» совпадает с выпуском в sw.js', () => {
   const sw = /const VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'))[1];
   const app = /export const APP_VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'js/view-more.js'), 'utf8'))[1];

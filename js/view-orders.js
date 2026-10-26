@@ -3,6 +3,8 @@
 import { h, fill, icon, money, fmtDate, toast, openSheet, field, select, chips, parseNum } from './ui.js';
 import { ACTIVE, computed, isWarranty } from './orders.js';
 import { store, today } from './store.js';
+import { SERVICES, ORDER } from './engine.js';
+import { REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
 
 const STATUS_CLASS = {
   'Обращение': 'lead', 'Принят': 'work', 'Диагностика': 'work', 'Жду запчасть': 'wait', 'В работе': 'work',
@@ -45,6 +47,43 @@ export function matchOrder(o, q) {
   if (!q) return true;
   const hay = [o.num, o.model, o.client, o.phone, o.problem, o.done, o.comment, o.device].filter(Boolean).join(' ').toLowerCase().replace(/ё/g, 'е');
   return q.toLowerCase().replace(/ё/g, 'е').split(/\s+/).filter(Boolean).every((t) => hay.includes(t));
+}
+
+// Детали заказа для корзины. Сначала — из комментария: «Записать заказ» пишет туда «Деталь: Поставщик — название
+// цена р.»; если там не нашлось (поставщика переименовали, комментарий переписан) — по «Неисправности» вида
+// «Замена дисплея (копия ЖК)» и модели: нынешняя деталь этого варианта
+export function orderCartItems(pricer, o) {
+  const text = String(o.comment || '');
+  const supName = (k) => (pricer.data.suppliers[k] || {}).name || k;
+  const hits = [];
+  if (text) {
+    for (const p of pricer.data.parts) {
+      if (!p.cost || !p.models.length || !ORDER[p.svc] || !ORDER[p.svc].includes(p.tier)) continue;
+      const needle = supName(p.sup) + ' — ' + p.name + ' ';
+      const at = text.indexOf(needle);
+      if (at >= 0 && !hits.some((x) => x.p.sup === p.sup && x.p.name === p.name)) hits.push({ p, at, end: at + needle.length });
+    }
+  }
+  // «… — Дисплей iPhone 11 » внутри «… — Дисплей iPhone 11 Pro …» — не та деталь: берём самые длинные совпадения
+  const exact = hits.filter((a) => !hits.some((b) => b !== a && b.at <= a.at && b.end >= a.end && b.end - b.at > a.end - a.at));
+  if (exact.length) {
+    return exact.sort((a, b) => a.at - b.at)
+      .map(({ p }) => cartPart(p.models.includes(o.model) ? o.model : p.models[0], p.svc, p.tier, p));
+  }
+  const low = String(o.model || '').trim().toLowerCase();
+  const model = low ? [...pricer.byName.keys()].find((m) => m.toLowerCase() === low) : null;
+  if (!model) return [];
+  const entry = pricer.model(model);
+  const prob = String(o.problem || '').toLowerCase();
+  const out = [];
+  for (const svc of SERVICES) {
+    for (const tier of ORDER[svc]) {
+      if (!prob.includes((lcFirst(REPAIR[svc]) + ' (' + lcFirst(VAR_APP[tier]) + ')').toLowerCase())) continue;
+      const opt = entry.services[svc].opts.find((x) => x.tier === tier);
+      if (opt) out.push(cartPart(model, svc, tier, { sup: opt.sup, name: opt.part, cost: opt.cost }));
+    }
+  }
+  return out;
 }
 
 // Номер для сортировки: «Г12» → 12, без номера (ещё не отправлен) — в начало
@@ -165,12 +204,15 @@ function describeOp(op) {
   return 'расход';
 }
 
-// Гарантия по заказу: клиент и телефон те же, ремонт бесплатный
-export function warrantyPrefill(order) {
+// Гарантия по заказу: клиент и телефон те же, ремонт бесплатный. cart — детали того заказа (галочка «Те же детали
+// в корзину», по умолчанию выключена: по гарантии может понадобиться другая деталь)
+export function warrantyPrefill(app, order) {
+  const items = orderCartItems(app.pricer, order);
   return {
     warrantyOrder: true, wfor: order.num, price: 0,
     client: order.client || '', phone: order.phone || '', address: order.address || '',
     device: order.device || 'Телефон', model: order.model || '', source: order.source || store.get('lastSource', ''),
+    cart: items.length ? { items, glues: cartGlues(app.pricer, items[0].model, items.map((x) => x.svc)), same: true } : undefined,
   };
 }
 
@@ -178,8 +220,11 @@ export function warrantyPrefill(order) {
 export function openOrderForm(app, order, prefill) {
   const lists = app.sheet.lists;
   const isNew = !order;
+  // cart — детали заказа из «Цен» ({ items, glues }): по галочке «Детали в корзину» лягут в корзину
+  const { cart: cartPlan, ...pre } = prefill || {};
+  let toCartOn = cartPlan && cartPlan.same ? false : store.get('orderToCart', true);
   const o = isNew
-    ? { date: today(), status: 'Обращение', urgent: 'Нет', device: 'Телефон', source: store.get('lastSource', ''), ...prefill }
+    ? { date: today(), status: 'Обращение', urgent: 'Нет', device: 'Телефон', source: store.get('lastSource', ''), ...pre }
     : { ...order };
   const orig = { ...o };
   // цену из «Цен» запоминаем: переключил на гарантию и обратно — она вернётся
@@ -218,6 +263,33 @@ export function openOrderForm(app, order, prefill) {
     }
     sheet.el.querySelector('.sheet-head h3').textContent = on ? 'Гарантия' : 'Новый заказ';
     draw();
+  }
+
+  // Для корзины: «для чего» — с заказом; что ляжет — списком
+  const forOrder = (x) => ({ ...x, use: x.use + ' · заказ' + (o.num ? ' №' + o.num : '') + (o.client ? ' · ' + o.client : '') });
+  const planText = (items, glues) => items.map((x) => x.name).join('; ')
+    + (app.settings.cartGlue !== false && glues.flat().length ? ' + проклейка' : '');
+
+  // Записанный заказ: его детали — в корзину, цены этой модели
+  function orderActions() {
+    const found = orderCartItems(app.pricer, o);
+    const model = app.findModel(o.model);
+    if (!found.length && !model) return null;
+    const glues = found.length ? cartGlues(app.pricer, found[0].model, found.map((x) => x.svc)) : [];
+    return h('div', { style: 'margin-top:16px' },
+      found.length ? h('div', {},
+        h('button', {
+          class: 'btn small', onclick: (e) => {
+            app.addToCart(found.map(forOrder), glues);
+            toast('В корзине: ' + found.length + ' дет.' + (app.settings.cartGlue !== false && glues.flat().length ? ' с проклейкой' : ''));
+            // второй раз по ошибке не положить
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            btn.textContent = '✓ Добавлено в корзину';
+          },
+        }, icon('cart'), 'Детали в корзину'),
+        h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Положу: ' + planText(found, glues) })) : null,
+      model ? h('button', { class: 'btn small', style: found.length ? 'margin-top:12px' : null, text: 'Цены: ' + model, onclick: () => { sheet.close(); app.showModel(model); } }) : null);
   }
 
   // Скрипт таблицы до гарантии нумеровал бы такой заказ как обычный
@@ -288,10 +360,18 @@ export function openOrderForm(app, order, prefill) {
         h('summary', { text: 'Клиент (необязательно)' }),
         clientFields(false)),
       text('comment', 'Комментарий', { area: true }),
+      isNew && cartPlan && cartPlan.items.length ? h('label', { class: 'switch', style: 'margin-top:10px' },
+        h('input', {
+          type: 'checkbox', checked: toCartOn,
+          onchange: (e) => { toCartOn = e.target.checked; if (!cartPlan.same) store.set('orderToCart', toCartOn); },
+        }),
+        h('span', {}, cartPlan.same ? 'Те же детали в корзину' : 'Детали в корзину',
+          h('span', { class: 'tiny faint', style: 'display:block', text: planText(cartPlan.items, cartPlan.glues) }))) : null,
+      isNew ? null : orderActions(),
       // по выданному заказу можно сразу оформить гарантию
       !isNew && !w && o.num ? h('button', {
         class: 'btn small block', style: 'margin-top:16px', text: 'Гарантия по этому заказу',
-        onclick: () => { sheet.close(); openOrderForm(app, null, warrantyPrefill(order)); },
+        onclick: () => { sheet.close(); openOrderForm(app, null, warrantyPrefill(app, order)); },
       }) : null,
     );
     recalc();
@@ -311,7 +391,9 @@ export function openOrderForm(app, order, prefill) {
         if (!fields.model && !fields.problem && !fields.client) { toast('Заполни модель или неисправность'); return; }
         if (fields.source) store.set('lastSource', fields.source);
         app.sheet.add('addOrder', fields, w ? { warranty: true } : undefined);
-        toast((w ? 'Гарантийный заказ записан' : 'Заказ записан') + (app.sheet.connected ? '' : ' в очередь'));
+        const toCart = cartPlan && cartPlan.items.length && toCartOn;
+        if (toCart) app.addToCart(cartPlan.items.map(forOrder), cartPlan.glues);
+        toast((w ? 'Гарантийный заказ записан' : 'Заказ записан') + (app.sheet.connected ? '' : ' в очередь') + (toCart ? ', детали в корзине' : ''));
       } else {
         const changed = {};
         for (const k of EDITABLE) if ((o[k] ?? null) !== (orig[k] ?? null)) changed[k] = o[k] ?? '';

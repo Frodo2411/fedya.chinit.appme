@@ -57,6 +57,27 @@ export const REPAIR = {
 // «Копия ЖК (In-Cell, TFT)» → «копия ЖК (In-Cell, TFT)»: сокращения не трогаем
 export const lcFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);
 
+// Для корзины: деталь (что, у кого, почём и для чего) и проклейка к ней
+export function cartPart(model, svc, tier, part) {
+  return { sup: part.sup, name: part.name, cost: part.cost, model, svc, tier, use: model + ' · ' + lcFirst(SVC[svc]) + ' (' + lcFirst(VAR_APP[tier]) + ')' };
+}
+
+export function cartGlue(model, g) {
+  return { sup: g.sup, name: g.name, cost: g.cost, model, glue: g.type, use: model + ' · проклейка ' + GLUE_NAME[g.type] };
+}
+
+// Проклейки к деталям одного телефона (те же, что вычитаются из заработка): на всё вскрытие по разу,
+// каждая — к первой из svcs, которой она нужна. Ответ — список проклеек для каждой детали
+export function cartGlues(pricer, model, svcs) {
+  const out = svcs.map(() => []);
+  for (const g of pricer.glueFor(model, svcs).items) {
+    if (g.fallback) continue;
+    const i = svcs.findIndex((svc) => pricer.glueTypes(model, svc).includes(g.type));
+    out[Math.max(0, i)].push(cartGlue(model, g));
+  }
+  return out;
+}
+
 // Пояснения для клиента, по тексту с сайта
 function clientHint(svc, tier, model) {
   const iphone = model.startsWith('iPhone');
@@ -244,13 +265,7 @@ export function createPricesView(app) {
     toast(Array.isArray(items) ? 'В корзине: ' + items.length + ' дет.' + withGlue : n > 1 ? 'В корзине уже ' + n + ' шт.' + withGlue : 'Добавил в корзину' + withGlue);
   }
 
-  const partForCart = (entry, svc, o, p) => ({
-    sup: p.sup, name: p.part, cost: p.cost, model: entry.model, svc, tier: o.tier,
-    use: entry.model + ' · ' + lcFirst(SVC[svc]) + ' (' + lcFirst(VAR_APP[o.tier]) + ')',
-  });
-  const glueForCart = (model, g) => ({ sup: g.sup, name: g.name, cost: g.cost, model, glue: g.type, use: model + ' · проклейка ' + GLUE_NAME[g.type] });
-  // проклейки, которые нужны ремонту (те же, что вычитаются из заработка); svc — ремонт или список (комплекс)
-  const gluesForCart = (model, svc) => app.pricer.glueFor(model, svc).items.filter((g) => !g.fallback).map((g) => glueForCart(model, g));
+  const partForCart = (entry, svc, o, p) => cartPart(entry.model, svc, o.tier, { sup: p.sup, name: p.part, cost: p.cost });
 
   function supName(key) {
     const s = app.pricer.data.suppliers[key];
@@ -285,7 +300,7 @@ export function createPricesView(app) {
       h('span', { class: 'glue-side' }, stockBadge(g.sup, g.stock), siteButton(g.sup, g.name, true),
         h('button', {
           class: 'link', style: 'padding:2px 0', text: cartQty(app.settings.cart, g.sup, g.name) ? '✓ в корзине' : 'в корзину',
-          onclick: () => toCart(glueForCart(model, g)),
+          onclick: () => toCart(cartGlue(model, g)),
         })));
   }
 
@@ -338,7 +353,7 @@ export function createPricesView(app) {
           onclick: () => { if (st.combo.get(svc) === o.tier) st.combo.delete(svc); else st.combo.set(svc, o.tier); draw(); },
         }, st.combo.get(svc) === o.tier ? '✓ В комплексе' : 'В комплекс'),
         h('button', {
-          class: 'btn small' + (inCart ? ' on' : ''), onclick: () => toCart(partForCart(entry, svc, o, p), gluesForCart(entry.model, svc)),
+          class: 'btn small' + (inCart ? ' on' : ''), onclick: () => toCart(partForCart(entry, svc, o, p), cartGlues(app.pricer, entry.model, [svc])[0]),
         }, inCart ? '✓ В корзине · ' + inCart : 'В корзину'),
         h('button', {
           class: 'btn small', onclick: () => { if (st.open.has(key)) st.open.delete(key); else st.open.add(key); draw(); },
@@ -399,14 +414,9 @@ export function createPricesView(app) {
     return out;
   }
 
-  // Комплекс в корзину: проклейка на весь комплекс (сторона вскрытия одна); каждая — к первой детали, которой она нужна
+  // Комплекс в корзину: проклейка на весь комплекс (сторона вскрытия одна)
   function comboToCart(entry, items) {
-    const glues = items.map(() => []);
-    for (const g of gluesForCart(entry.model, items.map((x) => x.svc))) {
-      const i = items.findIndex((x) => app.pricer.glueTypes(entry.model, x.svc).includes(g.glue));
-      glues[Math.max(0, i)].push(g);
-    }
-    toCart(items.map((x) => partForCart(entry, x.svc, x.o, x.p)), glues);
+    toCart(items.map((x) => partForCart(entry, x.svc, x.o, x.p)), cartGlues(app.pricer, entry.model, items.map((x) => x.svc)));
   }
 
   function comboText(entry) {

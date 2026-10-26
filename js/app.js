@@ -8,7 +8,7 @@ import { Pricer, withOwnParts } from './engine.js';
 import { ModelSearch } from './search.js';
 import { store } from './store.js';
 import { SheetSync } from './sheet.js';
-import { createPricesView, REPAIR, VAR_APP, lcFirst } from './view-prices.js';
+import { createPricesView, REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
 import { createOrdersView, openOrderForm } from './view-orders.js';
 import { createSummaryView } from './view-summary.js';
 import { createMoreView, openSheetSetup } from './view-more.js';
@@ -73,6 +73,8 @@ const app = {
       device: 'Телефон', model: entry.model, problem: REPAIR[svc] + ' (' + lcFirst(VAR_APP[o.tier]) + ')',
       price: p.price, part: Math.round((p.cost + glue.total) * 100) / 100,
       comment: 'Деталь: ' + partNote(p) + glueNote(glue),
+      // что положить в корзину, если стоит галочка «Детали в корзину»
+      cart: { items: [cartPart(entry.model, svc, o.tier, { sup: p.sup, name: p.part, cost: p.cost })], glues: cartGlues(this.pricer, entry.model, [svc]) },
     });
     if (!this.sheet.connected) toast('Таблица не подключена: заказ уйдёт в неё после подключения', 4000);
   },
@@ -87,6 +89,10 @@ const app = {
       price: t.total, part: Math.round((parts + glue.total) * 100) / 100,
       comment: (t.discount ? 'Без скидки ' + t.sum + ' р., скидка за комплекс ' + this.pricer.S.combo_discount + '% на работу: −' + t.discount + ' р. ' : '')
         + 'Детали: ' + items.map((x) => partNote(x.p)).join('; ') + glueNote(glue),
+      cart: {
+        items: items.map((x) => cartPart(entry.model, x.svc, x.tier, { sup: x.p.sup, name: x.p.part, cost: x.p.cost })),
+        glues: cartGlues(this.pricer, entry.model, items.map((x) => x.svc)),
+      },
     });
     if (!this.sheet.connected) toast('Таблица не подключена: заказ уйдёт в неё после подключения', 4000);
   },
@@ -101,6 +107,23 @@ const app = {
     this.saveSettings({ cart });
     const last = list[list.length - 1];
     return cartQty(cart, last.sup, last.name);
+  },
+
+  // Модель из прайса по названию из заказа: точное, без учёта регистра или первая из поиска («айфон 13»)
+  findModel(name) {
+    const q = String(name || '').trim();
+    if (!q) return null;
+    if (this.pricer.byName.has(q)) return q;
+    const low = q.toLowerCase();
+    for (const m of this.pricer.byName.keys()) if (m.toLowerCase() === low) return m;
+    const hit = this.search.find(q, 1)[0];
+    return hit ? hit.model : null;
+  },
+
+  // Открыть цены этой модели (из заказа)
+  showModel(name) {
+    switchTab('prices');
+    this.views.prices.openModel(name);
   },
 
   // Сайт поставщика: свой (из «⋯» у поставщика) или из общего прайса; пустая строка — сайт убрали
