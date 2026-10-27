@@ -195,7 +195,7 @@ export function buildImport(data, supKey, sheets, cols, today) {
   // Разметка хранится как по правилам, поправка — при расчёте (Pricer), здесь — только чтобы показать новые позиции как в расчёте
   const s = data.suppliers[supKey] || {};
   const grade = typeof s.origGrade === 'boolean' ? s.origGrade
-    : gradeVocab(rows.map((r) => r[cols.nameCol]).filter((v) => typeof v === 'string'));
+    : gradeVocab(rows.map((r) => r[cols.nameCol]).filter((v) => typeof v === 'string' && kindOf(v.trim()) && families(v).size).map((v) => v.trim()));
   const report = { file: { rows: rows.length, parts: 0, otherBrands: 0, noPrice: 0 }, known: 0, extended: 0, priceUp: [], priceDown: [], fresh: [], unmapped: [], gone: [],
     grade, gradeAuto: typeof s.origGrade !== 'boolean' };
   for (const r of rows) {

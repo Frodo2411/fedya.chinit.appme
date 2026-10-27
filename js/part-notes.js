@@ -18,10 +18,13 @@ const cameraMessage = (model) => (iphoneGen(model) || 0) >= 12 || /^iPhone (Air|
 
 // «Оригинал» в названии копии: у поставщика это уровень качества или марка, а не деталь производителя телефона
 const ORIG_WORD = /оригинал|original|\borig\b/i;
-const ORIG_REAL = /100\s*%|сервис|service|снят|разбор|переклей|\bреф\b/i;
+const ORIG_REAL = /100\s*%|сервис|service|снят|разбор|переклей|(?<![а-яё])реф(?![а-яё])/i;
 
 const IC = /площадк[а-яёa-z]*\s+под\s+IC|под\s+IC\b|movable\s*IC|перенос[а-яёa-z]*\s+(?:микросхем|IC)/i;
 const VERIFIED = /верификац|с\s+привязкой|без\s+ошибки|genuine|подлинн|новая\s+запчасть/i;
+// «без верификации», «без привязки» — наоборот
+const NOT_VERIFIED = /без\s+(?:привязк|верификац)/i;
+const verified = (n) => VERIFIED.test(n) && !NOT_VERIFIED.test(n);
 
 function displayNotes(n, model, tier, out) {
   const add = (tag, text, warn) => out.push({ tag, text, warn: !!warn });
@@ -50,8 +53,8 @@ function displayNotes(n, model, tier, out) {
   }
   // микросхема дисплея: «Неизвестная деталь» и True Tone
   if (IC.test(n)) add('площадка под IC', 'можно перепаять микросхему со старого дисплея: не будет «Неизвестной детали», останется True Tone (нужна пайка)');
-  if (VERIFIED.test(n)) add('с верификацией', 'по словам поставщика — без «Неизвестной детали»; часто для этого нужен программатор (JCID/JC) — уточнить');
-  if (copy && !IC.test(n) && !VERIFIED.test(n) && displayMessage(model)) {
+  if (verified(n)) add('с верификацией', 'по словам поставщика — без «Неизвестной детали»; часто для этого нужен программатор (JCID/JC) — уточнить');
+  if (copy && !IC.test(n) && !verified(n) && displayMessage(model)) {
     add('будет «Неизвестная деталь»', 'без площадки под IC и без верификации: в настройках будет сообщение о неоригинальном дисплее, True Tone не будет', true);
   }
   // оригиналы
@@ -77,7 +80,7 @@ function batteryNotes(n, model, tier, out) {
   const mah = /(\d{3,5})\s*mAh/i.exec(n);
   if (/усилен|повышенн[а-яёa-z]*\s+[её]мк/i.test(n)) add('усиленная', 'ёмкость больше заводской — держит дольше; реальную ёмкость проверить после установки');
   if (mah) add(mah[1] + ' мА·ч', 'ёмкость по словам поставщика');
-  const ok = VERIFIED.test(n) && !/original|разбор|снят/i.test(n);
+  const ok = verified(n) && !/original|разбор|снят/i.test(n);
   if (ok) add('без ошибки', 'не будет «Неизвестной детали» в «Состоянии аккумулятора»');
   if (tier === 'orig_used') add('снятый', 'оригинал с другого телефона: ёмкость проверить (от 95%)');
   if (/\bOR100\b/.test(n)) add('OR100', 'несмотря на «OR», это копия');

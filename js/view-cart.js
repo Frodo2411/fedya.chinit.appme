@@ -18,8 +18,13 @@ export function createCartView(app) {
     const s = app.pricer.data.suppliers[k];
     return (s && s.name) || (k === OWN ? OWN_NAME : 'Поставщика больше нет в прайсе');
   };
-  // другие детали того же варианта — купить у другого поставщика
-  const alternatives = (x) => (x.model && x.svc && x.tier && !x.glue ? app.pricer.partsFor(x.model, x.svc, x.tier) : []);
+  // другие детали того же варианта — купить у другого поставщика. Вариант — как в нынешнем расчёте: деталь могли
+  // положить до поправки варианта (например, «оригинал» у аккумулятора айфона, который оказался копией)
+  const alternatives = (x) => {
+    if (!x.model || !x.svc || !x.tier || x.glue) return [];
+    const cur = app.pricer.data.parts.find((p) => p.sup === x.sup && p.name === x.name && p.svc === x.svc);
+    return app.pricer.partsFor(x.model, x.svc, cur ? app.pricer.tierOf(cur) : x.tier);
+  };
 
   function openSwap(x) {
     const rows = alternatives(x);

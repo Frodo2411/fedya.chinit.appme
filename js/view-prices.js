@@ -424,7 +424,9 @@ export function createPricesView(app) {
       st.open.has(key) ? h('div', { class: 'others' },
         p.override ? h('button', { class: 'link', text: 'Вернуть деталь по умолчанию', onclick: () => { st.overrides.delete(key); draw(); } }) : null,
         others.map((r) => {
-          const chosen = p.override ? r === st.overrides.get(key) : r.name === p.part && r.sup === p.sup && r.cost === p.cost;
+          // строки расчёта создаются заново при каждом пересчёте: сравниваем по поставщику, названию и цене
+          const ov = st.overrides.get(key);
+          const chosen = p.override ? r.name === ov.name && r.sup === ov.sup && r.cost === ov.cost : r.name === p.part && r.sup === p.sup && r.cost === p.cost;
           return h('div', { class: 'other' },
             h('div', { class: 'grow' },
               h('div', { class: 'small' }, h('b', { text: supName(r.sup) + ' · ' + money(r.cost) }), ' ', stockBadge(r.sup, r.stock)),
@@ -610,7 +612,12 @@ export function createPricesView(app) {
   return {
     el: root,
     draw,
-    reset() { st.overrides.clear(); draw(); },
+    reset() {
+      st.overrides.clear();
+      // поставщика удалили — он больше не в выборе (и не включится сам, если вернётся)
+      if (st.sups.size && chosen().length !== st.sups.size) { st.sups = new Set(chosen()); store.set('supFilter', [...st.sups]); }
+      draw();
+    },
     openModel,
     get model() { return st.model; },
   };

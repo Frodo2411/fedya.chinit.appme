@@ -59,17 +59,20 @@ export function orderCartItems(pricer, o) {
   const hits = [];
   if (text) {
     for (const p of pricer.data.parts) {
-      if (!p.cost || !p.models.length || !ORDER[p.svc] || !ORDER[p.svc].includes(p.tier)) continue;
+      if (!p.cost || !p.models.length || !ORDER[p.svc]) continue;
       const needle = supName(p.sup) + ' — ' + p.name + ' ';
       const at = text.indexOf(needle);
-      if (at >= 0 && !hits.some((x) => x.p.sup === p.sup && x.p.name === p.name)) hits.push({ p, at, end: at + needle.length });
+      if (at < 0) continue;
+      // вариант — как в расчёте (с поправками fixTier), а не как размечено при загрузке прайса
+      const tier = pricer.tierOf ? pricer.tierOf(p) : p.tier;
+      if (ORDER[p.svc].includes(tier) && !hits.some((x) => x.p.sup === p.sup && x.p.name === p.name)) hits.push({ p, tier, at, end: at + needle.length });
     }
   }
   // «… — Дисплей iPhone 11 » внутри «… — Дисплей iPhone 11 Pro …» — не та деталь: берём самые длинные совпадения
   const exact = hits.filter((a) => !hits.some((b) => b !== a && b.at <= a.at && b.end >= a.end && b.end - b.at > a.end - a.at));
   if (exact.length) {
     return exact.sort((a, b) => a.at - b.at)
-      .map(({ p }) => cartPart(p.models.includes(o.model) ? o.model : p.models[0], p.svc, p.tier, p));
+      .map(({ p, tier }) => cartPart(p.models.includes(o.model) ? o.model : p.models[0], p.svc, tier, p));
   }
   const low = String(o.model || '').trim().toLowerCase();
   const model = low ? [...pricer.byName.keys()].find((m) => m.toLowerCase() === low) : null;

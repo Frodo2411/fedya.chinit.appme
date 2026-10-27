@@ -2,7 +2,7 @@
 // Данные прайса и код скрипта сначала берём из сети (там могут быть свежие), без сети — из кэша.
 // При каждом выпуске меняется VERSION, телефон скачивает новую версию сам.
 
-const VERSION = '2026-10-27.1';
+const VERSION = '2026-10-27.2';
 const CACHE = 'master-' + VERSION;
 const FILES = [
   './', 'index.html', 'app.css', 'manifest.webmanifest',

@@ -1023,6 +1023,21 @@ await test('«ОРИГИНАЛ» — уровень копии у поставщ
   assert.equal(fixTier('b', 'Аккумулятор Samsung A52 - OR', ['Samsung Galaxy A52'], 'orig_new'), 'orig_new');
   assert.equal(fixTier('b', 'Аккумулятор iPhone 13 - Original (С верификацией/ Разбор)', ['iPhone 13'], 'orig_used'), 'orig_used');
   assert.equal(mapRow('Аккумулятор iPhone 11 - OR', 'b', siteIndex(MODELS.map((m) => m.model)), new Map(MODELS.map((m) => [m.model, BRAND_FAM[m.brand]]))).tier, 'copy');
+  assert.equal(fixTier('b', 'Аккумулятор iPhone 11 - Original (без привязки)', ['iPhone 11'], 'orig_new'), 'copy', '«без привязки» — не без ошибки');
+  assert.equal(fixTier('b', 'Аккумулятор iPhone 11 - OR (без верификации)', ['iPhone 11'], 'orig_new'), 'copy');
+  assert.equal(tier('b', 'Аккумулятор iPhone 11 - Genuine (без верификации)'), 'copy', '«без верификации» — не без ошибки');
+  assert.equal(fixTier('b', 'АКБ Apple iPhone 11 - ОРИГИНАЛ 100%', ['iPhone 11'], 'orig_new', true), 'orig_used', 'оригинал 100% у аккумулятора айфона — снятый');
+  // словарь — только если есть новый оригинал с пометкой: «снятый» и «переклей» — состояние, а не уровень копии
+  const used = [...Array(10)].flatMap((_, i) => ['Камера Samsung A' + i + ' - ОРИГИНАЛ-СНЯТЫЙ', 'Камера Samsung M' + i + ' - ОРИГИНАЛ']);
+  assert.equal(gradeVocab(used), false);
+  assert.equal(gradeVocab([...Array(10)].flatMap((_, i) => ['Дисплей Samsung A' + i + ' - ОРИГИНАЛ (SERVICE PACK)', 'Дисплей Samsung M' + i + ' - ОРИГИНАЛ (Снятый)'])), false);
+  // кириллица в границах слова: «ориг», «РЕФ»
+  assert.equal(tier('cr', 'Камера iPhone 11 основная - ориг', g), 'copy');
+  assert.equal(tier('cr', 'Камера iPhone 11 основная - ОРИГИНАЛ РЕФ', g), 'orig_new');
+  assert.equal(tier('d', 'Дисплей iPhone 11/iPhone11 (A2221) в сборе Черный - ОРИГИНАЛ (Заменен тач)', g), 'orig_reglass');
+  assert.equal(tier('d', 'Дисплей iPhone 11 - OR (снятый, заменена рамка)'), 'orig_used');
+  assert.equal(mapRow('Дисплей iPhone 11/iPhone11 (A2221) в сборе Черный - ОРИГИНАЛ (Заменено стекло и тач) (КОМПЛ. 3 ШТУКИ)', 'd',
+    siteIndex(MODELS.map((m) => m.model)), new Map(MODELS.map((m) => [m.model, BRAND_FAM[m.brand]]))).tier, 'skip', 'комплект из трёх — не на один ремонт');
   // расчёт: прежняя разметка в данных поправляется при расчёте, отметка поставщика сильнее словаря, своя деталь — как вписана
   const sup = { A: { name: 'А', stock: true, rank: 0 }, B: { name: 'Б', stock: true, rank: 1 } };
   const filler = names.map((n) => P('B', n, 50, 'В наличии', 'd', 'orig_new', ['Samsung Galaxy A52']));

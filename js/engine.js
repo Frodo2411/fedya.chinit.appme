@@ -192,17 +192,30 @@ export function sfKey(svc, tier) {
 
 // Поставщики, у которых «ОРИГИНАЛ» — уровень качества копии (см. gradeVocab в rules.js): отметка поставщика
 // origGrade (true/false, ставится в «Ещё → Прайсы поставщиков»), а без неё — по словам в его прайсе
+// Словарь по прайсу считается один раз на набор деталей: расчёт пересоздаётся часто, а детали те же
+const VOCAB = new WeakMap();
 export function origGrades(data) {
   const out = new Map();
-  const names = new Map();
-  for (const [k, s] of Object.entries(data.suppliers || {})) {
-    if (s && typeof s.origGrade === 'boolean') out.set(k, s.origGrade);
-    else names.set(k, []);
+  let auto = VOCAB.get(data.parts);
+  if (!auto) {
+    const names = new Map();
+    for (const p of data.parts) {
+      if (p.own) continue;
+      if (!names.has(p.sup)) names.set(p.sup, []);
+      names.get(p.sup).push(p.name);
+    }
+    auto = new Map([...names].map(([k, list]) => [k, gradeVocab(list)]));
+    VOCAB.set(data.parts, auto);
   }
-  for (const p of data.parts) if (names.has(p.sup)) names.get(p.sup).push(p.name);
-  for (const [k, list] of names) out.set(k, gradeVocab(list));
+  for (const k of Object.keys(data.suppliers || {})) {
+    const s = data.suppliers[k];
+    out.set(k, s && typeof s.origGrade === 'boolean' ? s.origGrade : !!auto.get(k));
+  }
   return out;
 }
+
+// Поправка варианта одной и той же строки данных считается один раз (пока не поменялись её вариант и словарь)
+const FIXED = new WeakMap();
 
 export class Pricer {
   // data: { suppliers: {key: {name, stock, rank}}, models: [{brand, model, year, ifixit, sf}], parts: [{sup, name, cost, stock, svc, tier, models, line}] }
@@ -217,7 +230,13 @@ export class Pricer {
   // Вариант детали для расчёта: размеченный при загрузке прайса, с поправками (fixTier в rules.js).
   // Своя деталь — как вписал мастер
   tierOf(p) {
-    return p.own ? p.tier : fixTier(p.svc, p.name, p.models, p.tier, this.grades.get(p.sup));
+    if (p.own) return p.tier;
+    const g = !!this.grades.get(p.sup);
+    const c = FIXED.get(p);
+    if (c && c.tier === p.tier && c.g === g) return c.out;
+    const out = fixTier(p.svc, p.name, p.models, p.tier, g);
+    FIXED.set(p, { tier: p.tier, g, out });
+    return out;
   }
 
   inStock(p) {

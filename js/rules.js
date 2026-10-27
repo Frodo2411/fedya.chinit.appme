@@ -222,7 +222,8 @@ const R = (s) => pyRe(s, 'i');
 const T = {
   bSkip: R('ячейк|банк|шлейф|плата|контроллер|tag-on'),
   bVer: R('верификац|без ошибки|genuine|подлинн|новая запчасть'),
-  bVerNot: R(String.raw`original|\bOR\b(?!100)|разбор|снят`),
+  // «без привязки», «без верификации» — сообщение о неизвестной детали будет
+  bVerNot: R(String.raw`original|\bOR\b(?!100)|разбор|снят|без\s+(?:привязк|верификац)`),
   bUsed: R('разбор|снят'),
   bOrig: R(String.raw`\bOR\b(?!100)|original|оригинал|\borig\b`),
   bBoost: R('усилен'),
@@ -230,7 +231,8 @@ const T = {
   dSkip: R(String.raw`стекл|тачскрин|подсветк|защитн|\bOCA\b|рамка дисплея|внешн|маленьк`),
   // «(в сборе) с тачскрином» — целый модуль, а не отдельный тачскрин
   dSkipNot: R('заменено.*стекл|полирован|с тачскрин'),
-  dReglass: R(String.raw`переклей|\bRef\b|\bреф\b|refurb|заменено`),
+  // «заменено стекло», «Заменен тач» — оригинальная матрица с новым стеклом или тачем («заменена рамка» — снятый)
+  dReglass: R(String.raw`переклей|\bRef\b|\bреф\b|refurb|заменено|заменен\w*\s+(?:только\s+)?(?:тач|стекл)`),
   dUsed: R('снят|разбор|б/у|полирован|заменена рамк'),
   dCopy: R('orig tech|под ориг|не ориг|high quality|копия'),
   oled: R(String.raw`oled|amoled|fog`),
@@ -252,18 +254,22 @@ const T = {
 // Поставщик, у которого «ОРИГИНАЛ» — уровень качества копии («Оригинал — яркий дисплей и качественный тач»),
 // а настоящий оригинал помечен отдельно: «ОРИГИНАЛ 100%», «ОРИГИНАЛ-СЕРВИС», «SERVICE PACK», «ОРИГИНАЛ-СНЯТЫЙ», «ОРИГИНАЛ-ПЕРЕКЛЕЙ».
 // У такого поставщика «оригинал» без этих пометок — копия.
-const PLAIN_ORIG = /оригинал|original|\borig\b|\bOR\b(?!100)|\bориг\b/i;
-const GENUINE = /оригинал[\s-]*100\s*%|100\s*%\s*оригинал|сервис|service|снят|разбор|переклей|\bреф\b|refurb|заменен/i;
-const GRADE_MARKED = /ОРИГИНАЛ-(?:СЕРВИС|СНЯТЫЙ|ПЕРЕКЛЕЙ)|ОРИГИНАЛ 100%/;
+// обычные выражения, а не pyRe: проверяются у десятков тысяч строк при каждом расчёте; «реф» — отдельным словом
+const PLAIN_ORIG = /ориг|orig|\bOR\b(?!100)/i;
+const GENUINE = /оригинал[\s-]*100\s*%|100\s*%\s*оригинал|сервис|service|снят|разбор|переклей|(?<![а-яёa-z])реф(?![а-яёa-z])|refurb|заменен/i;
+const ORIG_100 = /оригинал[\s-]*100\s*%|100\s*%\s*оригинал/i;
+// новый оригинал отдельной пометкой («ОРИГИНАЛ 100%», «ОРИГИНАЛ-СЕРВИС», «SERVICE PACK») и простой «- ОРИГИНАЛ»
+const GRADE_MARKED = /ОРИГИНАЛ[-\s]*(?:100\s*%|СЕРВИС)|SERVICE PACK/;
 const GRADE_PLAIN = /-\s*ОРИГИНАЛ(?:\s+NEW)?(?:\s*\(|\s*$)/;
 
-// Такой ли словарь у поставщика: по названиям его прайса (обе пометки встречаются хотя бы по 10 раз)
+// Такой ли словарь у поставщика: по названиям его прайса. Есть и новый оригинал с отдельной пометкой, и простой
+// «ОРИГИНАЛ» без пометок (снятый, переклей, сервис не в счёт) — хотя бы по 10 раз; значит, простой — уровень копии
 export function gradeVocab(names) {
   let marked = 0;
   let plain = 0;
   for (const n of names) {
     if (GRADE_MARKED.test(n)) marked++;
-    else if (GRADE_PLAIN.test(n)) plain++;
+    else if (GRADE_PLAIN.test(n) && !GENUINE.test(n)) plain++;
     if (marked >= 10 && plain >= 10) return true;
   }
   return false;
@@ -462,17 +468,25 @@ function parenModels(name, idx) {
   return out;
 }
 
+// «без привязки», «без верификации» — сообщение о неизвестной детали будет
+const NO_BIND = /без\s+(?:привязк|верификац)/i;
+
 // Вариант с поправками, которые знают модель и поставщика: у поставщика со словарём «ОРИГИНАЛ — качество копии»
 // простой «оригинал» — копия; новый оригинальный аккумулятор Apple у поставщиков не бывает (только снятый),
 // поэтому «оригинал» у нового аккумулятора айфона — марка или качество копии: с привязкой — «без ошибки», иначе копия
 export function fixTier(svc, name, models, t, origGrade) {
   if (!t || t === 'skip' || svc === 'g') return t;
+  // то же, что tier() с origGrade для такой строки, но без всех правил (быстрее: строк — десятки тысяч)
   if (origGrade && t.startsWith('orig') && PLAIN_ORIG.test(name) && !GENUINE.test(name)) {
-    const g = tier(svc, name, { origGrade: true });
-    t = g !== 'skip' ? g : svc === 'd' ? (T.oled.test(name) ? 'copy_oled' : 'copy_lcd') : svc === 'b' ? (T.bBoost.test(name) ? 'copy_boost' : 'copy') : 'copy';
+    if (svc === 'd') t = T.oled.test(name) || /soft\s*touch|hard\s*touch/i.test(name) ? 'copy_oled' : 'copy_lcd';
+    else if (svc === 'b') t = T.bVer.test(name) && !T.bVerNot.test(name) ? 'verified' : T.bBoost.test(name) ? 'copy_boost' : 'copy';
+    else t = 'copy';
   }
   if (svc === 'b' && t === 'orig_new' && models.length && models.every((m) => m.startsWith('iPhone')) && !/сервис|service/i.test(name)) {
-    t = T.bVer.test(name) || /привязк/i.test(name) ? 'verified' : T.bBoost.test(name) ? 'copy_boost' : 'copy';
+    // «оригинал 100%» — оригинал, но новым он у поставщика быть не может: снятый
+    if (ORIG_100.test(name)) t = 'orig_used';
+    else if (!NO_BIND.test(name) && (T.bVer.test(name) || /с\s+привязк/i.test(name))) t = 'verified';
+    else t = T.bBoost.test(name) ? 'copy_boost' : 'copy';
   }
   return t;
 }
@@ -492,7 +506,8 @@ export function mapRow(name, kind, idx, famOfModel, opts = {}) {
   if (kind === 'b' && /\bOR100\b/.test(name) && (t === 'orig_new' || t === 'orig_used')) t = 'copy';
   if (kind === 'd' && /\bOR100\b/.test(name) && t.startsWith('orig')) t = /oled/i.test(name) ? 'copy_oled' : 'copy_lcd';
   if (kind === 'b' && t === 'orig_new' && !/подлинн|привязк|original|оригинал|сервис|service/i.test(name)) t = 'copy';
-  if (/урезан/i.test(name)) t = 'skip';
+  // «урезанный» шлейф и комплект из нескольких штук («(КОМПЛ. 3 ШТУКИ)» — цена за все) на один ремонт не годятся
+  if (/урезан/i.test(name) || (kind !== 'g' && /компл\.?\s*\d+\s*шт/i.test(name))) t = 'skip';
   models = models.filter((m) => networkOk(name, m));
   return { models, tier: models.length ? fixTier(kind, name, models, t, opts.origGrade) : 'skip', line: lineKey(name) };
 }
