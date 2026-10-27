@@ -105,7 +105,8 @@ function clientHint(svc, tier, model) {
 
 export function createPricesView(app) {
   // combo — комплекс: ремонт → вариант детали (по одному на ремонт), для открытой модели
-  const st = { q: '', model: null, svc: store.get('svc', 'd'), overrides: new Map(), open: new Set(), showHidden: false, combo: new Map() };
+  // sups — только эти поставщики («по пути только …»): цены и детали по их прайсам; пусто — все
+  const st = { q: '', model: null, svc: store.get('svc', 'd'), overrides: new Map(), open: new Set(), showHidden: false, combo: new Map(), sups: new Set(store.get('supFilter', [])) };
   const root = h('div');
   const results = h('div');
   const input = h('input', {
@@ -122,6 +123,63 @@ export function createPricesView(app) {
   // «Скопировать клиенту» — отдельно от экрана модели: у сдвинутого свайпом экрана fixed-кнопки съехали бы вниз
   const dock = h('div', { class: 'dock' });
 
+  // Расчёт по выбранным поставщикам (свои детали — всегда); без выбора — общий расчёт приложения
+  let filtered = null;
+  function chosen() {
+    return [...st.sups].filter((k) => app.data.suppliers[k]).sort();
+  }
+  function P() {
+    const sel = chosen();
+    if (!sel.length) return app.pricer;
+    const key = sel.join('|');
+    if (!filtered || filtered.base !== app.pricer || filtered.key !== key) {
+      const set = new Set(sel);
+      filtered = { base: app.pricer, key, pricer: app.makePricer(app.data.parts.filter((p) => set.has(p.sup))) };
+    }
+    return filtered.pricer;
+  }
+  function setSups(keys) {
+    st.sups = new Set(keys);
+    store.set('supFilter', [...st.sups]);
+    st.overrides.clear();
+    st.combo = new Map();
+    st.open.clear();
+    draw();
+  }
+  // Нажатие на поставщика при «все» — только он; дальше добавляет и убирает; убрали всех — снова все
+  function toggleSup(k) {
+    const sel = new Set(chosen());
+    if (sel.has(k)) sel.delete(k); else sel.add(k);
+    setSups([...sel]);
+  }
+  const supNames = (keys) => keys.map((k) => supName(k)).join(', ');
+
+  // Строка поставщиков на экране модели: сколько разных деталей у каждого на эту модель (цвета одной детали — одна)
+  function supChips(model) {
+    const sel = chosen();
+    const lines = new Map();
+    for (const svc of SERVICES) {
+      for (const tier of ORDER[svc]) {
+        for (const p of app.pricer.partsFor(model, svc, tier)) {
+          if (p.sup === OWN) continue;
+          if (!lines.has(p.sup)) lines.set(p.sup, new Set());
+          lines.get(p.sup).add(svc + '|' + (p.line || p.name));
+        }
+      }
+    }
+    const count = new Map([...lines].map(([k, v]) => [k, v.size]));
+    const keys = Object.keys(app.data.suppliers).filter((k) => k !== OWN)
+      .sort((a, b) => (app.pricer.rank(a) - app.pricer.rank(b)) || supName(a).localeCompare(supName(b)));
+    if (keys.length < 2 && !sel.length) return null;
+    return h('div', { class: 'supbar' },
+      h('div', { class: 'chips' },
+        h('button', { type: 'button', class: 'chip' + (sel.length ? '' : ' on'), text: 'Все поставщики', onclick: () => setSups([]) }),
+        keys.map((k) => h('button', {
+          type: 'button', class: 'chip' + (sel.includes(k) ? ' on' : ''), onclick: () => toggleSup(k),
+        }, supName(k), h('span', { class: 'n', text: String(count.get(k) || 0) })))),
+      sel.length ? h('div', { class: 'small', style: 'margin-top:8px;color:var(--accent)', text: 'Цены и детали — только у: ' + supNames(sel) + '. Свои детали тоже видны.' }) : null);
+  }
+
   function drawResults() {
     clear.hidden = !st.q;
     if (!st.q.trim()) {
@@ -130,6 +188,9 @@ export function createPricesView(app) {
       fill(results, 
         recent.length ? h('h2', { text: 'Недавние' }) : null,
         recent.length ? h('div', { class: 'list' }, recent.map((n) => modelItem(app.pricer.byName.get(n)))) : null,
+        chosen().length ? h('div', { class: 'card flat', style: 'margin-top:16px' },
+          h('div', { class: 'small', style: 'color:var(--accent)', text: 'Цены сейчас только у: ' + supNames(chosen()) + '.' }),
+          h('button', { class: 'btn small', style: 'margin-top:8px', text: 'Показать всех поставщиков', onclick: () => setSups([]) })) : null,
         h('div', { class: 'card flat', style: 'margin-top:16px' },
           h('div', { class: 'small muted' }, 'В прайсе ', app.data.models.length, ' моделей. Прайсы: ',
             Object.values(sup).map((s) => s.name + ' от ' + fmt(s.date || app.data.priceDate)).join(', '), '.'),
@@ -163,7 +224,7 @@ export function createPricesView(app) {
     st.showHidden = false;
     const recent = [name, ...store.get('recent', []).filter((n) => n !== name)].slice(0, 12);
     store.set('recent', recent);
-    const e = app.pricer.model(name);
+    const e = P().model(name);
     const has = (svc) => e.services[svc].opts.some((o) => !o.hidden);
     if (!has(st.svc)) st.svc = SERVICES.find(has) || 'd';
     draw();
@@ -251,8 +312,8 @@ export function createPricesView(app) {
   function priceOf(entry, svc, o) {
     const ov = st.overrides.get(entry.model + '|' + svc + '|' + o.tier);
     if (!ov) return { price: o.price, formula: o.formula, smartfix: o.smartfix, cost: o.cost, sup: o.sup, part: o.part, stock: o.stock, inStock: o.inStock, override: false };
-    const cp = clientPrice(app.pricer.S, o.work, ov.cost, o.sf, riskReserve(app.pricer.S, svc, ov.cost));
-    return { ...cp, cost: ov.cost, sup: ov.sup, part: ov.name, stock: ov.stock, inStock: app.pricer.inStock(ov), override: true };
+    const cp = clientPrice(P().S, o.work, ov.cost, o.sf, riskReserve(P().S, svc, ov.cost));
+    return { ...cp, cost: ov.cost, sup: ov.sup, part: ov.name, stock: ov.stock, inStock: P().inStock(ov), override: true };
   }
 
   function stockBadge(sup, stock) {
@@ -306,12 +367,12 @@ export function createPricesView(app) {
   }
 
   function variantCard(entry, svc, o) {
-    const S = app.pricer.S;
+    const S = P().S;
     const p = priceOf(entry, svc, o);
     const key = entry.model + '|' + svc + '|' + o.tier;
-    const glue = app.pricer.glueFor(entry.model, svc);
+    const glue = P().glueFor(entry.model, svc);
     const earn = p.price - p.cost - glue.total;
-    const others = app.pricer.partsFor(entry.model, svc, o.tier);
+    const others = P().partsFor(entry.model, svc, o.tier);
     const inCart = cartQty(app.settings.cart, p.sup, p.part);
     const note = (app.settings.supplierNotes || {})[p.sup];
     let sfText = null;
@@ -349,13 +410,13 @@ export function createPricesView(app) {
       h('div', { class: 'sfline', text: sfText }),
       o.hidden ? h('div', { class: 'tiny', style: 'color:var(--accent);margin-top:6px', text: 'Скрыт: не дешевле варианта получше' }) : null,
       h('div', { class: 'actions wrap' },
-        h('button', { class: 'btn small primary', onclick: () => app.newOrderFromPrice(entry, svc, o, p) }, 'Записать заказ'),
+        h('button', { class: 'btn small primary', onclick: () => app.newOrderFromPrice(entry, svc, o, p, P()) }, 'Записать заказ'),
         h('button', {
           class: 'btn small' + (st.combo.get(svc) === o.tier ? ' on' : ''),
           onclick: () => { if (st.combo.get(svc) === o.tier) st.combo.delete(svc); else st.combo.set(svc, o.tier); draw(); },
         }, st.combo.get(svc) === o.tier ? '✓ В комплексе' : 'В комплекс'),
         h('button', {
-          class: 'btn small' + (inCart ? ' on' : ''), onclick: () => toCart(partForCart(entry, svc, o, p), cartGlues(app.pricer, entry.model, [svc])[0]),
+          class: 'btn small' + (inCart ? ' on' : ''), onclick: () => toCart(partForCart(entry, svc, o, p), cartGlues(P(), entry.model, [svc])[0]),
         }, inCart ? '✓ В корзине · ' + inCart : 'В корзину'),
         h('button', {
           class: 'btn small', onclick: () => { if (st.open.has(key)) st.open.delete(key); else st.open.add(key); draw(); },
@@ -396,7 +457,7 @@ export function createPricesView(app) {
 
   // Почему нет деталей и что делать: своя деталь, а у айфонов с лазером ещё и корпус
   function emptyState(e, svc, noParts) {
-    const laser = svc === 'c' && e.model.startsWith('iPhone') && !app.pricer.noLaser.has(e.model);
+    const laser = svc === 'c' && e.model.startsWith('iPhone') && !P().noLaser.has(e.model);
     const hs = e.services.hs.opts.filter((o) => !o.hidden);
     const hsFrom = hs.length ? Math.min(...hs.map((o) => priceOf(e, 'hs', o).price)) : null;
     let why;
@@ -404,6 +465,8 @@ export function createPricesView(app) {
       why = h('div', {}, 'На этой модели заднее стекло снимается только лазером, поэтому крышки из прайса здесь не считаются.',
         h('br'), 'Если делаешь с лазером (сам или отдаёшь) — впиши свою деталь или добавь модель в «Ещё → Расчёт цены → Модели без лазера».',
         hsFrom ? h('div', { style: 'margin-top:8px' }, 'Без лазера меняют корпус целиком.') : null);
+    } else if (chosen().length) {
+      why = h('div', {}, 'У ' + supNames(chosen()) + ' нет ' + (noParts ? 'деталей для этой модели.' : 'детали для этого ремонта.'));
     } else if (noParts) {
       why = h('div', {}, 'Деталей для этой модели в прайсе пока нет.', h('br'), 'Если они есть у поставщика — загрузи его свежий прайс: «Ещё» → «Прайсы поставщиков». Или впиши свою деталь.');
     } else {
@@ -411,7 +474,8 @@ export function createPricesView(app) {
     }
     return h('div', { class: 'empty' }, why,
       h('div', { class: 'row wrap', style: 'justify-content:center;margin-top:14px' },
-        h('button', { class: 'btn small primary', text: '+ Своя деталь', onclick: () => openOwnPart(app, e, svc, null) }),
+        chosen().length ? h('button', { class: 'btn small primary', text: 'Все поставщики', onclick: () => setSups([]) }) : null,
+        h('button', { class: 'btn small' + (chosen().length ? '' : ' primary'), text: '+ Своя деталь', onclick: () => openOwnPart(app, e, svc, null) }),
         laser && hsFrom ? h('button', { class: 'btn small', text: 'Корпус · от ' + hsFrom + ' р.', onclick: () => { st.svc = 'hs'; store.set('svc', 'hs'); draw(); } }) : null));
   }
 
@@ -429,15 +493,15 @@ export function createPricesView(app) {
 
   // Комплекс в корзину: проклейка на весь комплекс (сторона вскрытия одна)
   function comboToCart(entry, items) {
-    toCart(items.map((x) => partForCart(entry, x.svc, x.o, x.p)), cartGlues(app.pricer, entry.model, items.map((x) => x.svc)));
+    toCart(items.map((x) => partForCart(entry, x.svc, x.o, x.p)), cartGlues(P(), entry.model, items.map((x) => x.svc)));
   }
 
   function comboText(entry) {
     const items = comboItems(entry);
-    const t = comboTotal(app.pricer.S, items);
+    const t = comboTotal(P().S, items);
     const lines = [entry.model + ' — комплексный ремонт:'];
     for (const x of items) lines.push('• ' + REPAIR[x.svc] + ' (' + lcFirst(VAR_CLIENT[x.tier]) + ') — ' + x.price + ' р.');
-    if (t.discount) lines.push('Скидка за комплекс (' + app.pricer.S.combo_discount + '% на работу): −' + t.discount + ' р.');
+    if (t.discount) lines.push('Скидка за комплекс (' + P().S.combo_discount + '% на работу): −' + t.discount + ' р.');
     lines.push('Итого: ' + t.total + ' р.');
     const foot = (app.settings.clientFooter || '').trim();
     if (foot) lines.push('', foot);
@@ -447,10 +511,10 @@ export function createPricesView(app) {
   function comboCard(entry) {
     const items = comboItems(entry);
     if (!items.length) return null;
-    const S = app.pricer.S;
+    const S = P().S;
     const t = comboTotal(S, items);
     // проклейка на весь комплекс: телефон вскрывается один раз
-    const glue = app.pricer.glueFor(entry.model, items.map((x) => x.svc)).total;
+    const glue = P().glueFor(entry.model, items.map((x) => x.svc)).total;
     const earn = items.reduce((a, x) => a + x.price - x.cost, 0) - glue - t.discount;
     return h('div', { class: 'card combo' },
       h('div', { class: 'head' }, h('div', { class: 'vname', text: 'Комплекс · ' + items.length }), h('div', { class: 'price', text: t.total + ' р.' })),
@@ -460,7 +524,7 @@ export function createPricesView(app) {
       h('div', { class: 'actions wrap' },
         h('button', {
           class: 'btn small primary',
-          onclick: () => (items.length === 1 ? app.newOrderFromPrice(entry, items[0].svc, items[0].o, items[0].p) : app.newOrderFromCombo(entry, items, t)),
+          onclick: () => (items.length === 1 ? app.newOrderFromPrice(entry, items[0].svc, items[0].o, items[0].p, P()) : app.newOrderFromCombo(entry, items, t, P())),
         }, 'Записать заказ'),
         h('button', { class: 'btn small', onclick: async () => { if (await copyText(comboText(entry))) toast('Комплекс скопирован'); } }, icon('copy'), 'Скопировать клиенту'),
         h('button', { class: 'btn small', text: 'Всё в корзину', onclick: () => comboToCart(entry, items) }),
@@ -491,9 +555,9 @@ export function createPricesView(app) {
       drawResults();
       return;
     }
-    const e = app.pricer.model(st.model);
+    const e = P().model(st.model);
     if (!e) { st.model = null; draw(); return; }
-    const S = app.pricer.S;
+    const S = P().S;
     const svcData = e.services[st.svc];
     const visible = svcData.opts.filter((o) => !o.hidden);
     const hidden = svcData.opts.filter((o) => o.hidden);
@@ -505,6 +569,7 @@ export function createPricesView(app) {
       bar,
       title,
       h('div', { class: 'small muted', text: [e.year ? e.year + ' г.' : null, 'iFixit ' + (e.ifixit ?? 'нет оценки'), coefs].filter(Boolean).join(' · ') }),
+      supChips(e.model),
       // ремонты сайта — всегда, остальные — только если есть детали
       h('div', { class: 'repairs' }, SERVICES.filter((svc) => SITE_SERVICES.includes(svc) || e.services[svc].opts.length).map((svc) => {
         const vis = e.services[svc].opts.filter((o) => !o.hidden);

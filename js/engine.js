@@ -3,6 +3,7 @@
 
 import { pyRe } from './pyre.js';
 import { APP_ONLY } from './data.js';
+import { fixTier, gradeVocab } from './rules.js';
 
 // Ремонты сайта и ремонты только для приложения: по любой детали из прайса (камеры, динамики, шлейфы, корпус…)
 export const SITE_SERVICES = ['b', 'd', 'p', 'c'];
@@ -189,13 +190,34 @@ export function sfKey(svc, tier) {
   return SF_KEY[svc + ':' + tier] || null;
 }
 
+// Поставщики, у которых «ОРИГИНАЛ» — уровень качества копии (см. gradeVocab в rules.js): отметка поставщика
+// origGrade (true/false, ставится в «Ещё → Прайсы поставщиков»), а без неё — по словам в его прайсе
+export function origGrades(data) {
+  const out = new Map();
+  const names = new Map();
+  for (const [k, s] of Object.entries(data.suppliers || {})) {
+    if (s && typeof s.origGrade === 'boolean') out.set(k, s.origGrade);
+    else names.set(k, []);
+  }
+  for (const p of data.parts) if (names.has(p.sup)) names.get(p.sup).push(p.name);
+  for (const [k, list] of names) out.set(k, gradeVocab(list));
+  return out;
+}
+
 export class Pricer {
   // data: { suppliers: {key: {name, stock, rank}}, models: [{brand, model, year, ifixit, sf}], parts: [{sup, name, cost, stock, svc, tier, models, line}] }
   constructor(data, settings) {
     this.data = data;
     this.S = settingsWithDefaults(settings);
     this.byName = new Map(data.models.map((m) => [m.model, m]));
+    this.grades = origGrades(data);
     this.index = this.buildIndex();
+  }
+
+  // Вариант детали для расчёта: размеченный при загрузке прайса, с поправками (fixTier в rules.js).
+  // Своя деталь — как вписал мастер
+  tierOf(p) {
+    return p.own ? p.tier : fixTier(p.svc, p.name, p.models, p.tier, this.grades.get(p.sup));
   }
 
   inStock(p) {
@@ -213,7 +235,9 @@ export class Pricer {
     this.noLaser = noLaser;
     const index = new Map();
     this.glue = new Map();
-    for (const p of this.data.parts) {
+    for (const p0 of this.data.parts) {
+      const t = p0.svc === 'g' ? p0.tier : this.tierOf(p0);
+      const p = t === p0.tier ? p0 : { ...p0, tier: t };
       if (p.svc === 'g') {
         if (!GLUE_NAME[p.tier] || !usable(p)) continue;
         for (const model of p.models) {

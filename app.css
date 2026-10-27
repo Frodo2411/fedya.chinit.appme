@@ -161,6 +161,8 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 .combo { margin-bottom: 12px; }
 .back { border: 0; background: none; color: var(--accent); font-weight: 650; font-size: 17px; min-height: 44px; padding: 0 8px 0 0; display: inline-flex; align-items: center; gap: 2px; }
 .back svg { width: 22px; height: 22px; }
+.supbar { margin-top: 12px; }
+.supbar .chip { min-height: 38px; font-size: 14px; padding: 0 12px; }
 .repairs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 16px; }
 .repair { min-height: 68px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); text-align: left; padding: 10px 14px; }
 .repair .name { font-weight: 700; display: block; }

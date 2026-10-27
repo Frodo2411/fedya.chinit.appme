@@ -4,7 +4,7 @@
 // К знакомой позиции с моделями дописываются подходящие модели приложения, модели сайта остаются как были.
 // Столбцы с названием, ценой и наличием ищутся сами; цену узнаём по совпадению с прошлыми ценами.
 
-import { kindOf, families, mapRow, siteIndex, lineKey, BRAND_FAM } from './rules.js';
+import { kindOf, families, mapRow, siteIndex, lineKey, BRAND_FAM, gradeVocab, fixTier } from './rules.js';
 import { Pricer, SERVICES } from './engine.js';
 import { APP_ONLY, APP_ALIASES } from './data.js';
 
@@ -191,7 +191,13 @@ export function buildImport(data, supKey, sheets, cols, today) {
   const used = new Map();
   const seen = new Set();
   const parts = [];
-  const report = { file: { rows: rows.length, parts: 0, otherBrands: 0, noPrice: 0 }, known: 0, extended: 0, priceUp: [], priceDown: [], fresh: [], unmapped: [], gone: [] };
+  // «ОРИГИНАЛ» у поставщика — уровень копии (gradeVocab): отметка в его настройках, а без неё — по словам в файле.
+  // Разметка хранится как по правилам, поправка — при расчёте (Pricer), здесь — только чтобы показать новые позиции как в расчёте
+  const s = data.suppliers[supKey] || {};
+  const grade = typeof s.origGrade === 'boolean' ? s.origGrade
+    : gradeVocab(rows.map((r) => r[cols.nameCol]).filter((v) => typeof v === 'string'));
+  const report = { file: { rows: rows.length, parts: 0, otherBrands: 0, noPrice: 0 }, known: 0, extended: 0, priceUp: [], priceDown: [], fresh: [], unmapped: [], gone: [],
+    grade, gradeAuto: typeof s.origGrade !== 'boolean' };
   for (const r of rows) {
     const raw = r[cols.nameCol];
     if (typeof raw !== 'string') continue;
@@ -231,7 +237,11 @@ export function buildImport(data, supKey, sheets, cols, today) {
     const part = { sup: supKey, name, cost, stock, svc, tier: m.tier, models: m.models, line: m.line, fresh: true };
     parts.push(part);
     seen.add(key);
-    if (m.tier !== 'skip' && m.models.length) report.fresh.push(part);
+    if (m.tier !== 'skip' && m.models.length) {
+      const shown = fixTier(svc, name, m.models, m.tier, grade);
+      if (shown !== m.tier) part.shown = shown;
+      report.fresh.push(part);
+    }
     else report.unmapped.push(name);
   }
   if (!report.file.parts) throw new Error('В выбранном столбце нет названий деталей.');

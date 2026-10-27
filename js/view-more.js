@@ -1,7 +1,7 @@
 // Экран «Ещё»: прайсы, расчёт цены, текст для клиента, поставщики, Google Таблица, приложение.
 
 import { h, fill, toast, openSheet, field, parseNum, fmtDate, shareFile, copyText } from './ui.js';
-import { DEFAULTS, SERVICES, MORE_SERVICES, settingsWithDefaults, siteFile } from './engine.js';
+import { DEFAULTS, SERVICES, MORE_SERVICES, settingsWithDefaults, siteFile, origGrades } from './engine.js';
 import { SVC } from './view-prices.js';
 import { openImport } from './import-flow.js';
 import { withRate, oddRate } from './importer.js';
@@ -148,6 +148,9 @@ function openSupplier(app, key) {
   const cur = key ? app.data.suppliers[key] : null;
   const repoSite = key ? ((app.repoData && app.repoData.suppliers[key]) || {}).site || '' : '';
   const s = { name: cur ? cur.name : '', currency: cur && cur.currency === 'USD' ? 'USD' : 'BYN', rate: cur && cur.rate ? cur.rate : null, stock: cur ? !!cur.stock : true, site: cur && cur.site !== undefined ? cur.site : repoSite };
+  // «ОРИГИНАЛ» — уровень копии: как сейчас считается (отметка или по словам в прайсе); сохраняем, только если поменяли
+  s.grade = key ? !!origGrades(app.data).get(key) : false;
+  let gradeTouched = false;
   const count = key ? app.data.parts.filter((p) => p.sup === key).length : 0;
   const rateField = field('Курс, р. за $', h('input', { class: 'input num', inputmode: 'decimal', placeholder: 'например 3,05', value: s.rate ? String(s.rate).replace('.', ',') : '', oninput: (e) => { s.rate = parseNum(e.target.value); } }),
     cur && cur.currency === 'USD' && count ? 'Закупочные цены этого поставщика пересчитаются по новому курсу сразу.' : null);
@@ -158,6 +161,10 @@ function openSupplier(app, key) {
       h('option', { value: 'BYN', text: 'в рублях', selected: s.currency === 'BYN' }), h('option', { value: 'USD', text: 'в долларах', selected: s.currency === 'USD' }))),
     rateField,
     h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: s.stock, onchange: (e) => { s.stock = e.target.checked; } }), 'В прайсе есть наличие'),
+    h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: s.grade, onchange: (e) => { s.grade = e.target.checked; gradeTouched = true; } }),
+      '«ОРИГИНАЛ» у поставщика — уровень копии'),
+    h('div', { class: 'tiny faint', text: 'Тогда оригиналом считаются только «оригинал 100%», «сервис» (Service Pack), «снятый» и переклей, остальное — копия. '
+      + 'Если поставщик так пишет, приложение понимает это само по названиям в его прайсе.' }),
     field('Сайт (необязательно)', h('input', { class: 'input', type: 'url', value: s.site, placeholder: 'https://…', autocapitalize: 'off', oninput: (e) => { s.site = e.target.value.trim(); } })),
     key ? h('div', { class: 'tiny faint', style: 'margin-top:8px', text: 'Позиций в прайсе: ' + count + '.' } ) : null);
   const save = async () => {
@@ -176,6 +183,7 @@ function openSupplier(app, key) {
       && confirm('Уже загруженные цены этого поставщика (' + count + ') были в долларах? «ОК» — пересчитаю по курсу ' + String(s.rate).replace('.', ',') + '. «Отмена» — оставлю как есть, тогда загрузи его прайс заново.');
     let data = app.data;
     const next = { ...(cur || {}), name, stock: s.stock };
+    if (gradeTouched) next.origGrade = s.grade;
     if (s.currency === 'USD') { next.currency = 'USD'; next.rate = s.rate; delete next.costRate; } else {
       if (wasUsd && count) next.costRate = cur.rate;
       delete next.currency; delete next.rate;

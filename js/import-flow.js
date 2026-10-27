@@ -113,6 +113,8 @@ export async function openImport(app, supKey, file) {
       strange ? h('div', { class: 'banner bad', style: 'margin-top:10px', text: 'Почти ни одна позиция не совпала с прошлым прайсом ' + sup.name + '. Это точно его файл? Если нет — нажми «Отмена».' }) : null,
       rateBox(),
       columnsBox(),
+      r.grade ? h('div', { class: 'small muted', style: 'margin-top:8px', text: 'У этого поставщика «ОРИГИНАЛ» — уровень копии: оригиналом считаю только «оригинал 100%», «сервис» (Service Pack), «снятый» и переклей.'
+        + (r.gradeAuto ? ' Понял по названиям в прайсе; поменять — в «Ещё → Прайсы поставщиков».' : '') }) : null,
       h('div', { class: 'tiles', style: 'margin-top:8px' },
         tile('Позиций в файле', r.file.parts), tile('Знакомых', r.known),
         tile('Новых распознано', r.fresh.length), tile('Пропало из прайса', r.gone.length)),
@@ -163,7 +165,7 @@ export async function openImport(app, supKey, file) {
           h('input', { type: 'checkbox', checked: p.tier !== 'skip', style: 'width:22px;height:22px;margin-top:2px;accent-color:var(--accent)',
             onchange: (e) => { p.tier = e.target.checked ? p._tier : 'skip'; drawSoon(); } }),
           h('div', { class: 'grow' }, h('div', { class: 'small break', text: p.name }),
-            h('div', { class: 'tiny muted', text: SVC[p.svc] + ' · ' + VAR_APP[p._tier] + ' · ' + money(p.cost) + ' → ' + p.models.join(', ') }))))) : null);
+            h('div', { class: 'tiny muted', text: SVC[p.svc] + ' · ' + VAR_APP[p.shown || p._tier] + ' · ' + money(p.cost) + ' → ' + p.models.join(', ') }))))) : null);
     });
   }
 
@@ -175,7 +177,7 @@ export async function openImport(app, supKey, file) {
     clearTimeout(drawTimer);
     applyBtn.disabled = true;
     try {
-      for (const p of result.next.parts) { delete p._tier; delete p.fresh; }
+      for (const p of result.next.parts) { delete p._tier; delete p.fresh; delete p.shown; }
       await app.applyData(result.next);
       toast('Прайс ' + sup.name + ' обновлён');
       sheet.close();

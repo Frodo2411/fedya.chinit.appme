@@ -245,21 +245,46 @@ const T = {
   pOrig: R(String.raw`\bOR\b|original|сервис|\borig\b|(?<!под\s|не\s)\bориг\b`),
   oUsed: R('снят|разбор'),
   oOrig: R(String.raw`\bOR\b|original|\borig\b|оригинал|сервис`),
+  // «копия» в названии сильнее «оригинала»: «копия под оригинал», «оригинальное качество, копия»
+  copy: R('копи[яиюе]'),
 };
 
-export function tier(kind, n) {
+// Поставщик, у которого «ОРИГИНАЛ» — уровень качества копии («Оригинал — яркий дисплей и качественный тач»),
+// а настоящий оригинал помечен отдельно: «ОРИГИНАЛ 100%», «ОРИГИНАЛ-СЕРВИС», «SERVICE PACK», «ОРИГИНАЛ-СНЯТЫЙ», «ОРИГИНАЛ-ПЕРЕКЛЕЙ».
+// У такого поставщика «оригинал» без этих пометок — копия.
+const PLAIN_ORIG = /оригинал|original|\borig\b|\bOR\b(?!100)|\bориг\b/i;
+const GENUINE = /оригинал[\s-]*100\s*%|100\s*%\s*оригинал|сервис|service|снят|разбор|переклей|\bреф\b|refurb|заменен/i;
+const GRADE_MARKED = /ОРИГИНАЛ-(?:СЕРВИС|СНЯТЫЙ|ПЕРЕКЛЕЙ)|ОРИГИНАЛ 100%/;
+const GRADE_PLAIN = /-\s*ОРИГИНАЛ(?:\s+NEW)?(?:\s*\(|\s*$)/;
+
+// Такой ли словарь у поставщика: по названиям его прайса (обе пометки встречаются хотя бы по 10 раз)
+export function gradeVocab(names) {
+  let marked = 0;
+  let plain = 0;
+  for (const n of names) {
+    if (GRADE_MARKED.test(n)) marked++;
+    else if (GRADE_PLAIN.test(n)) plain++;
+    if (marked >= 10 && plain >= 10) return true;
+  }
+  return false;
+}
+
+// opts.origGrade — поставщик с таким словарём (см. gradeVocab)
+export function tier(kind, n, opts = {}) {
   // «(SP) = пожизненная гарантия» — значок гарантии поставщика, а не Service Pack
   n = n.replace(/\(SP\)\s*=\s*пожизненн\S*\s+гарант\S*/gi, ' ');
+  if (opts.origGrade && PLAIN_ORIG.test(n) && !GENUINE.test(n)) n += ' копия';
   if (kind === 'd') n = n.replace(/^LCD\s+/i, 'Дисплей '); // «LCD для iPhone» — не признак копии ЖК
   // русская буква в латинском слове: «оrig» с русской «о»
   if (kind !== 'b') n = n.replace(LATIN_MIX, (ch) => LOOKALIKE[ch] || ch);
+  const copy = T.copy.test(n);
   if (kind === 'b') {
     if (T.bSkip.test(n)) return 'skip';
     if (T.bVer.test(n) && !T.bVerNot.test(n)) return 'verified';
     if (T.bUsed.test(n)) return 'orig_used';
     // «усиленный … ic orig» — усиленная копия с родным контроллером, не оригинал
-    if (T.bBoost.test(n) && !/original|оригинал/i.test(n)) return 'copy_boost';
-    if (T.bOrig.test(n)) return 'orig_new';
+    if (T.bBoost.test(n) && (copy || !/original|оригинал/i.test(n))) return 'copy_boost';
+    if (!copy && T.bOrig.test(n)) return 'orig_new';
     if (T.bBoost.test(n)) return 'copy_boost';
     return 'copy';
   }
@@ -275,6 +300,7 @@ export function tier(kind, n) {
   }
   if (kind === 'c') {
     if (T.cSkip.test(n) && !/^Заднее стекло/i.test(n)) return 'skip';
+    if (copy && !T.oUsed.test(n)) return 'copy';
     if (T.cUsed.test(n)) return 'orig_used';
     if (T.cOrig.test(n)) return 'orig_new';
     return 'copy';
@@ -282,13 +308,13 @@ export function tier(kind, n) {
   if (kind === 'p') {
     if (T.pSkip.test(n)) return 'skip';
     if (T.pUsed.test(n)) return 'orig_used';
-    if (T.pOrig.test(n)) return 'orig_new';
+    if (!copy && T.pOrig.test(n)) return 'orig_new';
     return 'copy';
   }
   if (MORE_KINDS.has(kind)) {
     if (T.oUsed.test(n)) return 'orig_used';
     // стекло под переклейку и тачскрин оригинальными не бывают: «OR» у них — про качество плёнки
-    if (kind !== 'gl' && kind !== 'tc' && T.oOrig.test(n)) return 'orig_new';
+    if (kind !== 'gl' && kind !== 'tc' && !copy && T.oOrig.test(n)) return 'orig_new';
     return 'copy';
   }
   return 'skip';
@@ -436,7 +462,23 @@ function parenModels(name, idx) {
   return out;
 }
 
-export function mapRow(name, kind, idx, famOfModel) {
+// Вариант с поправками, которые знают модель и поставщика: у поставщика со словарём «ОРИГИНАЛ — качество копии»
+// простой «оригинал» — копия; новый оригинальный аккумулятор Apple у поставщиков не бывает (только снятый),
+// поэтому «оригинал» у нового аккумулятора айфона — марка или качество копии: с привязкой — «без ошибки», иначе копия
+export function fixTier(svc, name, models, t, origGrade) {
+  if (!t || t === 'skip' || svc === 'g') return t;
+  if (origGrade && t.startsWith('orig') && PLAIN_ORIG.test(name) && !GENUINE.test(name)) {
+    const g = tier(svc, name, { origGrade: true });
+    t = g !== 'skip' ? g : svc === 'd' ? (T.oled.test(name) ? 'copy_oled' : 'copy_lcd') : svc === 'b' ? (T.bBoost.test(name) ? 'copy_boost' : 'copy') : 'copy';
+  }
+  if (svc === 'b' && t === 'orig_new' && models.length && models.every((m) => m.startsWith('iPhone')) && !/сервис|service/i.test(name)) {
+    t = T.bVer.test(name) || /привязк/i.test(name) ? 'verified' : T.bBoost.test(name) ? 'copy_boost' : 'copy';
+  }
+  return t;
+}
+
+// opts.origGrade — см. gradeVocab
+export function mapRow(name, kind, idx, famOfModel, opts = {}) {
   const fams = families(name);
   // у проклейки та же запись модели, что у дисплея: «Проклейка дисплея iPhone 15 - Orig» → «Дисплей iPhone 15 - Orig»
   const forModels = kind === 'g' ? name.trim().replace(GLUE_PREFIX, 'Дисплей ') : MORE_KINDS.has(kind) ? moreModels(name) : name;
@@ -444,7 +486,7 @@ export function mapRow(name, kind, idx, famOfModel) {
   for (const m of matchModels(forModels, idx)) if (fams.has(famOfModel.get(m)) && !models.includes(m)) models.push(m);
   // модель не нашлась — бывает, что понятное название в скобках после кода: «Samsung A415F (A41)», «АКБ Xiaomi BP4E (13 Lite)»
   if (!models.length) for (const m of parenModels(name, idx)) if (fams.has(famOfModel.get(m)) && !models.includes(m)) models.push(m);
-  let t = kind === 'g' ? glueType(name) : tier(kind, name);
+  let t = kind === 'g' ? glueType(name) : tier(kind, name, opts);
   if (t === 'skip') models = [];
   if (!models.length) t = 'skip';
   if (kind === 'b' && /\bOR100\b/.test(name) && (t === 'orig_new' || t === 'orig_used')) t = 'copy';
@@ -452,5 +494,5 @@ export function mapRow(name, kind, idx, famOfModel) {
   if (kind === 'b' && t === 'orig_new' && !/подлинн|привязк|original|оригинал|сервис|service/i.test(name)) t = 'copy';
   if (/урезан/i.test(name)) t = 'skip';
   models = models.filter((m) => networkOk(name, m));
-  return { models, tier: models.length ? t : 'skip', line: lineKey(name) };
+  return { models, tier: models.length ? fixTier(kind, name, models, t, opts.origGrade) : 'skip', line: lineKey(name) };
 }

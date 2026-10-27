@@ -45,9 +45,9 @@ const app = {
     this.search = new ModelSearch(d.models);
   },
 
-  // Расчёт по прайсам и своим деталям из настроек
-  makePricer() {
-    return new Pricer(withOwnParts(this.data, this.settings.ownParts), this.settings.formula);
+  // Расчёт по прайсам и своим деталям из настроек; parts — только эти детали прайсов (выбранные поставщики)
+  makePricer(parts) {
+    return new Pricer(withOwnParts(parts ? { ...this.data, parts } : this.data, this.settings.ownParts), this.settings.formula);
   },
 
   redraw() {
@@ -66,22 +66,23 @@ const app = {
     backupSettings();
   },
 
-  newOrderFromPrice(entry, svc, o, p) {
+  // pricer — расчёт, по которому выбрана деталь (в «Ценах» могут быть выбраны не все поставщики)
+  newOrderFromPrice(entry, svc, o, p, pricer = this.pricer) {
     // в «Запчасть» — деталь вместе с проклейкой: это расход на ремонт
-    const glue = this.pricer.glueFor(entry.model, svc);
+    const glue = pricer.glueFor(entry.model, svc);
     openOrderForm(this, null, {
       device: 'Телефон', model: entry.model, problem: REPAIR[svc] + ' (' + lcFirst(VAR_APP[o.tier]) + ')',
       price: p.price, part: Math.round((p.cost + glue.total) * 100) / 100,
       comment: 'Деталь: ' + partNote(p) + glueNote(glue),
       // что положить в корзину, если стоит галочка «Детали в корзину»
-      cart: { items: [cartPart(entry.model, svc, o.tier, { sup: p.sup, name: p.part, cost: p.cost })], glues: cartGlues(this.pricer, entry.model, [svc]) },
+      cart: { items: [cartPart(entry.model, svc, o.tier, { sup: p.sup, name: p.part, cost: p.cost })], glues: cartGlues(pricer, entry.model, [svc]) },
     });
     if (!this.sheet.connected) toast('Таблица не подключена: заказ уйдёт в неё после подключения', 4000);
   },
 
   // Комплекс одним заказом: цена со скидкой, в «Запчасть» — все детали и проклейка на весь комплекс (вскрытие одно)
-  newOrderFromCombo(entry, items, t) {
-    const glue = this.pricer.glueFor(entry.model, items.map((x) => x.svc));
+  newOrderFromCombo(entry, items, t, pricer = this.pricer) {
+    const glue = pricer.glueFor(entry.model, items.map((x) => x.svc));
     const parts = items.reduce((a, x) => a + x.cost, 0);
     openOrderForm(this, null, {
       device: 'Телефон', model: entry.model,
@@ -91,7 +92,7 @@ const app = {
         + 'Детали: ' + items.map((x) => partNote(x.p)).join('; ') + glueNote(glue),
       cart: {
         items: items.map((x) => cartPart(entry.model, x.svc, x.tier, { sup: x.p.sup, name: x.p.part, cost: x.p.cost })),
-        glues: cartGlues(this.pricer, entry.model, items.map((x) => x.svc)),
+        glues: cartGlues(pricer, entry.model, items.map((x) => x.svc)),
       },
     });
     if (!this.sheet.connected) toast('Таблица не подключена: заказ уйдёт в неё после подключения', 4000);

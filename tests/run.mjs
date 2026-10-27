@@ -988,6 +988,74 @@ await test('пояснения к деталям для мастера: что �
   assert.deepEqual(tags('Дисплей Samsung A14 5G - ОРИГИНАЛ (SP) = пожизненная гарантия', 'd', 'Samsung Galaxy A14 5G', 'orig_new'), ['пожизненная гарантия']);
 });
 
+await test('«ОРИГИНАЛ» — уровень копии у поставщика; новый оригинальный аккумулятор айфона', async () => {
+  const { fixTier, gradeVocab } = RULES;
+  const g = { origGrade: true };
+  // у такого поставщика «оригинал» без пометок — копия, с пометками («100%», сервис, снятый, переклей) — оригинал
+  assert.equal(tier('b', 'АКБ Apple iPhone 13/iPhone13 - ОРИГИНАЛ (SP) = пожизненная гарантия', g), 'copy');
+  assert.equal(tier('b', 'АКБ Apple iPhone 13/iPhone13 - ОРИГИНАЛ (SP) = пожизненная гарантия'), 'orig_new', 'без отметки — как раньше');
+  assert.equal(tier('b', 'АКБ Apple iPhone 12 mini - ОРИГИНАЛ - усиленная 2460 mAh (с верификацией = подлинная деталь (Genuine clean/Gen) = зеленая галочка)', g), 'verified');
+  assert.equal(tier('b', 'АКБ Apple iPhone 15 Pro Max/14ProMax - ОРИГИНАЛ-СНЯТЫЙ (100%)', g), 'orig_used');
+  assert.equal(tier('b', 'АКБ Huawei HB486591EHW (Honor 90) - ОРИГИНАЛ 100%', g), 'orig_new');
+  assert.equal(tier('b', 'АКБ Apple iPhone 13 - ОРИГИНАЛ (100% емкость)', g), 'copy', '«100% ёмкость» — не оригинал');
+  assert.equal(tier('d', 'Дисплей Huawei Honor 50 (NTH-NX9) в сборе с тачскрином Черный - ОРИГИНАЛ', g), 'copy_lcd');
+  assert.equal(tier('d', 'Дисплей Samsung A536B (A53 5G) МОДУЛЬ Черный - ОРИГИНАЛ-СЕРВИС', g), 'orig_new');
+  assert.equal(tier('d', 'Дисплей Samsung F956 (Z Fold 6) МОДУЛЬ Черный - ОРИГИНАЛ (SERVICE PACK)', g), 'orig_new');
+  assert.equal(tier('d', 'Дисплей iPhone 13 (A2635) в сборе с тачскрином Черный - ОРИГИНАЛ (Снятый, заменено ТОЛЬКО стекло)', g), 'orig_reglass');
+  assert.equal(tier('d', 'Дисплей iPhone 13 mini (A2630) в сборе с тачскрином Черный - ОРИГИНАЛ 100% (Снятый, без ремонта)', g), 'orig_used');
+  assert.equal(tier('cg', 'Cтекло камеры iPhone 13 - ОРИГИНАЛ NEW', g), 'copy');
+  assert.equal(tier('cf', 'Камера iPhone 12 передняя - ОРИГИНАЛ 100%', g), 'orig_new');
+  assert.equal(tier('hs', 'Корпус iPhone 11 Белый - ОРИГИНАЛ', g), 'copy');
+  assert.equal(tier('fo', 'Шлейф iPhone 13 на вспышку - ОРИГИНАЛ-СНЯТЫЙ', g), 'orig_used');
+  assert.equal(tier('c', 'Задняя крышка iPhone 13 mini Белый - ОРИГИНАЛ NEW', g), 'copy');
+  // «копия» в названии сильнее «оригинала» у любого поставщика
+  assert.equal(tier('cr', 'Камера задняя Samsung A52 - копия оригинала'), 'copy');
+  assert.equal(tier('b', 'Аккумулятор Samsung A52 - оригинальное качество, копия'), 'copy');
+  // словарь поставщика узнаётся по прайсу: обе пометки хотя бы по 10 раз
+  const names = [...Array(10)].flatMap((_, i) => ['Дисплей Samsung A' + i + ' - ОРИГИНАЛ-СЕРВИС', 'Дисплей Samsung M' + i + ' - ОРИГИНАЛ']);
+  assert.equal(gradeVocab(names), true);
+  assert.equal(gradeVocab(names.filter((n) => /СЕРВИС/.test(n))), false);
+  assert.equal(gradeVocab(['Аккумулятор iPhone 13 - Original (Разбор)', 'Дисплей iPhone 11 - OR', 'Дисплей iPhone 12 - оригинал']), false);
+  // новый оригинальный аккумулятор Apple не продают: с привязкой — «без ошибки», иначе копия; андроид и снятые не трогаем
+  assert.equal(fixTier('b', 'Аккумулятор iPhone 12/12 Pro - OR (с привязкой Подлинный)', ['iPhone 12', 'iPhone 12 Pro'], 'orig_new'), 'verified');
+  assert.equal(fixTier('b', 'АКБ Apple iPhone 8/8G - ОРИГИНАЛ NEW', ['iPhone 8'], 'orig_new'), 'copy');
+  assert.equal(fixTier('b', 'Аккумулятор iPhone 11 - Original усиленная 3500 mAh', ['iPhone 11'], 'orig_new'), 'copy_boost');
+  assert.equal(fixTier('b', 'Аккумулятор Samsung A52 - OR', ['Samsung Galaxy A52'], 'orig_new'), 'orig_new');
+  assert.equal(fixTier('b', 'Аккумулятор iPhone 13 - Original (С верификацией/ Разбор)', ['iPhone 13'], 'orig_used'), 'orig_used');
+  assert.equal(mapRow('Аккумулятор iPhone 11 - OR', 'b', siteIndex(MODELS.map((m) => m.model)), new Map(MODELS.map((m) => [m.model, BRAND_FAM[m.brand]]))).tier, 'copy');
+  // расчёт: прежняя разметка в данных поправляется при расчёте, отметка поставщика сильнее словаря, своя деталь — как вписана
+  const sup = { A: { name: 'А', stock: true, rank: 0 }, B: { name: 'Б', stock: true, rank: 1 } };
+  const filler = names.map((n) => P('B', n, 50, 'В наличии', 'd', 'orig_new', ['Samsung Galaxy A52']));
+  const data = {
+    suppliers: sup, models: MODELS, parts: [
+      P('A', 'Аккумулятор iPhone 11 - OR', 40, 'В наличии', 'b', 'orig_new', ['iPhone 11']),
+      P('B', 'Дисплей Samsung A52 - ОРИГИНАЛ', 60, 'В наличии', 'd', 'orig_new', ['Samsung Galaxy A52']),
+      ...filler,
+    ],
+  };
+  const tiers = (d, model, svc) => new Pricer(d).model(model).services[svc].opts.map((o) => o.tier);
+  assert.deepEqual(tiers(data, 'iPhone 11', 'b'), ['copy']);
+  assert.ok(tiers(data, 'Samsung Galaxy A52', 'd').includes('copy_lcd'), 'простой «ОРИГИНАЛ» — копия');
+  const off = { ...data, suppliers: { ...sup, B: { ...sup.B, origGrade: false } } };
+  assert.ok(!tiers(off, 'Samsung Galaxy A52', 'd').includes('copy_lcd'), 'отметка «нет» — как было');
+  const own = withOwnParts(data, [{ id: 'x', model: 'iPhone 11', svc: 'b', tier: 'orig_new', cost: 90, name: 'с донора' }]);
+  assert.ok(tiers(own, 'iPhone 11', 'b').includes('orig_new'), 'свою деталь не трогаем');
+  // загрузка прайса: разметка хранится как по правилам, новые позиции показываются как в расчёте, словарь узнаётся по файлу
+  const colours = ['Черный', 'Белый', 'Синий', 'Зеленый', 'Красный', 'Желтый', 'Розовый', 'Серый', 'Золото', 'Фиолетовый'];
+  const rows = [['Наименование', 'Цена'], ...colours.flatMap((c, i) => [['Дисплей Samsung A52 ' + c + ' - ОРИГИНАЛ-СЕРВИС', 200 + i], ['Дисплей Samsung A52 ' + c + ' - ОРИГИНАЛ', 90 + i]]),
+    ['АКБ Apple iPhone 11 - ОРИГИНАЛ NEW', 30]];
+  const sheets = [{ name: 'L', rows }];
+  const d2 = { suppliers: { T: { name: 'Т', stock: false, rank: 0 } }, models: MODELS, parts: [] };
+  const { report } = buildImport(d2, 'T', sheets, detect(sheets, 'T', d2), '2026-10-27');
+  assert.equal(report.grade, true);
+  assert.equal(report.gradeAuto, true);
+  const bat = report.fresh.find((p) => p.svc === 'b');
+  assert.equal(bat.tier, 'copy', 'аккумулятор айфона: новый оригинал не бывает');
+  const plain = report.fresh.find((p) => /A52 Черный - ОРИГИНАЛ$/.test(p.name));
+  assert.equal(plain.tier, 'orig_new');
+  assert.equal(plain.shown, 'copy_lcd');
+});
+
 await test('версия в «Ещё» совпадает с выпуском в sw.js', () => {
   const sw = /const VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'))[1];
   const app = /export const APP_VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'js/view-more.js'), 'utf8'))[1];

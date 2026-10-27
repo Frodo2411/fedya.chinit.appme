@@ -16,6 +16,10 @@ const displayMessage = (model) => (iphoneGen(model) || 0) >= 11;
 const batteryMessage = (model) => /^iPhone (XR|XS|XS Max|SE 2020|SE 2022)$/.test(model || '') || (iphoneGen(model) || 0) >= 11 || /^iPhone (Air|16e|17e)$/.test(model || '');
 const cameraMessage = (model) => (iphoneGen(model) || 0) >= 12 || /^iPhone (Air|16e|17e)$/.test(model || '');
 
+// «Оригинал» в названии копии: у поставщика это уровень качества или марка, а не деталь производителя телефона
+const ORIG_WORD = /оригинал|original|\borig\b/i;
+const ORIG_REAL = /100\s*%|сервис|service|снят|разбор|переклей|\bреф\b/i;
+
 const IC = /площадк[а-яёa-z]*\s+под\s+IC|под\s+IC\b|movable\s*IC|перенос[а-яёa-z]*\s+(?:микросхем|IC)/i;
 const VERIFIED = /верификац|с\s+привязкой|без\s+ошибки|genuine|подлинн|новая\s+запчасть/i;
 
@@ -26,7 +30,7 @@ function displayNotes(n, model, tier, out) {
   if (/soft\s*(?:oled|touch)/i.test(n)) add('Soft OLED', 'гибкая матрица, как в оригинале: тонкая, рамки как у оригинала, цвета и яркость ближе к нему');
   else if (/hard\s*(?:oled|touch)/i.test(n)) add('Hard OLED', 'жёсткая матрица: модуль толще, нижняя рамка заметно шире, яркость ниже, при падении бьётся легче; цвета и чёрный — как у OLED, лучше ЖК');
   else if (/\bfog\b|orig\s*tech/i.test(n)) add('FOG / Orig Tech', 'копия «под оригинал»; Hard это или Soft, в названии не сказано — уточнить у поставщика');
-  else if (/in-?cell|incell|\btft\b|\bltps\b/i.test(n) || (copy && tier === 'copy_lcd')) {
+  else if (/in-?cell|incell|\btft\b|\bltps\b/i.test(n) || (copy && tier === 'copy_lcd' && !ORIG_WORD.test(n))) {
     add('ЖК', 'самая дешёвая копия: цвета бледнее, чёрный сероватый, экран толще, батарею ест больше'
       + (OLED_IPHONE.test(model || '') ? '; у оригинала OLED — разница заметна' : ''));
   } else if (copy && /\boled\b|amoled/i.test(n)) add('OLED', 'Hard или Soft — в названии не сказано, уточнить у поставщика');
@@ -107,6 +111,9 @@ export function partNotes(name, svc, model, tier) {
     out.push({ tag: 'будет «Неизвестная деталь»', text: 'на этой модели после замены камеры на неоригинальную будет сообщение в настройках', warn: true });
   }
   // для любых деталей
+  if ((String(tier || '').startsWith('copy') || tier === 'verified') && ORIG_WORD.test(n) && !ORIG_REAL.test(n)) {
+    out.unshift({ tag: '«оригинал» — не деталь производителя', text: 'так у поставщика назван уровень качества копии (или марка); клиенту это копия', warn: false });
+  }
   if (/премиум|premium|high\s*quality/i.test(n)) out.push({ tag: 'премиум', text: 'лучшая копия у этого поставщика (общего стандарта нет)', warn: false });
   const order = /под\s+заказ(?:\s+до\s+(\d+)\s*дн)?/i.exec(n);
   if (order) out.push({ tag: 'под заказ', text: 'не на складе' + (order[1] ? ', срок до ' + order[1] + ' дн.' : ', срок уточнить'), warn: true });
