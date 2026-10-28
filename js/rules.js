@@ -221,7 +221,10 @@ export function matchModels(name, idx) {
 const R = (s) => pyRe(s, 'i');
 const T = {
   bSkip: R('ячейк|банк|шлейф|плата|контроллер|tag-on'),
+  // «с верификацией», «с привязкой», «без ошибки» — в настройках виден процент износа, но «Неизвестная деталь» остаётся;
+  // «подлинная деталь», Genuine, «зелёная галочка» — в настройках как оригинальная, без «Неизвестной детали»
   bVer: R('верификац|без ошибки|genuine|подлинн|новая запчасть'),
+  bGenuine: R(String.raw`genuine|подлинн|зел[её]н\w*\s+галочк|новая запчасть`),
   // «без привязки», «без верификации» — сообщение о неизвестной детали будет
   bVerNot: R(String.raw`original|\bOR\b(?!100)|разбор|снят|без\s+(?:привязк|верификац)`),
   bUsed: R('разбор|снят'),
@@ -286,7 +289,7 @@ export function tier(kind, n, opts = {}) {
   const copy = T.copy.test(n);
   if (kind === 'b') {
     if (T.bSkip.test(n)) return 'skip';
-    if (T.bVer.test(n) && !T.bVerNot.test(n)) return 'verified';
+    if (T.bVer.test(n) && !T.bVerNot.test(n)) return T.bGenuine.test(n) ? 'genuine' : 'verified';
     if (T.bUsed.test(n)) return 'orig_used';
     // «усиленный … ic orig» — усиленная копия с родным контроллером, не оригинал
     if (T.bBoost.test(n) && (copy || !/original|оригинал/i.test(n))) return 'copy_boost';
@@ -473,21 +476,24 @@ const NO_BIND = /без\s+(?:привязк|верификац)/i;
 
 // Вариант с поправками, которые знают модель и поставщика: у поставщика со словарём «ОРИГИНАЛ — качество копии»
 // простой «оригинал» — копия; новый оригинальный аккумулятор Apple у поставщиков не бывает (только снятый),
-// поэтому «оригинал» у нового аккумулятора айфона — марка или качество копии: с привязкой — «без ошибки», иначе копия
+// поэтому «оригинал» у нового аккумулятора айфона — марка или качество копии: «подлинная деталь» — без ошибки,
+// с привязкой — с процентом износа, иначе копия
 export function fixTier(svc, name, models, t, origGrade) {
   if (!t || t === 'skip' || svc === 'g') return t;
   // то же, что tier() с origGrade для такой строки, но без всех правил (быстрее: строк — десятки тысяч)
   if (origGrade && t.startsWith('orig') && PLAIN_ORIG.test(name) && !GENUINE.test(name)) {
     if (svc === 'd') t = T.oled.test(name) || /soft\s*touch|hard\s*touch/i.test(name) ? 'copy_oled' : 'copy_lcd';
-    else if (svc === 'b') t = T.bVer.test(name) && !T.bVerNot.test(name) ? 'verified' : T.bBoost.test(name) ? 'copy_boost' : 'copy';
+    else if (svc === 'b') t = T.bVer.test(name) && !T.bVerNot.test(name) ? (T.bGenuine.test(name) ? 'genuine' : 'verified') : T.bBoost.test(name) ? 'copy_boost' : 'copy';
     else t = 'copy';
   }
   if (svc === 'b' && t === 'orig_new' && models.length && models.every((m) => m.startsWith('iPhone')) && !/сервис|service/i.test(name)) {
     // «оригинал 100%» — оригинал, но новым он у поставщика быть не может: снятый
     if (ORIG_100.test(name)) t = 'orig_used';
-    else if (!NO_BIND.test(name) && (T.bVer.test(name) || /с\s+привязк/i.test(name))) t = 'verified';
+    else if (!NO_BIND.test(name) && (T.bVer.test(name) || /с\s+привязк/i.test(name))) t = T.bGenuine.test(name) ? 'genuine' : 'verified';
     else t = T.bBoost.test(name) ? 'copy_boost' : 'copy';
   }
+  // «без ошибки» по-настоящему — только «подлинная деталь» (раньше размечалось одним вариантом с привязкой)
+  if (svc === 'b' && t === 'verified' && T.bGenuine.test(name)) t = 'genuine';
   return t;
 }
 

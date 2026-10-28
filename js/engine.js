@@ -12,7 +12,8 @@ export const SERVICES = [...SITE_SERVICES, ...MORE_SERVICES];
 
 // Варианты от слабого к лучшему. Слабый вариант, который не дешевле лучшего, прячем.
 export const ORDER = {
-  b: ['copy', 'copy_boost', 'verified', 'orig_used', 'orig_new'],
+  // verified — с привязкой (виден процент износа, «Неизвестная деталь» остаётся), genuine — «подлинная деталь», без ошибки
+  b: ['copy', 'copy_boost', 'verified', 'genuine', 'orig_used', 'orig_new'],
   d: ['copy_lcd', 'copy_oled', 'orig_reglass', 'orig_used', 'orig_new'],
   p: ['copy', 'orig_used', 'orig_new'],
   c: ['copy', 'orig_used', 'orig_new'],

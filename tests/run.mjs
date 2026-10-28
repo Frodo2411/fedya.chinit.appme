@@ -155,7 +155,8 @@ await test('разбор названий для новых строк прай�
   assert.equal(tier('d', 'Дисплей iPhone 11 - OLED (GX)'), 'copy_oled');
   assert.equal(tier('d', 'Дисплей iPhone 11 - Original (переклей)'), 'orig_reglass');
   assert.equal(tier('b', 'Аккумулятор iPhone 11 - Б/У'), 'copy');
-  assert.equal(tier('b', 'Аккумулятор iPhone 11 - Genuine (с верификацией)'), 'verified');
+  assert.equal(tier('b', 'Аккумулятор iPhone 11 - Genuine (с верификацией)'), 'genuine');
+  assert.equal(tier('b', 'Аккумулятор iPhone 11 - JCID (с верификацией, усиленная 3500 mAh)'), 'verified', 'с верификацией — процент износа виден, ошибка остаётся');
   assert.equal(tier('d', 'Дисплей Samsung A52 - стекло'), 'skip');
   assert.equal(lineKey('Задняя крышка iPhone 14 - черная'), 'Задняя крышка iPhone 14');
   assert.equal(kindOf('Плата зарядки Redmi Note 13 - премиум'), 'p');
@@ -981,7 +982,8 @@ await test('пояснения к деталям для мастера: что �
   assert.deepEqual(tags('Дисплей iPhone 12 Pro Max - OR (Снятый, заменено ТОЛЬКО стекло)', 'd', 'iPhone 12 Pro Max', 'orig_reglass'), ['переклей: только стекло']);
   assert.deepEqual(tags('Дисплей Samsung A52 - OLED', 'd', 'Samsung Galaxy A52', 'copy_oled'), ['OLED'], 'не айфон — без «Неизвестной детали»');
   assert.deepEqual(tags('Аккумулятор для iPhone11 3500 mAh усиленный', 'b', 'iPhone 11', 'copy_boost'), ['усиленная', '3500 мА·ч', '!будет «Неизвестная деталь»']);
-  assert.deepEqual(tags('Аккумулятор iPhone 11 - Genuine (с верификацией)', 'b', 'iPhone 11', 'verified'), ['без ошибки']);
+  assert.deepEqual(tags('Аккумулятор iPhone 11 - Genuine (с верификацией)', 'b', 'iPhone 11', 'genuine'), ['без ошибки']);
+  assert.deepEqual(tags('Аккумулятор iPhone 11 - JCID (с верификацией)', 'b', 'iPhone 11', 'verified'), ['!с процентом износа']);
   assert.deepEqual(tags('Аккумулятор iPhone 8 - копия', 'b', 'iPhone 8', 'copy'), [], 'у iPhone 8 сообщения нет');
   assert.deepEqual(tags('Заднее стекло для iPhone14 + стекло камеры + магнит MagSafe', 'c', 'iPhone 14', 'copy'), ['со стеклом камеры', 'MagSafe']);
   assert.deepEqual(tags('Дисплей Apple Watch 4 (40 мм) - ОРИГИНАЛ (под заказ до 7дн.)', 'd', 'Apple Watch', 'orig_new'), ['!под заказ']);
@@ -994,7 +996,8 @@ await test('«ОРИГИНАЛ» — уровень копии у поставщ
   // у такого поставщика «оригинал» без пометок — копия, с пометками («100%», сервис, снятый, переклей) — оригинал
   assert.equal(tier('b', 'АКБ Apple iPhone 13/iPhone13 - ОРИГИНАЛ (SP) = пожизненная гарантия', g), 'copy');
   assert.equal(tier('b', 'АКБ Apple iPhone 13/iPhone13 - ОРИГИНАЛ (SP) = пожизненная гарантия'), 'orig_new', 'без отметки — как раньше');
-  assert.equal(tier('b', 'АКБ Apple iPhone 12 mini - ОРИГИНАЛ - усиленная 2460 mAh (с верификацией = подлинная деталь (Genuine clean/Gen) = зеленая галочка)', g), 'verified');
+  assert.equal(tier('b', 'АКБ Apple iPhone 12 mini - ОРИГИНАЛ - усиленная 2460 mAh (с верификацией = подлинная деталь (Genuine clean/Gen) = зеленая галочка)', g), 'genuine');
+  assert.equal(tier('b', 'АКБ Apple iPhone 13/iPhone13 - ПРЕМИУМ (с верификацией = с привязкой без ошибки)', g), 'verified', 'с привязкой — не без ошибки');
   assert.equal(tier('b', 'АКБ Apple iPhone 15 Pro Max/14ProMax - ОРИГИНАЛ-СНЯТЫЙ (100%)', g), 'orig_used');
   assert.equal(tier('b', 'АКБ Huawei HB486591EHW (Honor 90) - ОРИГИНАЛ 100%', g), 'orig_new');
   assert.equal(tier('b', 'АКБ Apple iPhone 13 - ОРИГИНАЛ (100% емкость)', g), 'copy', '«100% ёмкость» — не оригинал');
@@ -1017,7 +1020,11 @@ await test('«ОРИГИНАЛ» — уровень копии у поставщ
   assert.equal(gradeVocab(names.filter((n) => /СЕРВИС/.test(n))), false);
   assert.equal(gradeVocab(['Аккумулятор iPhone 13 - Original (Разбор)', 'Дисплей iPhone 11 - OR', 'Дисплей iPhone 12 - оригинал']), false);
   // новый оригинальный аккумулятор Apple не продают: с привязкой — «без ошибки», иначе копия; андроид и снятые не трогаем
-  assert.equal(fixTier('b', 'Аккумулятор iPhone 12/12 Pro - OR (с привязкой Подлинный)', ['iPhone 12', 'iPhone 12 Pro'], 'orig_new'), 'verified');
+  assert.equal(fixTier('b', 'Аккумулятор iPhone 12/12 Pro - OR (с привязкой Подлинный)', ['iPhone 12', 'iPhone 12 Pro'], 'orig_new'), 'genuine');
+  assert.equal(fixTier('b', 'Аккумулятор iPhone 13 - OR (с привязкой)', ['iPhone 13'], 'orig_new'), 'verified');
+  // в старых данных «подлинная деталь» размечена одним вариантом с привязкой — при расчёте это «без ошибки»
+  assert.equal(fixTier('b', 'Аккумулятор iPhone 13 - Genuine clean/ Gen (Подлинная деталь/ С верификацией/ Зеленая галочка)', ['iPhone 13'], 'verified'), 'genuine');
+  assert.equal(fixTier('b', 'Аккумулятор для iPhone13 3227mAh (A2655) orig (100%, без ошибки)', ['iPhone 13'], 'verified'), 'verified');
   assert.equal(fixTier('b', 'АКБ Apple iPhone 8/8G - ОРИГИНАЛ NEW', ['iPhone 8'], 'orig_new'), 'copy');
   assert.equal(fixTier('b', 'Аккумулятор iPhone 11 - Original усиленная 3500 mAh', ['iPhone 11'], 'orig_new'), 'copy_boost');
   assert.equal(fixTier('b', 'Аккумулятор Samsung A52 - OR', ['Samsung Galaxy A52'], 'orig_new'), 'orig_new');

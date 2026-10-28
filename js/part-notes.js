@@ -80,11 +80,16 @@ function batteryNotes(n, model, tier, out) {
   const mah = /(\d{3,5})\s*mAh/i.exec(n);
   if (/усилен|повышенн[а-яёa-z]*\s+[её]мк/i.test(n)) add('усиленная', 'ёмкость больше заводской — держит дольше; реальную ёмкость проверить после установки');
   if (mah) add(mah[1] + ' мА·ч', 'ёмкость по словам поставщика');
-  const ok = verified(n) && !/original|разбор|снят/i.test(n);
-  if (ok) add('без ошибки', 'не будет «Неизвестной детали» в «Состоянии аккумулятора»');
+  const used = /original|разбор|снят/i.test(n);
+  // «подлинная деталь» — без ошибки; «с верификацией», «с привязкой», «без ошибки» — процент износа виден, «Неизвестная деталь» остаётся
+  const genuine = verified(n) && !used && /genuine|подлинн|зел[её]н\S*\s+галочк|новая\s+запчасть/i.test(n);
+  const bound = verified(n) && !used && !genuine;
+  const ok = genuine || bound;
+  if (genuine) add('без ошибки', 'в настройках как оригинальная: без «Неизвестной детали», процент износа виден');
+  if (bound) add('с процентом износа', 'процент износа в настройках будет виден, но отметка «Неизвестная деталь» останется' + (batteryMessage(model) ? '' : ' (на этой модели её и так нет)'), batteryMessage(model));
   if (tier === 'orig_used') add('снятый', 'оригинал с другого телефона: ёмкость проверить (от 95%)');
   if (/\bOR100\b/.test(n)) add('OR100', 'несмотря на «OR», это копия');
-  if (!ok && tier !== 'orig_new' && tier !== 'verified' && batteryMessage(model)) {
+  if (!ok && tier !== 'orig_new' && tier !== 'verified' && tier !== 'genuine' && batteryMessage(model)) {
     add('будет «Неизвестная деталь»', 'на этой модели неоригинальный аккумулятор покажет сообщение, а процент износа видно не будет; на работу не влияет', true);
   }
 }
@@ -114,7 +119,7 @@ export function partNotes(name, svc, model, tier) {
     out.push({ tag: 'будет «Неизвестная деталь»', text: 'на этой модели после замены камеры на неоригинальную будет сообщение в настройках', warn: true });
   }
   // для любых деталей
-  if ((String(tier || '').startsWith('copy') || tier === 'verified') && ORIG_WORD.test(n) && !ORIG_REAL.test(n)) {
+  if ((String(tier || '').startsWith('copy') || tier === 'verified' || tier === 'genuine') && ORIG_WORD.test(n) && !ORIG_REAL.test(n)) {
     out.unshift({ tag: '«оригинал» — не деталь производителя', text: 'так у поставщика назван уровень качества копии (или марка); клиенту это копия', warn: false });
   }
   if (/премиум|premium|high\s*quality/i.test(n)) out.push({ tag: 'премиум', text: 'лучшая копия у этого поставщика (общего стандарта нет)', warn: false });
