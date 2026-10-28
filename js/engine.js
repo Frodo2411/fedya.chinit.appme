@@ -51,7 +51,7 @@ export const DEFAULTS = {
   year: 0, // 0 — текущий год
   glue: true, // учитывать проклейку в заработке и в заказе (на цену клиенту не влияет)
   glue_default: 0, // проклейка, если своей нет в прайсе (клей, скотч), р. на ремонт
-  // Задняя крышка iPhone только там, где не нужен лазер
+  // Айфоны, у которых заднее стекло меняется без лазера. На остальных — только крышка вместе с рамкой (работа как за корпус)
   no_laser: ['iPhone 14', 'iPhone 14 Plus', 'iPhone 15', 'iPhone 15 Plus', 'iPhone 15 Pro', 'iPhone 15 Pro Max', 'iPhone 16',
     'iPhone 16 Plus', 'iPhone 16 Pro', 'iPhone 16 Pro Max', 'iPhone 16e', 'iPhone 17', 'iPhone Air', 'iPhone 17 Pro',
     'iPhone 17 Pro Max', 'iPhone 17e', 'iPhone 18 Pro', 'iPhone 18 Pro Max'],
@@ -61,6 +61,10 @@ export const DEFAULTS = {
 const DEFECT = pyRe(String.raw`битк|б/у|\bБУ\b|царап|пятн|выгор|дефект|трещ|точк|полос|засвет|Diagnosable|\b9[0-4]%`, 'i');
 // крышка с широким вырезом под камеру — под лазерную замену, не для обычной
 const WIDE_CUT = pyRe('широкий вырез|широкое отверстие', 'i');
+// Задняя крышка вместе с рамкой («Задняя крышка для iPhone 11 + стекло»; по цене как корпус): лазер не нужен
+export const FRAME_BACK = /^Задняя крышка\s.*\+\s*стекло(?!\s*камер)/i;
+// Айфоны без заднего стекла: задняя крышка у них и есть корпус
+const METAL_BACK = /^iPhone (?:5c?|5s|SE 2016|6s?(?: Plus)?|7(?: Plus)?)$/;
 // Pixel вскрываются через дисплей, кроме стеклянных 3 и 4 и линейки 10: у них батарея сзади
 const PIXEL_BACK = /^Google Pixel (3|3 XL|4|4 XL|10|10 Pro|10 Pro XL)$/;
 
@@ -251,8 +255,7 @@ export class Pricer {
   }
 
   buildIndex() {
-    const noLaser = new Set(this.S.no_laser);
-    this.noLaser = noLaser;
+    this.noLaser = new Set(this.S.no_laser);
     const index = new Map();
     this.glue = new Map();
     for (const p0 of this.data.parts) {
@@ -270,7 +273,7 @@ export class Pricer {
       // свою деталь мастер вписал сознательно: правила про лазер и вырез к ней не применяем
       if (p.svc === 'c' && !p.own && WIDE_CUT.test(p.name)) continue;
       for (const model of p.models) {
-        if (p.svc === 'c' && !p.own && model.startsWith('iPhone') && !noLaser.has(model)) continue;
+        if (p.svc === 'c' && !p.own && this.laser(model) && !METAL_BACK.test(model) && !FRAME_BACK.test(p.name)) continue;
         const key = model + '|' + p.svc + '|' + p.tier;
         let lines = index.get(key);
         if (!lines) index.set(key, (lines = new Map()));
@@ -283,14 +286,26 @@ export class Pricer {
     return index;
   }
 
+  // Айфон, у которого одно заднее стекло снимается только лазером (и айфон без стекла сзади)
+  laser(model) {
+    return model.startsWith('iPhone') && !this.noLaser.has(model);
+  }
+
+  // Какая работа на деле: задняя крышка такого айфона меняется вместе с рамкой — телефон переезжает в новый корпус,
+  // поэтому работа и проклейки как за корпус
+  job(model, svc) {
+    return svc === 'c' && this.laser(model) ? 'hs' : svc;
+  }
+
   // Какие проклейки нужны ремонту. Через дисплей вскрываются айфоны с лазером и почти все Pixel, остальные — сзади.
   // Корпус — дисплей, батарея и сторона вскрытия; стекло экрана и тачскрин — дисплей; стекло камеры и SIM-лоток — без проклейки.
   glueTypes(model, svc) {
     if (!this.S.glue) return [];
-    const front = model.startsWith('iPhone') ? !this.noLaser.has(model) : model.startsWith('Google Pixel') && !PIXEL_BACK.test(model);
+    const front = model.startsWith('iPhone') ? this.laser(model) : model.startsWith('Google Pixel') && !PIXEL_BACK.test(model);
     const open = front ? 'gd' : 'gc';
-    const need = { d: ['gd'], c: ['gc'], b: ['gb', open], hs: ['gd', 'gb', open], tc: ['gd'], gl: ['gd'], cg: [], sim: [] }[svc];
-    return [...new Set(need || (ORDER[svc] ? [open] : []))];
+    const job = this.job(model, svc);
+    const need = { d: ['gd'], c: ['gc'], b: ['gb', open], hs: ['gd', 'gb', open], tc: ['gd'], gl: ['gd'], cg: [], sim: [] }[job];
+    return [...new Set(need || (ORDER[job] ? [open] : []))];
   }
 
   // Проклейки для ремонта: самая дешёвая из тех, что в наличии; нет в прайсе — не считаем.
@@ -322,7 +337,7 @@ export class Pricer {
 
   service(m, svc) {
     const S = this.S;
-    const work = workFee(S, svc, m);
+    const work = workFee(S, this.job(m.model, svc), m);
     const opts = [];
     for (const tier of ORDER[svc]) {
       const lines = this.index.get(m.model + '|' + svc + '|' + tier);

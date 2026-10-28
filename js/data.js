@@ -3,6 +3,7 @@
 // parts:  [supplier, name, cost, stock, svc, tier, [model indexes], line (0 — как name)]
 
 import { APP_MODELS, SITE_ALIASES } from './models-app.js';
+import { kindOf, tier as tierByRules, fixTier } from './rules.js';
 
 // Модели только для приложения: на сайте их нет, а детали у поставщиков есть (js/models-app.js).
 // Детали к ним размечаются при загрузке прайса поставщика, в файл для сайта они не попадают.
@@ -18,6 +19,15 @@ export function decode(b) {
   const parts = b.parts.map(([sup, name, cost, stock, svc, tier, ms, line]) => ({
     sup, name, cost, stock: stock || null, svc, tier, models: ms.map((i) => names[i]), line: line === 0 ? name : line,
   }));
+  // Пакет до выпуска 2026-10-28.2: «Задняя крышка для iPhone…» лежала в «Корпусе». Теперь это задняя крышка —
+  // переносим и размечаем вариант по правилам крышки, как при загрузке прайса (снятую галочкой не трогаем)
+  for (const p of parts) {
+    if (p.svc !== 'hs' || kindOf(p.name) !== 'c') continue;
+    p.svc = 'c';
+    if (p.tier === 'skip') continue;
+    const t = tierByRules('c', p.name);
+    p.tier = t === 'skip' ? t : fixTier('c', p.name, p.models, t, false);
+  }
   // бренд и год моделей приложения — из models-app.js, даже если пакет сохранён старой версией
   const appBy = new Map(APP_MODELS.map(([brand, model, year]) => [model, { brand, year }]));
   for (const m of models) {

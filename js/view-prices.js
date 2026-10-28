@@ -1,7 +1,7 @@
 // Экран «Цены»: поиск модели, ремонты, варианты деталей с ценой клиенту, поставщиком и заработком.
 
 import { h, fill, icon, money, toast, copyText, openSheet, field, select, parseNum, fmtDate } from './ui.js';
-import { SERVICES, SITE_SERVICES, ORDER, OWN, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, workFee, sfKey, GLUE_NAME } from './engine.js';
+import { SERVICES, SITE_SERVICES, ORDER, OWN, FRAME_BACK, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, workFee, sfKey, GLUE_NAME } from './engine.js';
 import { store, newId, today } from './store.js';
 import { telHref } from './view-orders.js';
 import { cartQty } from './cart.js';
@@ -80,8 +80,9 @@ export function cartGlues(pricer, model, svcs) {
 }
 
 // Пояснения для клиента, по тексту с сайта
-function clientHint(svc, tier, model) {
+function clientHint(svc, tier, model, part) {
   const iphone = model.startsWith('iPhone');
+  if (svc === 'c' && FRAME_BACK.test(part || '')) return 'крышка вместе с рамкой: телефон переносится в новый корпус';
   if (svc === 'b') {
     return {
       copy: iphone ? 'не от производителя; на iPhone может появиться сообщение о неизвестной детали, процент износа не виден' : 'батарея не от производителя телефона',
@@ -460,13 +461,13 @@ export function createPricesView(app) {
 
   // Почему нет деталей и что делать: своя деталь, а у айфонов с лазером ещё и корпус
   function emptyState(e, svc, noParts) {
-    const laser = svc === 'c' && e.model.startsWith('iPhone') && !P().noLaser.has(e.model);
+    const laser = svc === 'c' && P().laser(e.model);
     const hs = e.services.hs.opts.filter((o) => !o.hidden);
     const hsFrom = hs.length ? Math.min(...hs.map((o) => priceOf(e, 'hs', o).price)) : null;
     let why;
     if (laser) {
-      why = h('div', {}, 'На этой модели заднее стекло снимается только лазером, поэтому крышки из прайса здесь не считаются.',
-        h('br'), 'Если делаешь с лазером (сам или отдаёшь) — впиши свою деталь или добавь модель в «Ещё → Расчёт цены → Модели без лазера».',
+      why = h('div', {}, 'На этой модели заднее стекло снимается только лазером: из прайса здесь считается только крышка вместе с рамкой («Задняя крышка … + стекло»), а её у поставщиков нет.',
+        h('br'), 'Если меняешь одно стекло лазером (сам или отдаёшь) — впиши свою деталь или добавь модель в «Ещё → Расчёт цены → Модели без лазера».',
         hsFrom ? h('div', { style: 'margin-top:8px' }, 'Без лазера меняют корпус целиком.') : null);
     } else if (chosen().length) {
       why = h('div', {}, 'У ' + supNames(chosen()) + ' нет ' + (noParts ? 'деталей для этой модели.' : 'детали для этого ремонта.'));
@@ -543,8 +544,9 @@ export function createPricesView(app) {
       if (!opts.length) continue;
       if (svcs.length > 1) lines.push('', SVC[svc] + ':');
       for (const o of opts) {
-        const hint = hints ? clientHint(svc, o.tier, entry.model) : '';
-        lines.push('• ' + VAR_CLIENT[o.tier] + ' — ' + priceOf(entry, svc, o).price + ' р.' + (hint ? ' (' + hint + ')' : ''));
+        const p = priceOf(entry, svc, o);
+        const hint = hints ? clientHint(svc, o.tier, entry.model, p.part) : '';
+        lines.push('• ' + VAR_CLIENT[o.tier] + ' — ' + p.price + ' р.' + (hint ? ' (' + hint + ')' : ''));
       }
     }
     const foot = (app.settings.clientFooter || '').trim();
@@ -630,7 +632,7 @@ export function openOwnPart(app, entry, svc, item) {
   const S = app.pricer.S;
   const tiers = ORDER[svc];
   const x = item ? { ...item } : { tier: tiers[0], cost: null, name: '' };
-  const work = workFee(S, svc, entry);
+  const work = workFee(S, app.pricer.job(entry.model, svc), entry);
   const preview = h('div', { class: 'card', style: 'margin-top:16px' });
   const update = () => {
     if (!(x.cost > 0)) {

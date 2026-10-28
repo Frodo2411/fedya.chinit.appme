@@ -10,7 +10,7 @@ import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteK
 import { SCRIPT_VERSION } from './sheet.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-10-28.1';
+export const APP_VERSION = '2026-10-28.2';
 
 export function createMoreView(app) {
   const root = h('div');
@@ -280,6 +280,7 @@ function openFormula(app) {
     h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'На цену клиенту не влияет. Дисплей, стекло экрана и тачскрин — проклейка дисплея, крышка — задней крышки, аккумулятор — батареи и стороны вскрытия, корпус — дисплея, батареи и стороны вскрытия, стекло камеры и SIM-лоток — без проклейки, остальное — стороны вскрытия. Айфоны из списка ниже и почти все Android вскрываются сзади, остальные айфоны и большинство Pixel — через дисплей. Берётся самая дешёвая в наличии, набор «(5шт)» — за штуку.' }),
     h('h3', { style: 'margin-top:20px', text: 'Задняя крышка iPhone' }),
     field('Модели без лазера, по одной в строке', h('textarea', { class: 'input', style: 'min-height:160px', value: S.no_laser.join('\n'), oninput: (e) => { S.no_laser = e.target.value.split('\n').map((x) => x.trim()).filter(Boolean); } })),
+    h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'У этих моделей заднее стекло меняется без лазера. У остальных айфонов из прайса считается только крышка вместе с рамкой («Задняя крышка … + стекло»): телефон переезжает в новый корпус, поэтому работа и проклейки — как за корпус.' }),
   );
   const sheet = openSheet('Расчёт цены', body, [
     h('button', { class: 'btn', text: 'Как было', onclick: () => { if (confirm('Вернуть все числа как было изначально?')) { app.saveSettings({ formula: null }); sheet.close(); toast('Настройки сброшены'); } } }),

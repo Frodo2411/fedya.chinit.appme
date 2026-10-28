@@ -96,6 +96,10 @@ function batteryNotes(n, model, tier, out) {
 
 function coverNotes(n, out) {
   const add = (tag, text) => out.push({ tag, text, warn: false });
+  if (/\+\s*стекло(?!\s*камер)/i.test(n) && /^Задняя крышка/i.test(n)) {
+    add('с рамкой', 'крышка вместе с рамкой (по сути корпус): лазер не нужен, в неё переносятся все детали телефона');
+  }
+  if (/со\s+шлейф/i.test(n)) add('со шлейфами', 'шлейфы уже стоят — переносить меньше');
   if (/стекл[а-яёa-z]*\s+камер/i.test(n)) add('со стеклом камеры', 'стекло камеры уже стоит');
   if (/magsafe|магнит/i.test(n)) add('MagSafe', 'магниты MagSafe уже на крышке');
   if (/\bnfc\b/i.test(n)) add('NFC', 'антенна NFC уже на крышке');
