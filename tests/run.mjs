@@ -1117,6 +1117,20 @@ await test('задняя крышка вместе с рамкой: во вкл�
   assert.ok(!partNotes('Заднее стекло для iPhone14 + стекло камеры', 'c', 'iPhone 14', 'copy').some((x) => x.tag === 'с рамкой'));
 });
 
+await test('аккумулятор «без ошибки» не прячется за снятым оригиналом, за новым оригиналом — прячется', () => {
+  const B = (name, cost, t) => P('E', name, cost, null, 'b', t, ['iPhone 11']);
+  const rows = [B('Аккумулятор iPhone 11 - DEJI (с верификацией)', 43, 'verified'),
+    B('Аккумулятор iPhone 11 - JCID Genuine clean (Подлинная деталь)', 79, 'genuine'),
+    B('Аккумулятор iPhone 11 - Original (Разбор) от 95%', 73, 'orig_used')];
+  const opts = (more) => new Pricer({ ...DATA, parts: [...rows, ...more] }, { year: 2026 }).model('iPhone 11').services.b.opts;
+  const a = opts([]);
+  assert.ok(a.find((o) => o.tier === 'orig_used').price < a.find((o) => o.tier === 'genuine').price);
+  assert.deepEqual(a.filter((o) => !o.hidden).map((o) => o.tier), ['verified', 'genuine', 'orig_used'], 'новый «без ошибки» дороже снятого оригинала — оба видны');
+  const b = opts([B('Аккумулятор iPhone 11 - Apple новая (сервис)', 70, 'orig_new')]);
+  assert.equal(b.find((o) => o.tier === 'genuine').hidden, true, 'новый оригинал дешевле — «без ошибки» прячем');
+  assert.equal(b.find((o) => o.tier === 'orig_used').hidden, true);
+});
+
 await test('версия в «Ещё» совпадает с выпуском в sw.js', () => {
   const sw = /const VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'))[1];
   const app = /export const APP_VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'js/view-more.js'), 'utf8'))[1];

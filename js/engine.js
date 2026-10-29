@@ -377,10 +377,12 @@ export class Pricer {
       });
     }
     // прячем слабый вариант, если он не дешевле варианта получше.
-    // Переклей при равной цене оставляем: деталь дешевле — заработок больше, клиенту предложим оба
+    // Переклей при равной цене оставляем: деталь дешевле — заработок больше, клиенту предложим оба.
+    // Новый аккумулятор «без ошибки» и снятый оригинал друг друга не прячут: новый с полной ёмкостью или оригинал от 95% — выбор клиента
     for (let i = 0; i < opts.length; i++) {
       const o = opts[i];
-      if (opts.slice(i + 1).some((b) => (o.tier === 'orig_reglass' ? b.price < o.price : b.price <= o.price))) o.hidden = true;
+      const better = opts.slice(i + 1).filter((b) => !(o.tier === 'genuine' && b.tier === 'orig_used'));
+      if (better.some((b) => (o.tier === 'orig_reglass' ? b.price < o.price : b.price <= o.price))) o.hidden = true;
     }
     return { work, opts };
   }
