@@ -985,6 +985,11 @@ await test('пояснения к деталям для мастера: что �
   assert.deepEqual(tags('Аккумулятор iPhone 11 - Genuine (с верификацией)', 'b', 'iPhone 11', 'genuine'), ['без ошибки']);
   assert.deepEqual(tags('Аккумулятор iPhone 11 - JCID (с верификацией)', 'b', 'iPhone 11', 'verified'), ['!с процентом износа']);
   assert.deepEqual(tags('Аккумулятор iPhone 8 - копия', 'b', 'iPhone 8', 'copy'), [], 'у iPhone 8 сообщения нет');
+  // снятый оригинал: с iPhone 12 телефон примет его сам («Завершить ремонт», iOS 18), на XS–11 — только программатором
+  assert.deepEqual(tags('Аккумулятор iPhone 13 - Original (С верификацией/ Разбор ) от 95% емкость', 'b', 'iPhone 13', 'orig_used'), ['снятый', 'завершить ремонт']);
+  assert.deepEqual(tags('Аккумулятор iPhone 11 - Original (Разбор) от 95% емкость', 'b', 'iPhone 11', 'orig_used'), ['снятый', '!будет «Неизвестная деталь»']);
+  assert.ok(partNotes('Аккумулятор iPhone 11 - Original (Разбор)', 'b', 'iPhone 11', 'orig_used')[1].text.includes('программатором'));
+  assert.deepEqual(tags('Аккумулятор iPhone 8 - Original (Разбор)', 'b', 'iPhone 8', 'orig_used'), ['снятый']);
   assert.deepEqual(tags('Заднее стекло для iPhone14 + стекло камеры + магнит MagSafe', 'c', 'iPhone 14', 'copy'), ['со стеклом камеры', 'MagSafe']);
   assert.deepEqual(tags('Дисплей Apple Watch 4 (40 мм) - ОРИГИНАЛ (под заказ до 7дн.)', 'd', 'Apple Watch', 'orig_new'), ['!под заказ']);
   assert.deepEqual(tags('Дисплей Samsung A14 5G - ОРИГИНАЛ (SP) = пожизненная гарантия', 'd', 'Samsung Galaxy A14 5G', 'orig_new'), ['пожизненная гарантия']);
