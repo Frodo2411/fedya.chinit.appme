@@ -51,9 +51,12 @@ export const DEFAULTS = {
   year: 0, // 0 — текущий год
   glue: true, // учитывать проклейку в заработке и в заказе (на цену клиенту не влияет)
   glue_default: 0, // проклейка, если своей нет в прайсе (клей, скотч), р. на ремонт
-  // Надбавка к работе за пайку, р., и ремонты, где деталь паяется («модель|ремонт»; на экране модели — «Нужна пайка»)
+  // Надбавка к работе за пайку, р., и ремонты, где деталь паяется («модель|ремонт»; на экране модели — «Нужна пайка»).
+  // Слуховой динамик iPhone X–12: на нём сидит датчик приближения (часть Face ID) — переносится на новый динамик пайкой;
+  // с iPhone 13 динамик отдельный
   solder: 20,
-  solder_jobs: ['iPhone 12 Pro|es'],
+  solder_jobs: ['iPhone X', 'iPhone XS', 'iPhone XS Max', 'iPhone XR', 'iPhone 11', 'iPhone 11 Pro', 'iPhone 11 Pro Max',
+    'iPhone 12 mini', 'iPhone 12', 'iPhone 12 Pro', 'iPhone 12 Pro Max'].map((m) => m + '|es'),
   // Айфоны, у которых заднее стекло меняется без лазера. На остальных — только крышка вместе с рамкой (работа как за корпус)
   no_laser: ['iPhone 14', 'iPhone 14 Plus', 'iPhone 15', 'iPhone 15 Plus', 'iPhone 15 Pro', 'iPhone 15 Pro Max', 'iPhone 16',
     'iPhone 16 Plus', 'iPhone 16 Pro', 'iPhone 16 Pro Max', 'iPhone 16e', 'iPhone 17', 'iPhone Air', 'iPhone 17 Pro',

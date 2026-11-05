@@ -1194,7 +1194,8 @@ await test('аккумулятор «без ошибки» не прячется
 
 await test('надбавка за пайку: к работе отмеченного ремонта этой модели, в цене клиенту и на сайте', () => {
   const D = settingsWithDefaults(null);
-  assert.deepEqual([D.solder, D.solder_jobs], [20, ['iPhone 12 Pro|es']]);
+  assert.equal(D.solder, 20);
+  assert.ok(D.solder_jobs.includes('iPhone 12 Pro|es') && D.solder_jobs.includes('iPhone X|es') && !D.solder_jobs.includes('iPhone 13|es'), 'слуховой динамик X–12');
   const on = new Pricer(DATA, { year: 2026, solder: 25, solder_jobs: ['iPhone 14|c'] });
   const off = new Pricer(DATA, { year: 2026, solder_jobs: [] });
   const c1 = on.model('iPhone 14').services.c;
