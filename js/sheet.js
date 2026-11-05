@@ -8,6 +8,8 @@ import { DEFAULT_LISTS } from './orders.js';
 const blank = (v) => (v === '' || v === undefined ? null : v);
 // Версия скрипта таблицы, которая нужна приложению (apps-script/Code.gs, VERSION): 3 — гарантийные заказы Г1, Г2…
 export const SCRIPT_VERSION = 3;
+// С какой версии скрипт умеет удалять заказ
+export const DELETE_VERSION = 4;
 
 export class SheetSync {
   constructor(onChange) {
@@ -93,6 +95,23 @@ export class SheetSync {
         id: newId(), op: kind, ref: ref || undefined,
         num: target.num ?? (sent ? sent.num : null), row: target.row ?? (sent ? sent.row : null),
         was: target.was || (sent ? sent.was : undefined), fields, at: Date.now(),
+      });
+    }
+    this.save();
+    this.onChange();
+    this.flush();
+  }
+
+  // Удалить заказ. Ещё не ушедший в таблицу просто убираем из очереди вместе с его правками
+  remove(target) {
+    const ref = target.pendingId || null;
+    if (ref && !this.inflight.has(ref) && this.outbox.some((o) => o.id === ref)) {
+      this.outbox = this.outbox.filter((o) => o.id !== ref && o.ref !== ref);
+    } else {
+      const sent = ref ? this.sent[ref] : null;
+      this.outbox.push({
+        id: newId(), op: 'deleteOrder', ref: ref || undefined,
+        num: target.num ?? (sent ? sent.num : null), row: target.row ?? (sent ? sent.row : null), fields: {}, at: Date.now(),
       });
     }
     this.save();
@@ -189,15 +208,16 @@ export class SheetSync {
     const list = ((this.cache && this.cache.orders) || []).map((o) => ({ ...o }));
     const byNum = new Map(list.map((o) => [String(o.num), o]));
     for (const op of this.outbox) {
-      if (op.op === 'updateOrder') {
+      if (op.op === 'updateOrder' || op.op === 'deleteOrder') {
         const num = op.num ?? (op.ref && this.sent[op.ref] ? this.sent[op.ref].num : null);
         const o = num !== null && num !== undefined ? byNum.get(String(num)) : list.find((x) => x.pendingId && x.pendingId === op.ref);
-        if (o) Object.assign(o, op.fields, { pending: true });
+        if (o && op.op === 'deleteOrder') o.deleted = true;
+        else if (o) Object.assign(o, op.fields, { pending: true });
       } else if (op.op === 'addOrder') {
         list.push({ ...op.fields, num: null, row: null, pending: true, pendingId: op.id, warrantyOrder: op.warranty || undefined });
       }
     }
-    return list;
+    return list.filter((o) => !o.deleted);
   }
 
   expenses() {
@@ -218,27 +238,28 @@ export class SheetSync {
     return list;
   }
 
-  // Резервная копия данных приложения на служебном листе (данные зашифрованы)
-  // Адрес скрипта — один на все устройства. Новое развертывание скрипта даёт новый адрес: устройство с новым скриптом
-  // оставляет свой адрес в таблице, а устройство со старым адресом (через старый скрипт той же таблицы) читает его,
+  // Адрес скрипта — один на все устройства. Новое развертывание скрипта даёт новый адрес: устройство с самым новым
+  // скриптом оставляет свой адрес в таблице, а устройство со скриптом старее (через свой скрипт той же таблицы) читает его,
   // проверяет своим ключом и переключается. true — переключились
   async followUrl() {
     if (!this.connected || this.version === null) return false;
     const r = await this.backupGet('script');
     const saved = r && r.value ? JSON.parse(r.value) : null;
-    if (this.version >= SCRIPT_VERSION) {
-      if (!saved || !(saved.version >= this.version)) await this.backupSet('script', JSON.stringify({ url: this.cfg.url, version: this.version }), Date.now());
-      return false;
+    if (saved && saved.url && saved.url !== this.cfg.url && saved.version > this.version) {
+      const cfg = { ...this.cfg, url: saved.url };
+      const info = await this.call('ping', {}, cfg);
+      if (!(info && info.version > this.version)) return false;
+      this.configure(cfg);
+      await this.load();
+      return true;
     }
-    if (!saved || !saved.url || saved.url === this.cfg.url || !(saved.version >= SCRIPT_VERSION)) return false;
-    const cfg = { ...this.cfg, url: saved.url };
-    const info = await this.call('ping', {}, cfg);
-    if (!(info && info.version >= SCRIPT_VERSION)) return false;
-    this.configure(cfg);
-    await this.load();
-    return true;
+    if (this.version >= SCRIPT_VERSION && !(saved && saved.version >= this.version)) {
+      await this.backupSet('script', JSON.stringify({ url: this.cfg.url, version: this.version }), Date.now());
+    }
+    return false;
   }
 
+  // Резервная копия данных приложения на служебном листе (данные зашифрованы)
   async backupGet(name) {
     return this.call('kvGet', { name });
   }

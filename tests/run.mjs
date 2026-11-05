@@ -715,7 +715,7 @@ await test('Apps Script: ключ, список, запись, повтор, ф�
   assert.equal(gas.post({ op: 'kvGet', key: 'test-key', name: 'p' }).data.value.slice(0, 4), '+abc');
   assert.ok(fr > 0);
   // гарантийные заказы: своя нумерация Г1, Г2…, обычная не сбивается; столбец «Гарантия по №» появляется сам
-  assert.equal(gas.post({ op: 'list', key: 'test-key' }).data.version, 3);
+  assert.equal(gas.post({ op: 'list', key: 'test-key' }).data.version, 4);
   const nextNum = Math.max(...gas.post({ op: 'list', key: 'test-key' }).data.orders.map((o) => (typeof o.num === 'number' ? o.num : 0))) + 1;
   const wr = gas.post({ op: 'batch', key: 'test-key', ops: [
     { id: 'w1', op: 'addOrder', warranty: true, fields: { model: 'iPhone 11', client: 'Иван', phone: '291112233', wfor: 2, price: 0, part: 25 } },
@@ -740,6 +740,17 @@ await test('Apps Script: ключ, список, запись, повтор, ф�
   assert.equal(sh.getRange(2, 17).getValue(), 'Принят', 'заказ №1 не тронут правкой Г1');
   const wrep = gas.post({ op: 'batch', key: 'test-key', ops: [{ id: 'w3', op: 'addOrder', warranty: true, fields: { model: 'Redmi' } }] }).data[0];
   assert.deepEqual([wrep.repeat, wrep.num], [true, 'Г2'], 'повтор гарантийного не создаёт Г3');
+  // удаление: номера вписаны — строка удаляется, номера остальных не меняются
+  const before = gas.post({ op: 'list', key: 'test-key' }).data.orders;
+  const victim = before.find((o) => o.num === nextNum);
+  const del = gas.post({ op: 'batch', key: 'test-key', ops: [{ id: 'd1', op: 'deleteOrder', num: nextNum, row: victim.row }] }).data[0];
+  assert.deepEqual([del.ok, del.deleted], [true, true], del.error);
+  const after = gas.post({ op: 'list', key: 'test-key' }).data.orders;
+  assert.equal(after.length, before.length - 1);
+  assert.ok(!after.some((o) => o.num === nextNum));
+  assert.deepEqual(after.map((o) => o.num), before.filter((o) => o.num !== nextNum).map((o) => o.num), 'номера остальных те же');
+  assert.equal(gas.post({ op: 'batch', key: 'test-key', ops: [{ id: 'd1', op: 'deleteOrder', num: nextNum }] }).data[0].repeat, true, 'повтор не удаляет ещё раз');
+  assert.equal(gas.post({ op: 'batch', key: 'test-key', ops: [{ id: 'd2', op: 'deleteOrder', num: 999 }] }).data[0].ok, false);
   // заглушка ключа не работает
   const raw = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, '__KEY__');
   assert.equal(raw.post({ op: 'ping', key: '__KEY__' }).ok, false);
@@ -783,7 +794,18 @@ await test('Apps Script: номер «№» считает формула — г
   const fix = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'retry1', op: 'updateOrder', ref: 'old1', num: 'Г2', row: n.row, fields: { status: 'Принят' } }] }).data[0];
   assert.equal(fix.ok, true, fix.error);
   assert.deepEqual([sh.getRange(n.row, 1).getValue(), sh.getRange(n.row, 5).getValue()], ['Г2', 'Принят'], '«Повторить» после обновления скрипта чинит номер');
-  assert.equal(gas.post({ op: 'list', key: 'k' }).data.version, 3);
+  assert.equal(gas.post({ op: 'list', key: 'k' }).data.version, 4);
+  // удаление при формуле в «№»: строка остаётся с номером-числом (номера ниже не съедут), остальное очищено, в списке её нет
+  const d = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'd1', op: 'deleteOrder', num: 1, row: 2 }] }).data[0];
+  assert.deepEqual([d.ok, d.cleared, d.row], [true, true, 2], d.error);
+  assert.deepEqual([sh.getRange(2, 1).getValue(), sh.getRange(2, 1).getFormula(), sh.getRange(2, 2).getValue(), sh.getRange(2, 3).getValue(), sh.getRange(2, 4).getValue()],
+    [1, '', '', '', ''], 'номер числом, данные очищены');
+  assert.ok(sh.getRange(3, 1).getFormula().startsWith('=IF('), 'формула номера ниже на месте');
+  const left = gas.post({ op: 'list', key: 'k' }).data.orders;
+  assert.ok(!left.some((o) => o.num === 1), 'удалённого нет в списке');
+  assert.ok(left.some((o) => o.num === 2 && o.client === 'Клиент 3'), 'заказ №2 на месте');
+  const again = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'n9', op: 'addOrder', fields: { date: '2026-10-27', model: 'Poco' } }] }).data[0];
+  assert.notEqual(again.row, 2, 'строку удалённого заказа новый не занимает');
 });
 
 await test('очередь приложения: правка заказа во время отправки, из открытой формы, две правки расхода', async () => {
@@ -838,7 +860,7 @@ await test('очередь приложения: правка заказа во 
   assert.equal(s.failed.length, 0);
   const g = s.orders().find((o) => o.num === 'Г1');
   assert.ok(g && isWarranty(g), 'после отправки номер Г1');
-  assert.equal(s.version, 3);
+  assert.equal(s.version, 4);
   assert.deepEqual([sh.getRange(g.row, 1).getValue(), sh.getRange(g.row, 3).getValue()], ['Г1', 'iPhone 11']);
   s.update('updateOrder', g, { status: 'Выдан' });
   while (s.outbox.length || s.running) await (s.running || s.flush());
@@ -848,7 +870,7 @@ await test('очередь приложения: правка заказа во 
   const plain = globalThis.fetch;
   globalThis.fetch = async (url, o) => {
     const t = await (await plain(url, o)).text();
-    return new Response(url.endsWith('/old') ? t.replace(/"version":3/g, '"version":1') : t);
+    return new Response(url.endsWith('/old') ? t.replace(/"version":4/g, '"version":1') : t);
   };
   const phone = new SheetSync();
   phone.configure({ url: 'https://script.google.com/old', key: 'k' });
@@ -857,9 +879,27 @@ await test('очередь приложения: правка заказа во 
   assert.equal(await phone.followUrl(), false, 'адреса нового скрипта в таблице ещё нет');
   assert.equal(await s.followUrl(), false, 'компьютер только оставляет адрес');
   assert.equal(await phone.followUrl(), true);
-  assert.deepEqual([phone.cfg.url, phone.version], ['https://script.google.com/x', 3]);
+  assert.deepEqual([phone.cfg.url, phone.version], ['https://script.google.com/x', 4]);
   assert.equal(await phone.followUrl(), false, 'уже на новом адресе');
   globalThis.fetch = plain;
+  // удаление: не ушедший в таблицу заказ убирается из очереди, ушедший — операцией в таблице
+  offline = true;
+  s.add('addOrder', { model: 'Ошибочный' });
+  const draft = s.orders().find((o) => o.model === 'Ошибочный');
+  s.update('updateOrder', draft, { status: 'Принят' });
+  while (s.running) await s.running; // попытки отправки без сети закончились, заказ ждёт в очереди
+  s.remove(draft);
+  assert.ok(!s.orders().some((o) => o.model === 'Ошибочный'));
+  assert.ok(!s.outbox.some((op) => op.fields && op.fields.model === 'Ошибочный'), 'в таблицу не уйдёт');
+  offline = false;
+  const victim = s.orders().find((o) => o.model === 'Тест');
+  s.remove(victim);
+  assert.ok(!s.orders().some((o) => o.model === 'Тест'), 'сразу пропал из списка');
+  s.again = true;
+  while (s.outbox.length || s.running) await (s.running || s.flush());
+  assert.equal(s.failed.length, 0, JSON.stringify(s.failed));
+  assert.ok(!s.orders().some((o) => o.model === 'Тест'), 'и в таблице его нет');
+  assert.ok(s.orders().some((o) => o.num === 'Г1'), 'остальные на месте');
 });
 
 await test('корзина: +1 к той же детали, по поставщикам, цена из нынешнего прайса, замена поставщика', async () => {

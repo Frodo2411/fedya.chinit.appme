@@ -27,8 +27,8 @@ const FORMULA_KEYS = ['profit', 'due', 'warranty', 'month'];
 const OPTIONAL_COLS = ['wfor'];
 // Гарантийные заказы нумеруются отдельно: Г1, Г2…
 const WARRANTY_PREFIX = 'Г';
-// 3 — номер гарантийного пишется и поверх формулы в «№»
-const VERSION = 3;
+// 3 — номер гарантийного пишется и поверх формулы в «№»; 4 — удаление заказа
+const VERSION = 4;
 
 function doGet(e) {
   // Просто открыть адрес в браузере — проверка, что скрипт развёрнут правильно. Данных без ключа не отдаём.
@@ -140,7 +140,11 @@ function readRows_(sh, cols, isRow) {
 function isOrder_(o) { return o.num != null || o.date != null || o.model != null || o.client != null || o.problem != null; }
 function isExpense_(o) { return o.date != null || o.what != null || o.sum != null; }
 
-function readOrders_() { const sh = sheet_(SHEET_ORDERS); return readRows_(sh, columns_(sh, ORDER_COLS), isOrder_); }
+// Заказ, от которого остались только формулы (номер, прибыль…), — удалённый: строку очистили, формулы оставили
+function hasData_(o) {
+  return Object.keys(ORDER_COLS).some(function (k) { return k !== 'num' && FORMULA_KEYS.indexOf(k) < 0 && o[k] != null; });
+}
+function readOrders_() { const sh = sheet_(SHEET_ORDERS); return readRows_(sh, columns_(sh, ORDER_COLS), isOrder_).filter(hasData_); }
 function readExpenses_() { const sh = sheet_(SHEET_EXPENSES); return readRows_(sh, columns_(sh, EXPENSE_COLS), isExpense_); }
 
 // Списки с листа «Настройки»: заголовок в одной ячейке, значения ниже до пустой
@@ -192,6 +196,7 @@ function runOp_(op) {
   try {
     if (op.op === 'addOrder') res = addRow_(SHEET_ORDERS, ORDER_COLS, op.fields, isOrder_, true, pend[op.id], reserve, op.warranty === true);
     else if (op.op === 'updateOrder') res = updateOrder_(op);
+    else if (op.op === 'deleteOrder') res = deleteOrder_(op);
     else if (op.op === 'addExpense') res = addRow_(SHEET_EXPENSES, EXPENSE_COLS, op.fields, isExpense_, false, pend[op.id], reserve);
     else if (op.op === 'updateExpense') res = updateExpense_(op);
     else throw new Error('Неизвестная операция: ' + op.op);
@@ -292,9 +297,8 @@ function addRow_(name, spec, fields, isRow, numbered, reserved, reserve, warrant
   return { row: target, num: numbered ? f.num : null };
 }
 
-function updateOrder_(op) {
-  const sh = sheet_(SHEET_ORDERS);
-  const cols = columns_(sh, ORDER_COLS);
+// Строка заказа: по номеру строки, если там тот же номер, иначе поиском по номеру
+function orderRow_(sh, cols, op) {
   if (op.num === null || op.num === undefined || op.num === '') throw new Error('У заказа нет номера: обнови список и попробуй ещё раз');
   const key = numKey_(op.num);
   const warranty = warrantyNum_(op.num) !== null;
@@ -304,14 +308,44 @@ function updateOrder_(op) {
   // гарантийный, добавленный скриптом версии 2: в «№» осталась формула с обычным номером, строку знаем по журналу
   else if (at && op.byRef && warranty && at.getFormula()) row = op.row;
   if (row === null) {
-    const found = readRows_(sh, cols, isOrder_).filter(function (o) { return numKey_(o.num) === key; });
+    const found = readRows_(sh, cols, isOrder_).filter(function (o) { return numKey_(o.num) === key && hasData_(o); });
     if (!found.length) throw new Error('Не нашёл заказ №' + op.num);
     row = found[0].row;
   }
+  return row;
+}
+
+function updateOrder_(op) {
+  const sh = sheet_(SHEET_ORDERS);
+  const cols = columns_(sh, ORDER_COLS);
+  const row = orderRow_(sh, cols, op);
+  const key = numKey_(op.num);
+  const warranty = warrantyNum_(op.num) !== null;
   ensureCols_(sh, cols, ORDER_COLS, op.fields);
   if (warranty && numKey_(sh.getRange(row, cols.num).getValue()) !== key) sh.getRange(row, cols.num).setValue(op.num);
   writeFields_(sh, row, cols, op.fields);
   return { row: row, num: op.num };
+}
+
+// Удалить заказ. Номера вписаны (в «№» с этой строки и ниже нет формул) — строка удаляется целиком, номера других
+// заказов не меняются. Номер считает формула («наибольший номер выше + 1») — строку удалять или очищать нельзя:
+// номера всех заказов ниже съехали бы. Тогда номер удалённого заказа остаётся в строке числом (вместо формулы),
+// остальное очищается (формулы прибыли и т. п. остаются); такая строка в списке не показывается, номер не занимается
+function deleteOrder_(op) {
+  const sh = sheet_(SHEET_ORDERS);
+  const cols = columns_(sh, ORDER_COLS);
+  const row = orderRow_(sh, cols, op);
+  const last = Math.max(sh.getLastRow(), row);
+  const numFormulas = cols.num && sh.getRange(row, cols.num, last - row + 1, 1).getFormulas().some(function (r) { return r[0]; });
+  if (!numFormulas) {
+    sh.deleteRow(row);
+    return { row: row, num: op.num, deleted: true };
+  }
+  const num = sh.getRange(row, cols.num).getValue();
+  const formulas = sh.getRange(row, 1, 1, sh.getLastColumn()).getFormulas()[0];
+  formulas.forEach(function (f, i) { if (!f && i + 1 !== cols.num) sh.getRange(row, i + 1).clearContent(); });
+  sh.getRange(row, cols.num).setValue(num);
+  return { row: row, num: op.num, cleared: true };
 }
 
 function updateExpense_(op) {

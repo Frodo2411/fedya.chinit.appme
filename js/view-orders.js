@@ -3,7 +3,7 @@
 import { h, fill, icon, money, fmtDate, toast, openSheet, field, select, chips, parseNum } from './ui.js';
 import { ACTIVE, computed, isWarranty } from './orders.js';
 import { store, today } from './store.js';
-import { SCRIPT_VERSION } from './sheet.js';
+import { SCRIPT_VERSION, DELETE_VERSION } from './sheet.js';
 import { SERVICES, ORDER } from './engine.js';
 import { REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
 
@@ -210,6 +210,7 @@ function describeOp(op) {
   const f = op.fields || {};
   if (op.op === 'addOrder') return (op.warranty ? 'новый гарантийный заказ ' : 'новый заказ ') + (f.model || f.problem || '');
   if (op.op === 'updateOrder') return 'заказ №' + op.num;
+  if (op.op === 'deleteOrder') return 'удаление заказа №' + op.num;
   if (op.op === 'addExpense') return 'расход ' + (f.what || '');
   return 'расход';
 }
@@ -306,6 +307,22 @@ export function openOrderForm(app, order, prefill) {
   const oldScript = () => (isNew ? isWarranty(o) : /^\s*Г/i.test(String(o.num ?? '')))
     && app.sheet.connected && app.sheet.version !== null && app.sheet.version < SCRIPT_VERSION;
 
+  // Удалить заказ: из таблицы тоже. Скрипт таблицы старше 4-й версии удалять не умеет — сначала обновить его
+  function removeOrder() {
+    const s = app.sheet;
+    if (order.num && s.connected && s.version !== null && s.version < DELETE_VERSION) {
+      if (confirm('Чтобы удалять заказы, обнови скрипт таблицы до версии ' + DELETE_VERSION + ' (сейчас ' + s.version + '): «Скопировать код скрипта» → вставь в Apps Script → «Сохранить» → '
+        + 'Развертывание → Управление развертываниями → карандаш → Версия: «Новая версия» → Развернуть. Открыть «Google Таблица»?')) { sheet.close(); app.openSheetSetup(); }
+      return;
+    }
+    const what = [order.num ? '№' + order.num : null, order.model, order.client].filter(Boolean).join(' · ');
+    if (!confirm('Удалить заказ' + (what ? ' ' + what : '') + '? Из таблицы он тоже удалится.')) return;
+    s.remove(order);
+    toast('Заказ удалён' + (s.connected ? '' : ' (уйдёт в таблицу, когда будет связь)'));
+    sheet.close();
+    app.redraw();
+  }
+
   // needPhone — телефон обязателен (гарантия); имя обязательно всегда
   function clientFields(needPhone) {
     return [
@@ -329,10 +346,17 @@ export function openOrderForm(app, order, prefill) {
           h('button', { class: 'btn small', text: 'Открыть «Google Таблица»', onclick: () => app.openSheetSetup() }),
           h('button', { class: 'btn small', text: 'Я обновил, проверить', onclick: async () => { await app.sheet.refresh(); draw(); if (!oldScript()) toast('Скрипт обновлён'); } }))) : null,
       !isNew && w ? h('div', { class: 'banner', style: 'margin-top:8px' }, h('b', { text: 'Гарантийный ремонт' }), o.wfor ? ' по заказу №' + o.wfor : '') : null,
-      // гарантия: клиент обязателен и идёт первым
+      field('Статус', select(lists.statuses, o.status || '', (v) => {
+        o.status = v || null;
+        if (v === 'Выдан' && !o.issued) { o.issued = today(); issuedInput.value = o.issued; }
+        recalc();
+      }, { empty: '—' })),
+      statusHint,
+      refusalBox,
+      // клиент — сразу после статуса; у гарантии ещё и заказ, по которому она
+      h('h3', { style: 'margin-top:16px', text: 'Клиент' }),
+      clientFields(w),
       w ? h('div', {},
-        h('h3', { style: 'margin-top:16px', text: 'Клиент' }),
-        clientFields(true),
         originPicker(app, o, (x) => {
           o.wfor = x ? x.num : null;
           if (x) {
@@ -344,13 +368,6 @@ export function openOrderForm(app, order, prefill) {
           draw();
         }),
         h('h3', { style: 'margin-top:20px', text: 'Ремонт' })) : null,
-      field('Статус', select(lists.statuses, o.status || '', (v) => {
-        o.status = v || null;
-        if (v === 'Выдан' && !o.issued) { o.issued = today(); issuedInput.value = o.issued; }
-        recalc();
-      }, { empty: '—' })),
-      statusHint,
-      refusalBox,
       h('div', { class: 'grid2' },
         field('Дата приёма', h('input', { class: 'input', type: 'date', value: o.date || '', oninput: (e) => { o.date = e.target.value || null; recalc(); } })),
         field('Дата выдачи', issuedInput)),
@@ -367,7 +384,6 @@ export function openOrderForm(app, order, prefill) {
       field('Источник', select(lists.sources, o.source || '', (v) => { o.source = v || null; }, { empty: '—' })),
       h('label', { class: 'switch', style: 'margin-top:8px' },
         h('input', { type: 'checkbox', checked: o.urgent === 'Да', onchange: (e) => { o.urgent = e.target.checked ? 'Да' : 'Нет'; } }), 'Срочно'),
-      w ? null : h('div', {}, h('h3', { style: 'margin-top:16px', text: 'Клиент' }), clientFields(false)),
       text('comment', 'Комментарий', { area: true }),
       isNew && cartPlan && cartPlan.items.length ? h('label', { class: 'switch', style: 'margin-top:10px' },
         h('input', {
@@ -382,6 +398,7 @@ export function openOrderForm(app, order, prefill) {
         class: 'btn small block', style: 'margin-top:16px', text: 'Гарантия по этому заказу',
         onclick: () => { sheet.close(); openOrderForm(app, null, warrantyPrefill(app, order)); },
       }) : null,
+      isNew ? null : h('button', { class: 'btn small danger block', style: 'margin-top:16px', text: 'Удалить заказ', onclick: removeOrder }),
     );
     recalc();
   }

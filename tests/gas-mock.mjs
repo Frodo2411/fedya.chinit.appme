@@ -18,6 +18,7 @@ export function makeBook(json) {
     getNumberFormat() { return this.cell(0, 0).fmt || 'General'; }
     setNumberFormat(f) { this.cell(0, 0).fmt = f; return this; }
     setValue(v) { const x = this.cell(0, 0); x.f = ''; x.v = sheetsParse(v); this.sh.writes++; return this; }
+    clearContent() { this.map((x) => { x.v = ''; x.f = ''; return null; }); this.sh.writes++; return this; }
     setValues(vs) { vs.forEach((row, i) => row.forEach((v, j) => { const x = this.cell(i, j); x.f = ''; x.v = sheetsParse(v); })); this.sh.writes++; return this; }
   }
   // Как Google Таблицы разбирают строку при setValue: числа и даты превращаются сами, апостроф — признак текста
@@ -39,6 +40,7 @@ export function makeBook(json) {
     getRange(r, c, nr = 1, nc = 1) { if (r < 1 || c < 1) throw new Error('bad range'); return new Range(this, r, c, nr, nc); }
     getDataRange() { return new Range(this, 1, 1, this.getLastRow(), this.getLastColumn()); }
     hideSheet() { this.hidden = true; }
+    deleteRow(r) { this.rows.splice(r - 1, 1); }
   }
   for (const [name, cells] of Object.entries(json)) sheets.set(name, new Sheet(name, cells.map((row) => row.map((x) => ({ v: toVal(x.v), f: x.f, fmt: x.fmt })))));
   const book = {
