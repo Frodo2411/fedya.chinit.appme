@@ -187,7 +187,8 @@ export function createOrdersView(app) {
     const old = s.version !== null && s.version < SCRIPT_VERSION;
     fill(failedBox, old ? h('div', { class: 'banner warn', style: 'margin-bottom:10px' },
       h('b', { text: 'Скрипт таблицы на этом устройстве старый ' }), '(версия ' + s.version + ', нужна ' + SCRIPT_VERSION + '): гарантийные заказы Г1, Г2… не запишутся и не исправятся. '
-        + 'Обнови код скрипта и проверь, что на телефоне и на компьютере один и тот же адрес скрипта.',
+        + 'Если на другом устройстве всё работает — открой приложение там, и это устройство само переключится на тот же адрес скрипта. '
+        + 'Иначе обнови код скрипта.',
       h('div', { style: 'margin-top:8px' }, h('button', { class: 'btn small', text: 'Открыть «Google Таблица»', onclick: () => app.openSheetSetup() }))) : null,
     s.failed.map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
       h('div', {}, h('b', { text: 'Не записалось в таблицу: ' }), describeOp(f), ' — ', f.error),
@@ -305,11 +306,11 @@ export function openOrderForm(app, order, prefill) {
   const oldScript = () => (isNew ? isWarranty(o) : /^\s*Г/i.test(String(o.num ?? '')))
     && app.sheet.connected && app.sheet.version !== null && app.sheet.version < SCRIPT_VERSION;
 
-  function clientFields(required) {
-    const mark = required ? ' *' : '';
+  // needPhone — телефон обязателен (гарантия); имя обязательно всегда
+  function clientFields(needPhone) {
     return [
-      text('client', 'Имя' + mark),
-      text('phone', 'Телефон' + mark, { type: 'tel', inputmode: 'tel' }),
+      text('client', 'Имя *'),
+      text('phone', 'Телефон' + (needPhone ? ' *' : ''), { type: 'tel', inputmode: 'tel' }),
       o.phone ? h('a', { href: telHref(o.phone), class: 'small', text: 'Позвонить ' + phoneText(o.phone) }) : null,
       text('address', 'Адрес'),
     ];
@@ -366,9 +367,7 @@ export function openOrderForm(app, order, prefill) {
       field('Источник', select(lists.sources, o.source || '', (v) => { o.source = v || null; }, { empty: '—' })),
       h('label', { class: 'switch', style: 'margin-top:8px' },
         h('input', { type: 'checkbox', checked: o.urgent === 'Да', onchange: (e) => { o.urgent = e.target.checked ? 'Да' : 'Нет'; } }), 'Срочно'),
-      w ? null : h('details', { open: !!(o.client || o.phone || o.address) },
-        h('summary', { text: 'Клиент (необязательно)' }),
-        clientFields(false)),
+      w ? null : h('div', {}, h('h3', { style: 'margin-top:16px', text: 'Клиент' }), clientFields(false)),
       text('comment', 'Комментарий', { area: true }),
       isNew && cartPlan && cartPlan.items.length ? h('label', { class: 'switch', style: 'margin-top:10px' },
         h('input', {
@@ -393,6 +392,7 @@ export function openOrderForm(app, order, prefill) {
       const w = isWarranty(o);
       if (o.phone) o.phone = normPhone(o.phone);
       if (w && (!String(o.client || '').trim() || !String(o.phone || '').trim())) { toast('Для гарантии заполни имя и телефон клиента'); return; }
+      if (isNew && !String(o.client || '').trim()) { toast('Заполни имя клиента'); return; }
       if (w && String(o.phone).replace(/\D/g, '').length < 7) { toast('Проверь телефон клиента'); return; }
       if (oldScript()) { toast('Сначала обнови скрипт таблицы: на этом устройстве он старый (версия ' + app.sheet.version + ')', 4000); return; }
       if (isNew) {

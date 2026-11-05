@@ -844,6 +844,22 @@ await test('очередь приложения: правка заказа во 
   while (s.outbox.length || s.running) await (s.running || s.flush());
   assert.equal(sh.getRange(g.row, 5).getValue(), 'Выдан');
   assert.equal(sh.getRange(1, 1).getValue(), '№');
+  // адрес скрипта: компьютер с новым скриптом оставляет свой адрес в таблице, телефон со старым адресом переключается сам
+  const plain = globalThis.fetch;
+  globalThis.fetch = async (url, o) => {
+    const t = await (await plain(url, o)).text();
+    return new Response(url.endsWith('/old') ? t.replace(/"version":3/g, '"version":1') : t);
+  };
+  const phone = new SheetSync();
+  phone.configure({ url: 'https://script.google.com/old', key: 'k' });
+  await phone.load();
+  assert.equal(phone.version, 1);
+  assert.equal(await phone.followUrl(), false, 'адреса нового скрипта в таблице ещё нет');
+  assert.equal(await s.followUrl(), false, 'компьютер только оставляет адрес');
+  assert.equal(await phone.followUrl(), true);
+  assert.deepEqual([phone.cfg.url, phone.version], ['https://script.google.com/x', 3]);
+  assert.equal(await phone.followUrl(), false, 'уже на новом адресе');
+  globalThis.fetch = plain;
 });
 
 await test('корзина: +1 к той же детали, по поставщикам, цена из нынешнего прайса, замена поставщика', async () => {

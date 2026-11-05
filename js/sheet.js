@@ -219,6 +219,26 @@ export class SheetSync {
   }
 
   // Резервная копия данных приложения на служебном листе (данные зашифрованы)
+  // Адрес скрипта — один на все устройства. Новое развертывание скрипта даёт новый адрес: устройство с новым скриптом
+  // оставляет свой адрес в таблице, а устройство со старым адресом (через старый скрипт той же таблицы) читает его,
+  // проверяет своим ключом и переключается. true — переключились
+  async followUrl() {
+    if (!this.connected || this.version === null) return false;
+    const r = await this.backupGet('script');
+    const saved = r && r.value ? JSON.parse(r.value) : null;
+    if (this.version >= SCRIPT_VERSION) {
+      if (!saved || !(saved.version >= this.version)) await this.backupSet('script', JSON.stringify({ url: this.cfg.url, version: this.version }), Date.now());
+      return false;
+    }
+    if (!saved || !saved.url || saved.url === this.cfg.url || !(saved.version >= SCRIPT_VERSION)) return false;
+    const cfg = { ...this.cfg, url: saved.url };
+    const info = await this.call('ping', {}, cfg);
+    if (!(info && info.version >= SCRIPT_VERSION)) return false;
+    this.configure(cfg);
+    await this.load();
+    return true;
+  }
+
   async backupGet(name) {
     return this.call('kvGet', { name });
   }

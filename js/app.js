@@ -249,8 +249,18 @@ async function pushPrices() {
   } catch { /* отправим при следующей связи */ }
 }
 
+// Адрес скрипта таблицы — один на все устройства: устройство со старым адресом переключается само (SheetSync.followUrl)
+async function syncScriptUrl() {
+  try {
+    if (!(await app.sheet.followUrl())) return;
+    toast('Скрипт таблицы обновлён: подключил тот же адрес, что на другом устройстве', 4000);
+    app.redraw();
+  } catch { /* попробуем при следующей связи с таблицей */ }
+}
+
 async function syncBackups() {
   if (!app.sheet.connected) return;
+  await syncScriptUrl();
   try {
     const rs = await app.sheet.backupGet('settings');
     if (rs && rs.value && rs.ts > (app.settings.ts || 0)) {
