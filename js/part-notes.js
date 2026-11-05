@@ -29,6 +29,14 @@ const VERIFIED = /верификац|с\s+привязкой|без\s+ошибк
 const NOT_VERIFIED = /без\s+(?:привязк|верификац)/i;
 const verified = (n) => VERIFIED.test(n) && !NOT_VERIFIED.test(n);
 
+// Дисплей в варианте «Копия ЖК», хотя ЖК в названии не сказано: «ОРИГИНАЛ» у поставщика — уровень копии, а матрица
+// может быть и OLED (у телефона с AMOLED-экраном — скорее всего, изогнутых ЖК не бывает)
+const LCD_TECH = /in-?cell|incell|\btft\b|\bltps\b|\bips\b|\blcd\b/i;
+export function matrixUnknown(name, tier) {
+  const n = String(name || '');
+  return tier === 'copy_lcd' && ORIG_WORD.test(n) && !LCD_TECH.test(n);
+}
+
 function displayNotes(n, model, tier, out) {
   const add = (tag, text, warn) => out.push({ tag, text, warn: !!warn });
   const copy = String(tier || '').startsWith('copy');
@@ -40,6 +48,9 @@ function displayNotes(n, model, tier, out) {
     add('ЖК', 'самая дешёвая копия: цвета бледнее, чёрный сероватый, экран толще, батарею ест больше'
       + (OLED_IPHONE.test(model || '') ? '; у оригинала OLED — разница заметна' : ''));
   } else if (copy && /\boled\b|amoled/i.test(n)) add('OLED', 'Hard или Soft — в названии не сказано, уточнить у поставщика');
+  else if (matrixUnknown(n, tier)) {
+    add('тип матрицы не указан', 'в названии нет In-Cell, TFT или OLED: у телефона с AMOLED-экраном это, скорее всего, тоже AMOLED (изогнутых ЖК не бывает) — уточнить у поставщика');
+  }
   // разрешение
   if (/hd\s*plus|hd\+/i.test(n)) add('HD Plus', 'разрешение ниже: текст и мелкие детали мягче, чем у Full HD');
   else if (/full\s*hd|\bfhd\b/i.test(n)) add('Full HD', 'разрешение выше, чем у HD Plus, — чётче');

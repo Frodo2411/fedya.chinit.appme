@@ -10,7 +10,7 @@ import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteK
 import { SCRIPT_VERSION, DELETE_VERSION } from './sheet.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-11-05.4';
+export const APP_VERSION = '2026-11-05.5';
 
 export function createMoreView(app) {
   const root = h('div');

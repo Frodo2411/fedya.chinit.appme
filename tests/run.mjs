@@ -1041,6 +1041,10 @@ await test('пояснения к деталям для мастера: что �
   assert.deepEqual(tags('Аккумулятор iPhone 11 - Genuine (с верификацией)', 'b', 'iPhone 11', 'genuine'), ['без ошибки']);
   assert.deepEqual(tags('Аккумулятор iPhone 11 - JCID (с верификацией)', 'b', 'iPhone 11', 'verified'), ['!с процентом износа']);
   assert.deepEqual(tags('Аккумулятор iPhone 8 - копия', 'b', 'iPhone 8', 'copy'), [], 'у iPhone 8 сообщения нет');
+  // «ОРИГИНАЛ» поставщика попал в «Копию ЖК», но ЖК в названии не сказано (у Tecno Spark Slim изогнутый AMOLED)
+  assert.deepEqual(tags('Дисплей Tecno Spark Slim (KM7k) в сборе с тачскрином Черный - ОРИГИНАЛ', 'd', 'Tecno Spark Slim', 'copy_lcd'),
+    ['«оригинал» — не деталь производителя', 'тип матрицы не указан']);
+  assert.ok(!tags('Дисплей Samsung A52 - ОРИГИНАЛ In-Cell', 'd', 'Samsung Galaxy A52', 'copy_lcd').includes('тип матрицы не указан'));
   // снятый оригинал: с iPhone 12 телефон примет его сам («Завершить ремонт», iOS 18), на XS–11 — только программатором
   assert.deepEqual(tags('Аккумулятор iPhone 13 - Original (С верификацией/ Разбор ) от 95% емкость', 'b', 'iPhone 13', 'orig_used'), ['снятый', 'завершить ремонт']);
   assert.deepEqual(tags('Аккумулятор iPhone 11 - Original (Разбор) от 95% емкость', 'b', 'iPhone 11', 'orig_used'), ['снятый', '!будет «Неизвестная деталь»']);

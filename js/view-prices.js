@@ -5,7 +5,7 @@ import { SERVICES, SITE_SERVICES, ORDER, OWN, FRAME_BACK, clientPrice, riskReser
 import { store, newId, today } from './store.js';
 import { telHref } from './view-orders.js';
 import { cartQty } from './cart.js';
-import { partNotes } from './part-notes.js';
+import { partNotes, matrixUnknown } from './part-notes.js';
 
 // Заметка «как заказать»: @бот → Telegram, адрес сайта и телефон — тоже нажимаются
 export function linkify(text) {
@@ -388,7 +388,7 @@ export function createPricesView(app) {
       sfText = 'У SmartFix нет цены на этот вариант';
     }
     const card = h('div', { class: 'card variant' + (o.hidden ? ' dim' : '') },
-      h('div', { class: 'head' }, h('div', { class: 'vname', text: VAR_APP[o.tier] }), h('div', { class: 'price', text: p.price + ' р.' })),
+      h('div', { class: 'head' }, h('div', { class: 'vname', text: svc === 'd' && matrixUnknown(p.part, o.tier) ? 'Копия (тип матрицы не указан)' : VAR_APP[o.tier] }), h('div', { class: 'price', text: p.price + ' р.' })),
       h('div', { class: 'earn' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), ' · деталь ', money(p.cost),
         glue.total ? ' · проклейка ' + money(glue.total) : '', ' · работа ', o.work, ' р.', P().soldered(entry.model, svc) ? ' (с пайкой)' : '',
         riskReserve(S, svc, p.cost) ? ' · запас на брак ' + money(Math.round(riskReserve(S, svc, p.cost) * 100) / 100) : '',
