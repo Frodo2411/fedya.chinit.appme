@@ -51,6 +51,9 @@ export const DEFAULTS = {
   year: 0, // 0 — текущий год
   glue: true, // учитывать проклейку в заработке и в заказе (на цену клиенту не влияет)
   glue_default: 0, // проклейка, если своей нет в прайсе (клей, скотч), р. на ремонт
+  // Надбавка к работе за пайку, р., и ремонты, где деталь паяется («модель|ремонт»; на экране модели — «Нужна пайка»)
+  solder: 20,
+  solder_jobs: ['iPhone 12 Pro|es'],
   // Айфоны, у которых заднее стекло меняется без лазера. На остальных — только крышка вместе с рамкой (работа как за корпус)
   no_laser: ['iPhone 14', 'iPhone 14 Plus', 'iPhone 15', 'iPhone 15 Plus', 'iPhone 15 Pro', 'iPhone 15 Pro Max', 'iPhone 16',
     'iPhone 16 Plus', 'iPhone 16 Pro', 'iPhone 16 Pro Max', 'iPhone 16e', 'iPhone 17', 'iPhone Air', 'iPhone 17 Pro',
@@ -229,6 +232,7 @@ export class Pricer {
     this.S = settingsWithDefaults(settings);
     this.byName = new Map(data.models.map((m) => [m.model, m]));
     this.grades = origGrades(data);
+    this.solderJobs = new Set(this.S.solder_jobs);
     this.index = this.buildIndex();
   }
 
@@ -297,6 +301,16 @@ export class Pricer {
     return svc === 'c' && this.laser(model) ? 'hs' : svc;
   }
 
+  // Ремонт этой модели, где деталь паяется (отмечен мастером)
+  soldered(model, svc) {
+    return this.solderJobs.has(model + '|' + svc);
+  }
+
+  // Работа за ремонт: по формуле (за крышку с рамкой — как за корпус) и надбавка за пайку
+  workFor(m, svc) {
+    return workFee(this.S, this.job(m.model, svc), m) + (this.soldered(m.model, svc) ? this.S.solder || 0 : 0);
+  }
+
   // Какие проклейки нужны ремонту. Через дисплей вскрываются айфоны с лазером и почти все Pixel, остальные — сзади.
   // Корпус — дисплей, батарея и сторона вскрытия; стекло экрана и тачскрин — дисплей; стекло камеры и SIM-лоток — без проклейки.
   glueTypes(model, svc) {
@@ -337,7 +351,7 @@ export class Pricer {
 
   service(m, svc) {
     const S = this.S;
-    const work = workFee(S, this.job(m.model, svc), m);
+    const work = this.workFor(m, svc);
     const opts = [];
     for (const tier of ORDER[svc]) {
       const lines = this.index.get(m.model + '|' + svc + '|' + tier);

@@ -1192,6 +1192,23 @@ await test('аккумулятор «без ошибки» не прячется
   assert.equal(b.find((o) => o.tier === 'orig_used').hidden, true);
 });
 
+await test('надбавка за пайку: к работе отмеченного ремонта этой модели, в цене клиенту и на сайте', () => {
+  const D = settingsWithDefaults(null);
+  assert.deepEqual([D.solder, D.solder_jobs], [20, ['iPhone 12 Pro|es']]);
+  const on = new Pricer(DATA, { year: 2026, solder: 25, solder_jobs: ['iPhone 14|c'] });
+  const off = new Pricer(DATA, { year: 2026, solder_jobs: [] });
+  const c1 = on.model('iPhone 14').services.c;
+  const c0 = off.model('iPhone 14').services.c;
+  assert.equal(c1.work, c0.work + 25);
+  assert.equal(c1.opts[0].work, c1.work);
+  assert.equal(c1.opts[0].price, clientPrice(on.S, c0.work + 25, c1.opts[0].cost, null).price);
+  assert.ok(c1.opts[0].price > c0.opts[0].price);
+  assert.deepEqual([on.soldered('iPhone 14', 'c'), on.soldered('iPhone 14', 'b'), on.soldered('iPhone 11', 'c')], [true, false, false]);
+  assert.equal(on.model('iPhone 11').services.b.work, off.model('iPhone 11').services.b.work, 'другие ремонты и модели — без надбавки');
+  const line = (pr) => siteFile(pr, 'x').split('\n').find((l) => l.includes('"iPhone 14"'));
+  assert.ok(line(on).includes('"c":[["copy",' + c1.opts[0].price + ']'), 'на сайте цена с пайкой');
+});
+
 await test('версия в «Ещё» совпадает с выпуском в sw.js', () => {
   const sw = /const VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'))[1];
   const app = /export const APP_VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'js/view-more.js'), 'utf8'))[1];

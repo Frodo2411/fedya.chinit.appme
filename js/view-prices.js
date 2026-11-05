@@ -1,7 +1,7 @@
 // Экран «Цены»: поиск модели, ремонты, варианты деталей с ценой клиенту, поставщиком и заработком.
 
 import { h, fill, icon, money, toast, copyText, openSheet, field, select, parseNum, fmtDate } from './ui.js';
-import { SERVICES, SITE_SERVICES, ORDER, OWN, FRAME_BACK, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, workFee, sfKey, GLUE_NAME } from './engine.js';
+import { SERVICES, SITE_SERVICES, ORDER, OWN, FRAME_BACK, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, sfKey, GLUE_NAME } from './engine.js';
 import { store, newId, today } from './store.js';
 import { telHref } from './view-orders.js';
 import { cartQty } from './cart.js';
@@ -390,7 +390,7 @@ export function createPricesView(app) {
     const card = h('div', { class: 'card variant' + (o.hidden ? ' dim' : '') },
       h('div', { class: 'head' }, h('div', { class: 'vname', text: VAR_APP[o.tier] }), h('div', { class: 'price', text: p.price + ' р.' })),
       h('div', { class: 'earn' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), ' · деталь ', money(p.cost),
-        glue.total ? ' · проклейка ' + money(glue.total) : '', ' · работа ', o.work, ' р.',
+        glue.total ? ' · проклейка ' + money(glue.total) : '', ' · работа ', o.work, ' р.', P().soldered(entry.model, svc) ? ' (с пайкой)' : '',
         riskReserve(S, svc, p.cost) ? ' · запас на брак ' + money(Math.round(riskReserve(S, svc, p.cost) * 100) / 100) : '',
         h('span', { class: 'faint', text: ' · налог ' + Math.round(p.price * S.tax) + ' р.' })),
       h('button', {
@@ -457,6 +457,15 @@ export function createPricesView(app) {
     return h('div', { class: 'row', style: 'margin-top:8px' },
       h('div', { class: 'tiny faint grow', text: 'Цена детали вписана ' + fmtDate(item.date) + '. Обновлять её при загрузке прайсов не будет.' }),
       h('button', { class: 'btn small', text: 'Изменить', onclick: () => openOwnPart(app, entry, svc, item) }));
+  }
+
+  // Пайка в ремонте этой модели: надбавка к работе (настройки расчёта, solder_jobs), уходит и в цены сайта
+  function setSolder(model, svc, on) {
+    const f = app.settings.formula || {};
+    const key = model + '|' + svc;
+    const cur = app.pricer.S.solder_jobs.filter((x) => x !== key);
+    app.saveSettings({ formula: { ...f, solder_jobs: on ? [...cur, key] : cur } });
+    toast(on ? 'С пайкой: работа +' + app.pricer.S.solder + ' р.' : 'Без надбавки за пайку');
   }
 
   // Почему нет деталей и что делать: своя деталь, а у айфонов с лазером ещё и корпус
@@ -591,7 +600,11 @@ export function createPricesView(app) {
       hidden.length ? h('button', { class: 'link', style: 'margin-top:8px', onclick: () => { st.showHidden = !st.showHidden; draw(); } },
         st.showHidden ? 'Не показывать скрытые варианты' : 'Скрытые варианты: ' + hidden.length + ' (не дешевле варианта получше)') : null,
       st.showHidden ? h('div', { class: 'variants', style: 'margin-top:12px' }, hidden.map((o) => variantCard(e, st.svc, o))) : null,
-      h('div', { class: 'small faint', style: 'margin-top:14px', text: 'Работа ' + svcData.work + ' р. Цена = (работа + деталь) / (1 − ' + String(S.tax).replace('.', ',') + '), округление до ' + S.round + ' р., сверка с SmartFix.' }),
+      h('label', { class: 'switch', style: 'margin-top:16px' },
+        h('input', { type: 'checkbox', checked: app.pricer.soldered(e.model, st.svc), onchange: (ev) => setSolder(e.model, st.svc, ev.target.checked) }),
+        h('span', {}, 'Нужна пайка: +' + S.solder + ' р. к работе',
+          h('span', { class: 'tiny faint', style: 'display:block', text: 'только этот ремонт на ' + e.model + ', и на сайте тоже; сумма — в «Ещё → Расчёт цены»' }))),
+      h('div', { class: 'small faint', style: 'margin-top:14px', text: 'Работа ' + svcData.work + ' р.' + (app.pricer.soldered(e.model, st.svc) ? ' (с пайкой)' : '') + '. Цена = (работа + деталь) / (1 − ' + String(S.tax).replace('.', ',') + '), округление до ' + S.round + ' р., сверка с SmartFix.' }),
     );
     fill(dock, h('div', { class: 'inner' },
       h('button', {
@@ -632,7 +645,7 @@ export function openOwnPart(app, entry, svc, item) {
   const S = app.pricer.S;
   const tiers = ORDER[svc];
   const x = item ? { ...item } : { tier: tiers[0], cost: null, name: '' };
-  const work = workFee(S, app.pricer.job(entry.model, svc), entry);
+  const work = app.pricer.workFor(entry, svc);
   const preview = h('div', { class: 'card', style: 'margin-top:16px' });
   const update = () => {
     if (!(x.cost > 0)) {

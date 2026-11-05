@@ -10,7 +10,7 @@ import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteK
 import { SCRIPT_VERSION, DELETE_VERSION } from './sheet.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-11-05.2';
+export const APP_VERSION = '2026-11-05.3';
 
 export function createMoreView(app) {
   const root = h('div');
@@ -235,6 +235,16 @@ function openFormula(app) {
     class: 'input num', inputmode: 'decimal', value: String(v).replace('.', ','),
     oninput: (e) => { const n = parseNum(e.target.value); if (n !== null) set(opts.pct ? n / 100 : n); },
   }));
+  // Ремонты с пайкой: отмечаются на экране модели («Нужна пайка»), здесь — список и убрать лишнее
+  const solderList = h('div', { style: 'margin-top:6px' });
+  const drawSolder = () => fill(solderList,
+    h('div', { class: 'tiny faint', style: 'margin-bottom:6px', text: 'Где деталь паяется, на экране модели в ремонте включи «Нужна пайка» — к работе прибавится надбавка, и на сайте тоже. '
+      + (S.solder_jobs.length ? 'С пайкой сейчас:' : 'Пока таких ремонтов нет.') }),
+    h('div', { class: 'row wrap' }, S.solder_jobs.map((k) => {
+      const [model, svc] = k.split('|');
+      return h('button', { class: 'btn small', text: model + ' · ' + (SVC[svc] || svc).toLowerCase() + ' ✕', onclick: () => { S.solder_jobs = S.solder_jobs.filter((x) => x !== k); drawSolder(); } });
+    })));
+  drawSolder();
   const tableRows = (rows, labelA, labelB) => rows.map((r, i) => h('div', { class: 'grid2' },
     num(r[0], i ? '' : labelA, (n) => { r[0] = n; }), num(r[1], i ? '' : labelB, (n) => { r[1] = n; })));
   const body = h('div', {},
@@ -244,6 +254,9 @@ function openFormula(app) {
     h('div', { class: 'grid2' },
       num(S.min_work, 'Минимум за работу, р.', (n) => { S.min_work = n; }),
       num(S.round, 'Округлять до, р.', (n) => { S.round = n; })),
+    h('h3', { style: 'margin-top:20px', text: 'Пайка' }),
+    num(S.solder, 'Надбавка к работе за пайку, р.', (n) => { S.solder = n; }),
+    solderList,
     h('h3', { style: 'margin-top:20px', text: 'Свой минимум за работу' }),
     h('div', { class: 'tiny faint', style: 'margin-bottom:6px', text: 'Для лёгких ремонтов (SIM-лоток, стекло камеры, динамики) общий минимум делает цену выше рынка. Пусто — общий минимум.' }),
     h('div', { class: 'grid2' }, MORE_SERVICES.map((svc) => field(SVC[svc], h('input', {
