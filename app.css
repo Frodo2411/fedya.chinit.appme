@@ -179,6 +179,10 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 .variant .price, .combo .price { margin-left: auto; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .variant .earn, .combo .earn { margin-top: 2px; font-size: 15px; color: var(--muted); }
 .variant .earn b, .combo .earn b { color: var(--good); font-weight: 700; }
+/* скидка дня: цена со скидкой и заработок с ней */
+.variant .promo, .combo .promo { margin-top: 4px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.variant .promo b, .combo .promo b { font-weight: 800; }
+.promo b.minus { color: var(--bad); }
 .combo { border-color: var(--accent); }
 .variant.dim { opacity: 0.55; }
 .part {

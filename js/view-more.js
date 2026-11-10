@@ -8,9 +8,11 @@ import { withRate, oddRate } from './importer.js';
 import { monthTitle } from './ui.js';
 import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteKey } from './site-publish.js';
 import { SCRIPT_VERSION, DELETE_VERSION, DEVICES_VERSION } from './sheet.js';
+import { discounted, discountNote, promoEnd } from './discount.js';
+import { today } from './store.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-11-10.1';
+export const APP_VERSION = '2026-11-10.2';
 
 export function createMoreView(app) {
   const root = h('div');
@@ -46,6 +48,8 @@ export function createMoreView(app) {
           h('button', { class: 'btn small', text: 'Обновить цены на сайте', onclick: () => toSite() }),
           h('button', { class: 'btn small', text: 'Файл цен для сайта', onclick: () => exportSite() }),
           siteKey() ? h('button', { class: 'btn small', text: 'Ключи для сайта', onclick: () => openSiteKey(null) }) : null)),
+
+      promoCard(app),
 
       h('div', { class: 'card' },
         h('h3', { text: 'Расчёт цены' }),
@@ -117,6 +121,69 @@ export function createMoreView(app) {
   }
 
   return { el: root, draw };
+}
+
+// Скидка дня (акция): день (или несколько дней подряд), процент и название. В эти дни скидка сама ставится в каждый
+// новый заказ, в «Ценах» видна цена со скидкой, «Скопировать клиенту» пишет цены со скидкой (discount.js)
+function promoCard(app) {
+  const p = { on: false, pct: 20, name: '', from: '', to: '', ...(app.settings.promo || {}) };
+  const status = h('div', { class: 'small', style: 'margin-top:4px' });
+  const showStatus = () => {
+    const day = today();
+    let text;
+    let now = false;
+    if (!p.on) text = 'Выключена.';
+    else if (!(p.pct > 0 && p.pct < 100)) text = 'Впиши скидку от 1 до 99 %.';
+    else if (!p.from) text = 'Выбери день.';
+    else if (day < p.from) text = 'Начнётся ' + fmtDate(p.from) + (promoEnd(p) > p.from ? ', до ' + fmtDate(promoEnd(p)) + ' включительно' : '') + '.';
+    else if (day > promoEnd(p)) text = 'Закончилась ' + fmtDate(promoEnd(p)) + '.';
+    else { now = true; text = 'Идёт сегодня' + (promoEnd(p) > day ? ', до ' + fmtDate(promoEnd(p)) + ' включительно' : '') + '.'; }
+    fill(status, h('b', { style: now ? 'color:var(--accent)' : null, text }),
+      p.pct > 0 && p.pct < 100 ? h('div', { class: 'tiny faint', style: 'margin-top:4px', text: 'В комментарии заказа: «' + discountNote({ ...p, base: 125 }, discounted(125, p.pct)) + '»' }) : null);
+  };
+  const save = () => {
+    app.saveSettings({ promo: { ...p } }, { redraw: false });
+    showStatus();
+  };
+  const toInput = h('input', {
+    class: 'input', type: 'date', value: p.to || '',
+    onchange: (e) => {
+      p.to = e.target.value;
+      // «по» раньше дня — значит, один день
+      if (p.to && p.from && p.to < p.from) { p.to = p.from; toInput.value = p.to; }
+      save();
+    },
+  });
+  const fromInput = h('input', {
+    class: 'input', type: 'date', value: p.from || '',
+    onchange: (e) => {
+      // скидка на один день: «по» идёт следом за днём
+      const single = !p.to || p.to === p.from;
+      p.from = e.target.value;
+      if (single || p.to < p.from) { p.to = p.from; toInput.value = p.to; }
+      save();
+    },
+  });
+  showStatus();
+  return h('div', { class: 'card' },
+    h('h3', { text: 'Скидка дня' }),
+    h('div', { class: 'small muted', text: 'Выбери день и скидку: в этот день она сама ставится в каждый новый заказ. В «Ценах» видна цена со скидкой, «Скопировать клиенту» пишет цены со скидкой.' }),
+    h('div', { class: 'grid2' },
+      field('День', fromInput),
+      field('По', toInput)),
+    h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Несколько дней подряд — в «По» последний день, один день — тот же день.' }),
+    h('div', { class: 'grid2' },
+      field('Скидка, %', h('input', {
+        class: 'input num', inputmode: 'decimal', value: p.pct === null || p.pct === undefined ? '' : String(p.pct).replace('.', ','),
+        oninput: (e) => { p.pct = parseNum(e.target.value); save(); },
+      })),
+      field('Название', h('input', {
+        class: 'input', value: p.name || '', placeholder: '11.11', autocomplete: 'off',
+        oninput: (e) => { p.name = e.target.value; save(); },
+      }))),
+    h('label', { class: 'switch' }, h('input', { type: 'checkbox', checked: !!p.on, onchange: (e) => { p.on = e.target.checked; save(); } }), 'Скидка включена'),
+    status,
+    h('div', { class: 'tiny faint', style: 'margin-top:8px', text: 'В заказ, записанный раньше, скидка ставится кнопкой в заказе, убрать — «Убрать» там же. Цена со скидкой — вниз до рубля, чтобы клиент получил не меньше обещанного. Цены на сайте не меняются.' }));
 }
 
 // Ключи для кнопки «Обновить цены на сайте»: хранятся только на этом телефоне

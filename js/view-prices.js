@@ -6,6 +6,7 @@ import { store, newId, today } from './store.js';
 import { telHref } from './view-orders.js';
 import { cartQty } from './cart.js';
 import { partNotes, matrixUnknown } from './part-notes.js';
+import { discounted, discountLabel, promoActive, promoWords } from './discount.js';
 
 // Заметка «как заказать»: @бот → Telegram, адрес сайта и телефон — тоже нажимаются
 export function linkify(text) {
@@ -322,6 +323,19 @@ export function createPricesView(app) {
     return supplierStock(app, sup, stock);
   }
 
+  // Скидка дня (акция): идёт сегодня — её настройки, иначе null
+  const promoNow = () => (promoActive(app.settings.promo, today()) ? app.settings.promo : null);
+
+  // В день скидки — цена со скидкой и заработок с ней (деталь и проклейка те же: spend)
+  function promoLine(price, spend) {
+    const pr = promoNow();
+    if (!pr) return null;
+    const sale = discounted(price, pr.pct);
+    const earn = Math.round((sale - spend) * 100) / 100;
+    return h('div', { class: 'promo' }, discountLabel(pr) + ': ', h('b', { text: sale + ' р.' }),
+      ' · заработок ', h('b', { class: earn < 0 ? 'minus' : null, text: money(earn) }));
+  }
+
   // В корзину: та же деталь ещё раз — +1 штука. glues — проклейки к ней (положатся сами, если не выключено в корзине)
   function toCart(items, glues) {
     const n = app.addToCart(items, glues);
@@ -393,6 +407,7 @@ export function createPricesView(app) {
         glue.total ? ' · проклейка ' + money(glue.total) : '', ' · работа ', o.work, ' р.', P().soldered(entry.model, svc) ? ' (с пайкой)' : '',
         riskReserve(S, svc, p.cost) ? ' · запас на брак ' + money(Math.round(riskReserve(S, svc, p.cost) * 100) / 100) : '',
         h('span', { class: 'faint', text: ' · налог ' + Math.round(p.price * S.tax) + ' р.' })),
+      promoLine(p.price, p.cost + glue.total),
       h('button', {
         class: 'part', 'aria-label': 'Скопировать название детали',
         onclick: async () => { if (await copyText(p.part)) toast('Название детали скопировано'); },
@@ -516,6 +531,11 @@ export function createPricesView(app) {
     for (const x of items) lines.push('• ' + REPAIR[x.svc] + ' (' + lcFirst(VAR_CLIENT[x.tier]) + ') — ' + x.price + ' р.');
     if (t.discount) lines.push('Скидка за комплекс (' + P().S.combo_discount + '% на работу): −' + t.discount + ' р.');
     lines.push('Итого: ' + t.total + ' р.');
+    const pr = promoNow();
+    if (pr) {
+      const words = promoWords(pr);
+      lines.push(words[0].toUpperCase() + words.slice(1) + ': ' + discounted(t.total, pr.pct) + ' р.');
+    }
     const foot = (app.settings.clientFooter || '').trim();
     if (foot) lines.push('', foot);
     return lines.join('\n');
@@ -534,6 +554,7 @@ export function createPricesView(app) {
       items.map((x) => h('div', { class: 'small' }, SVC[x.svc] + ' — ' + lcFirst(VAR_APP[x.tier]) + ': ' + x.price + ' р.')),
       t.discount ? h('div', { class: 'small', style: 'margin-top:6px' }, 'Скидка ' + S.combo_discount + '% на работу второго и следующих: ', h('b', { text: '−' + t.discount + ' р.' })) : h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Добавь второй ремонт — будет скидка ' + S.combo_discount + '% на его работу.' }),
       h('div', { class: 'earn', style: 'margin-top:6px' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), glue ? ' · проклейка ' + money(glue) : ''),
+      promoLine(t.total, t.total - earn),
       h('div', { class: 'actions wrap' },
         h('button', {
           class: 'btn small primary',
@@ -546,8 +567,10 @@ export function createPricesView(app) {
 
   function clientText(entry, svcs) {
     const hints = app.settings.clientHints !== false;
+    // в день скидки — цены со скидкой: «100 р. вместо 125 р.»
+    const pr = promoNow();
     const lines = [entry.model + (svcs.length === 1 ? ' — ' + REPAIR[svcs[0]].toLowerCase() : '')];
-    lines.push('Цена под ключ (деталь и работа):');
+    lines.push('Цена под ключ (деталь и работа)' + (pr ? ' ' + promoWords(pr) : '') + ':');
     for (const svc of svcs) {
       const opts = entry.services[svc].opts.filter((o) => !o.hidden);
       if (!opts.length) continue;
@@ -555,7 +578,8 @@ export function createPricesView(app) {
       for (const o of opts) {
         const p = priceOf(entry, svc, o);
         const hint = hints ? clientHint(svc, o.tier, entry.model, p.part) : '';
-        lines.push('• ' + VAR_CLIENT[o.tier] + ' — ' + p.price + ' р.' + (hint ? ' (' + hint + ')' : ''));
+        const price = pr ? discounted(p.price, pr.pct) + ' р. вместо ' + p.price + ' р.' : p.price + ' р.';
+        lines.push('• ' + VAR_CLIENT[o.tier] + ' — ' + price + (hint ? ' (' + hint + ')' : ''));
       }
     }
     const foot = (app.settings.clientFooter || '').trim();

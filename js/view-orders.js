@@ -7,6 +7,7 @@ import { SCRIPT_VERSION, DELETE_VERSION } from './sheet.js';
 import { DEVICE_OPS } from './devices.js';
 import { SERVICES, ORDER } from './engine.js';
 import { REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
+import { discounted, discountLabel, discountNote, setDiscountNote, orderDiscount, promoActive, promoName } from './discount.js';
 
 const STATUS_CLASS = {
   'Обращение': 'lead', 'Принят': 'work', 'Диагностика': 'work', 'Жду запчасть': 'wait', 'В работе': 'work',
@@ -142,10 +143,12 @@ export function createOrdersView(app) {
     const w = isWarranty(o);
     // у гарантийного цена обычно 0 — вместо неё значок
     const showPrice = o.price !== null && o.price !== undefined && o.price !== '' && !(w && Number(o.price) === 0);
+    const disc = w ? null : orderDiscount(o);
     return h('button', { class: 'item order', onclick: () => openOrderForm(app, o) },
       h('div', { class: 'grow' },
         h('div', { class: 'row' }, h('span', { class: 'num' + (w ? ' w' : ''), text: o.num ? '№' + o.num : '…' }), h('span', { class: 'model grow', text: o.model || o.device || 'Без модели' }),
           w ? h('span', { class: 'badge violet', text: 'гарантия' }) : null,
+          disc ? h('span', { class: 'badge warn', text: '−' + String(disc.pct).replace('.', ',') + '%' }) : null,
           showPrice ? h('span', { class: 'price', text: money(o.price) }) : null),
         h('div', { class: 'row' }, h('div', { class: 'prob grow', text: o.problem || o.done || '' }), statusBadge(o.status)),
         h('div', { class: 'tiny faint', style: 'margin-top:2px' },
@@ -158,10 +161,11 @@ export function createOrdersView(app) {
   const title = h('h1', { text: 'Заказы' });
   const connectBox = h('div');
   const syncBox = h('div', { class: 'syncbar' });
+  const promoBox = h('div');
   const failedBox = h('div');
   const chipsBox = h('div');
   const connected = h('div', {},
-    syncBox, failedBox,
+    syncBox, promoBox, failedBox,
     h('div', { class: 'searchbar', style: 'padding-top:0;margin-top:0;top:var(--safe-t)' }, search),
     chipsBox, h('div', { style: 'height:12px' }), listBox,
     h('button', { class: 'fab', onclick: () => openOrderForm(app, null) }, icon('plus'), 'Заказ'));
@@ -185,6 +189,10 @@ export function createOrdersView(app) {
     else syncText = s.cache ? 'Обновлено в ' + new Date(s.cache.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'Ещё не загружено';
     fill(syncBox, h('div', { class: 'grow' }, syncText),
       h('button', { class: 'btn small', 'aria-label': 'Обновить', disabled: s.busy, onclick: () => s.refresh() }, icon('refresh')));
+    // скидка дня: в новые заказы ставится сама — чтобы это не было неожиданностью
+    const promo = app.settings.promo;
+    fill(promoBox, promoActive(promo, today()) ? h('div', { class: 'banner warn', style: 'margin-bottom:10px' },
+      h('b', { text: 'Сегодня ' + lcFirst(discountLabel(promo)) }), ': ставится сама в каждый новый заказ. В заказ, записанный раньше, — кнопкой в заказе.') : null);
     const old = s.version !== null && s.version < SCRIPT_VERSION;
     fill(failedBox, old ? h('div', { class: 'banner warn', style: 'margin-bottom:10px' },
       h('b', { text: 'Скрипт таблицы на этом устройстве старый ' }), '(версия ' + s.version + ', нужна ' + SCRIPT_VERSION + '): гарантийные заказы Г1, Г2… не запишутся и не исправятся. '
@@ -247,6 +255,48 @@ export function openOrderForm(app, order, prefill) {
   const statusHint = h('div', { class: 'tiny faint', style: 'margin-top:6px' });
   const refusalBox = h('div');
 
+  // Скидка: { pct, name, base }, base — цена без скидки; в o.price — уже со скидкой (её и пишем в «Цену для клиента»),
+  // запись о скидке — в начале комментария. Записанный заказ — со скидкой из этой записи; новый в день скидки — сразу со скидкой
+  const promo = app.settings.promo;
+  const promoNow = promoActive(promo, today()) ? promo : null;
+  let disc = isNew ? null : orderDiscount(o);
+  let paidDisc = null; // скидка, пока заказ переключён на гарантию
+  let commentEl = null;
+  const discInfo = h('span');
+  if (isNew && promoNow && !isWarranty(o)) {
+    disc = { pct: promoNow.pct, name: promoName(promoNow.name), base: o.price ?? null };
+    applyDisc();
+  }
+
+  // Цена со скидкой и запись о ней в комментарии — по base и pct
+  function applyDisc() {
+    if (!disc) return;
+    o.price = disc.base === null || disc.base === undefined ? null : discounted(disc.base, disc.pct);
+    o.comment = setDiscountNote(o.comment, o.price !== null && o.price < disc.base ? discountNote(disc, o.price) : '');
+  }
+
+  // Поменялась цена без скидки или процент: поля не перерисовываем (иначе пропадёт клавиатура), только комментарий и итог
+  function discChanged() {
+    applyDisc();
+    if (commentEl) commentEl.value = o.comment ?? '';
+    recalc();
+  }
+
+  function setDisc(pct, name, focus) {
+    disc = { pct, name, base: o.price ?? null };
+    applyDisc();
+    draw();
+    const input = focus ? body.querySelector('.disc input') : null;
+    if (input) { input.focus(); input.select(); }
+  }
+
+  function removeDisc() {
+    o.price = disc.base ?? null;
+    disc = null;
+    o.comment = setDiscountNote(o.comment, '');
+    draw();
+  }
+
   const text = (key, label, opts = {}) => field(label, h(opts.area ? 'textarea' : 'input', {
     class: 'input', value: o[key] ?? '', type: opts.area ? null : (opts.type || 'text'), inputmode: opts.inputmode, placeholder: opts.placeholder || '',
     autocomplete: 'off', autocapitalize: opts.type === 'tel' ? 'off' : 'sentences',
@@ -255,23 +305,35 @@ export function openOrderForm(app, order, prefill) {
 
   function recalc() {
     const c = computed(o, lists.warrantyMonths);
-    fill(info, 
-      'Прибыль ', h('b', { text: c.profit === null ? '—' : money(c.profit) }),
+    fill(info,
+      'Прибыль ', h('b', { style: c.profit < 0 ? 'color:var(--bad)' : null, text: c.profit === null ? '—' : money(c.profit) }),
       ' · к оплате ', h('b', { text: c.due === null ? '—' : money(c.due) }),
       c.warranty ? ' · гарантия до ' + fmtDate(c.warranty) : '');
     statusHint.textContent = lists.hints[o.status] || '';
     refusalBox.hidden = o.status !== 'Отказ';
+    if (disc) {
+      fill(discInfo, disc.base === null || disc.base === undefined ? 'Впиши цену без скидки — посчитаю.'
+        : o.price < disc.base ? ['−' + money(Math.round((disc.base - o.price) * 100) / 100) + ' · клиент платит ', h('b', { text: money(o.price) })]
+          : 'Цена слишком маленькая: скидки не получается.');
+    }
   }
   fill(refusalBox, field('Если отказ: запчасть', select(['Вернул', 'Осталась у меня'], o.refusal || '', (v) => { o.refusal = v || null; recalc(); }, { empty: '—' })));
 
   function setWarranty(on) {
     if (on === isWarranty(o)) return;
     o.warrantyOrder = on || undefined;
+    // по гарантии клиент не платит: скидки нет, а вернулся к заказу — скидка снова на месте
     if (on) {
       paid = o.price;
+      paidDisc = disc;
+      disc = null;
       o.price = 0;
+      o.comment = setDiscountNote(o.comment, '');
     } else {
       o.price = paid ?? null;
+      disc = paidDisc;
+      paidDisc = null;
+      applyDisc();
       o.wfor = null;
     }
     sheet.el.querySelector('.sheet-head h3').textContent = on ? 'Гарантия' : 'Новый заказ';
@@ -335,9 +397,48 @@ export function openOrderForm(app, order, prefill) {
     ];
   }
 
+  // Со скидкой в поле — цена без скидки, а клиент платит (и в таблицу пишется) цену со скидкой
+  function priceField() {
+    return field(disc ? 'Без скидки' : 'Цена, р.', h('input', {
+      class: 'input', value: (disc ? disc.base : o.price) ?? '', inputmode: 'decimal', autocomplete: 'off',
+      oninput: (e) => {
+        const v = parseNum(e.target.value);
+        if (disc) { disc.base = v; discChanged(); } else { o.price = v; recalc(); }
+      },
+    }));
+  }
+
+  // Скидка: в день скидки — её кнопка, и любая другая; со скидкой — процент (можно поменять) и «Убрать»
+  function discountBlock() {
+    if (!disc) {
+      return h('div', { class: 'row wrap', style: 'margin-top:10px' },
+        promoNow ? h('button', { type: 'button', class: 'btn small on', text: discountLabel(promoNow), onclick: () => setDisc(promoNow.pct, promoName(promoNow.name)) }) : null,
+        h('button', { type: 'button', class: 'btn small', text: promoNow ? 'Другая скидка' : 'Сделать скидку', onclick: () => setDisc(store.get('discountPct', 10), '', true) }));
+    }
+    const pct = h('input', {
+      class: 'input num', value: String(disc.pct).replace('.', ','), inputmode: 'decimal', autocomplete: 'off', 'aria-label': 'Скидка, %',
+      style: 'width:72px;min-height:44px;padding:8px 10px;text-align:center',
+      oninput: (e) => {
+        const v = parseNum(e.target.value);
+        if (!(v > 0 && v < 100)) return;
+        disc.pct = v;
+        if (!disc.name) store.set('discountPct', v);
+        discChanged();
+      },
+      // стёр или вписал не то — в поле возвращается действующий процент
+      onchange: (e) => { if (disc) e.target.value = String(disc.pct).replace('.', ','); },
+    });
+    return h('div', { class: 'card disc', style: 'margin-top:10px;padding:10px 12px' },
+      h('div', { class: 'row' }, h('b', { text: 'Скидка' + (disc.name ? ' ' + disc.name : '') }), pct, h('span', { text: '%' }),
+        h('button', { type: 'button', class: 'btn small ghost', style: 'margin-left:auto', text: 'Убрать', onclick: removeDisc })),
+      h('div', { class: 'small muted', style: 'margin-top:6px' }, discInfo));
+  }
+
   function draw() {
     const w = isWarranty(o);
     const issuedInput = h('input', { class: 'input', type: 'date', value: o.issued || '', oninput: (e) => { o.issued = e.target.value || null; recalc(); } });
+    const commentField = text('comment', 'Комментарий', { area: true });
+    commentEl = commentField.querySelector('textarea');
     fill(body,
       isNew ? h('div', { style: 'margin-top:8px' }, chips([{ value: 'order', label: 'Заказ' }, { value: 'warranty', label: 'Гарантия' }],
         w ? 'warranty' : 'order', (v) => setWarranty(v === 'warranty'))) : null,
@@ -378,15 +479,15 @@ export function openOrderForm(app, order, prefill) {
       text('problem', 'Неисправность', { placeholder: w ? 'Что случилось: треснула задняя крышка…' : 'Разбит дисплей, замена АКБ…' }),
       text('done', 'Что сделано'),
       h('div', { class: 'grid3' },
-        text('price', 'Цена, р.', { inputmode: 'decimal', num: true }),
+        priceField(),
         text('part', 'Запчасть, р.', { inputmode: 'decimal', num: true }),
         text('prepay', 'Предоплата', { inputmode: 'decimal', num: true })),
-      w ? h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'По гарантии клиент не платит: цена 0. Запчасть — твой расход, уйдёт в минус прибыли месяца.' }) : null,
+      w ? h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'По гарантии клиент не платит: цена 0. Запчасть — твой расход, уйдёт в минус прибыли месяца.' }) : discountBlock(),
       info,
       field('Источник', select(lists.sources, o.source || '', (v) => { o.source = v || null; }, { empty: '—' })),
       h('label', { class: 'switch', style: 'margin-top:8px' },
         h('input', { type: 'checkbox', checked: o.urgent === 'Да', onchange: (e) => { o.urgent = e.target.checked ? 'Да' : 'Нет'; } }), 'Срочно'),
-      text('comment', 'Комментарий', { area: true }),
+      commentField,
       isNew && cartPlan && cartPlan.items.length ? h('label', { class: 'switch', style: 'margin-top:10px' },
         h('input', {
           type: 'checkbox', checked: toCartOn,
@@ -422,7 +523,8 @@ export function openOrderForm(app, order, prefill) {
         app.sheet.add('addOrder', fields, w ? { warranty: true } : undefined);
         const toCart = cartPlan && cartPlan.items.length && toCartOn;
         if (toCart) app.addToCart(cartPlan.items.map(forOrder), cartPlan.glues);
-        toast((w ? 'Гарантийный заказ записан' : 'Заказ записан') + (app.sheet.connected ? '' : ' в очередь') + (toCart ? ', детали в корзине' : ''));
+        const off = disc && o.price !== null && o.price < disc.base ? ' со скидкой ' + String(disc.pct).replace('.', ',') + '%' : '';
+        toast((w ? 'Гарантийный заказ записан' : 'Заказ записан') + off + (app.sheet.connected ? '' : ' в очередь') + (toCart ? ', детали в корзине' : ''));
       } else {
         const changed = {};
         for (const k of EDITABLE) if ((o[k] ?? null) !== (orig[k] ?? null)) changed[k] = o[k] ?? '';

@@ -634,7 +634,7 @@ await test('заказы: формулы таблицы', () => {
   assert.equal(computed({ price: null, part: 40, status: 'Отказ', refusal: 'Вернул' }, 3).profit, 0);
   assert.equal(computed({ price: null, part: 40, status: 'Отказ', refusal: 'Осталась у меня' }, 3).profit, -40);
   const s = summary([{ date: '2026-10-01', status: 'Выдан', price: 100, part: 40, issued: '2026-10-02' }], [{ date: '2026-10-03', sum: 15 }], '2026-10', 3);
-  assert.deepEqual(s, { taken: 1, issued: 1, revenue: 100, profit: 60, expenses: 15, net: 45, warranty: 0, warrantyCost: 0 });
+  assert.deepEqual(s, { taken: 1, issued: 1, revenue: 100, profit: 60, expenses: 15, net: 45, warranty: 0, warrantyCost: 0, discounted: 0, discountSum: 0 });
 });
 
 await test('гарантийные заказы: признак и итоги', () => {
@@ -649,7 +649,64 @@ await test('гарантийные заказы: признак и итоги', 
     { num: 'Г2', date: '2026-10-22', status: 'В работе', price: 0, part: 30 },
   ];
   const s = summary(orders, [], '2026-10', 4);
-  assert.deepEqual(s, { taken: 3, issued: 2, revenue: 100, profit: 35, expenses: 0, net: 35, warranty: 1, warrantyCost: 25 });
+  assert.deepEqual(s, { taken: 3, issued: 2, revenue: 100, profit: 35, expenses: 0, net: 35, warranty: 1, warrantyCost: 25, discounted: 0, discountSum: 0 });
+});
+
+await test('скидка в заказе: цена со скидкой, запись в комментарии, итоги', async () => {
+  const D = await imp('js/discount.js');
+  // вниз до рубля: клиент получает не меньше обещанного процента
+  assert.deepEqual([D.discounted(125, 20), D.discounted(115, 20), D.discounted(215, 20), D.discounted(97.5, 15), D.discounted(99.99, 20), D.discounted(125, 0)],
+    [100, 92, 172, 82, 79, 125]);
+  const note = D.discountNote({ name: '11.11', pct: 20, base: 125 }, 100);
+  assert.equal(note, 'Скидка 11.11 −20%: было 125 р., стало 100 р.');
+  assert.equal(D.discountNote({ name: '', pct: 12.5, base: 97.5 }, 82), 'Скидка −12,5%: было 97,5 р., стало 82 р.');
+  // запись встаёт в начало комментария, при смене скидки меняется на месте, убрал скидку — записи нет
+  const comment = 'Деталь: Первый — Дисплей iPhone 11 - In-Cell 40 р.';
+  const c1 = D.setDiscountNote(comment, note);
+  assert.equal(c1, note + ' ' + comment);
+  const note10 = D.discountNote({ name: '11.11', pct: 10, base: 125 }, 112);
+  assert.equal(D.setDiscountNote(c1, note10), note10 + ' ' + comment);
+  assert.equal(D.setDiscountNote(c1, ''), comment);
+  assert.equal(D.setDiscountNote('', note), note);
+  assert.equal(D.setDiscountNote('Позвонить после 18. ' + note + ' Деталь: X', ''), 'Позвонить после 18. Деталь: X');
+  assert.equal(D.setDiscountNote(comment, ''), comment, 'без скидки комментарий не трогаем');
+  // скидка заказа — по записи, если цена та же; цену потом поправили вручную — запись устарела
+  assert.deepEqual(D.orderDiscount({ price: 100, comment: c1 }), { name: '11.11', pct: 20, base: 125 });
+  assert.equal(D.orderDiscount({ price: 110, comment: c1 }), null);
+  assert.equal(D.orderDiscount({ price: null, comment: c1 }), null);
+  assert.deepEqual(D.orderDiscount({ price: 82, comment: 'Скидка −12,5%: было 97,5 р., стало 82 р.' }), { name: '', pct: 12.5, base: 97.5 });
+  // запись о скидке за комплекс — не она; вместе с ней скидка дня читается
+  const combo = 'Без скидки 560 р., скидка за комплекс 20% на работу: −10 р. Детали: Первый — Аккумулятор 24 р.';
+  assert.equal(D.parseDiscount(combo), null);
+  const both = D.setDiscountNote(combo, D.discountNote({ name: 'Чёрная пятница', pct: 20, base: 550 }, 440));
+  assert.deepEqual(D.orderDiscount({ price: 440, comment: both }), { name: 'Чёрная пятница', pct: 20, base: 550 });
+  // название с двоеточием и переносом не ломает запись
+  assert.deepEqual(D.orderDiscount({ price: 100, comment: D.discountNote({ name: 'Акция:\n11.11', pct: 20, base: 125 }, 100) }), { name: 'Акция 11.11', pct: 20, base: 125 });
+  // итоги: выданные в этом месяце со скидкой и сколько ею отдано; выручка — по цене со скидкой
+  const s = summary([
+    { date: '2026-11-11', status: 'Выдан', issued: '2026-11-11', price: 100, part: 40, comment: c1 },
+    { date: '2026-11-11', status: 'Принят', price: 92, part: 30, comment: 'Скидка 11.11 −20%: было 115 р., стало 92 р.' },
+    { date: '2026-11-02', status: 'Выдан', issued: '2026-11-03', price: 125, part: 40, comment: 'Скидка 11.11 −20%: было 125 р., стало 100 р.' },
+  ], [], '2026-11', 4);
+  assert.deepEqual([s.issued, s.revenue, s.profit, s.discounted, s.discountSum], [2, 225, 145, 1, 25]);
+});
+
+await test('скидка дня: день, несколько дней, включена', async () => {
+  const D = await imp('js/discount.js');
+  const promo = { on: true, pct: 20, name: '11.11', from: '2026-11-11', to: '2026-11-11' };
+  assert.deepEqual(['2026-11-10', '2026-11-11', '2026-11-12'].map((d) => D.promoActive(promo, d)), [false, true, false]);
+  assert.equal(D.promoActive({ ...promo, to: '' }, '2026-11-11'), true, 'без «по» — один день');
+  assert.equal(D.promoActive({ ...promo, to: '' }, '2026-11-12'), false);
+  assert.deepEqual(['2026-11-12', '2026-11-13', '2026-11-14'].map((d) => D.promoActive({ ...promo, to: '2026-11-13' }, d)), [true, true, false]);
+  assert.equal(D.promoActive({ ...promo, to: '2026-11-01' }, '2026-11-11'), true, '«по» раньше дня — один день');
+  assert.equal(D.promoActive({ ...promo, on: false }, '2026-11-11'), false);
+  assert.equal(D.promoActive({ ...promo, pct: 0 }, '2026-11-11'), false);
+  assert.equal(D.promoActive({ ...promo, pct: null }, '2026-11-11'), false);
+  assert.equal(D.promoActive({ ...promo, from: '' }, '2026-11-11'), false, 'день не выбран');
+  assert.equal(D.promoActive(undefined, '2026-11-11'), false);
+  assert.equal(D.discountLabel(promo), 'Скидка 11.11 −20%');
+  assert.equal(D.promoWords(promo), 'со скидкой 20% по акции «11.11»');
+  assert.equal(D.promoWords({ ...promo, name: ' ' }), 'со скидкой 20%');
 });
 
 // --- Скрипт таблицы на макете
@@ -1407,6 +1464,9 @@ await test('версия в «Ещё» совпадает с выпуском в
   const app = /export const APP_VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(ROOT, 'js/view-more.js'), 'utf8'))[1];
   assert.equal(app, sw);
   assert.match(sw, /^\d{4}-\d{2}-\d{2}\.\d+$/);
+  // без интернета приложение берёт файлы из кэша: каждый модуль должен быть в списке sw.js
+  const files = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  for (const f of fs.readdirSync(path.join(ROOT, 'js'))) assert.ok(files.includes("'js/" + f + "'"), 'нет в кэше sw.js: js/' + f);
 });
 
 // --- Настоящий прайс: только с паролем

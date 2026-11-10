@@ -18,8 +18,12 @@ import { createCartView } from './view-cart.js';
 import { cartAdd, cartQty, cartCount } from './cart.js';
 
 // ownParts — свои детали (цену вписал сам), см. withOwnParts в engine.js; cart — корзина (cart.js),
-// cartGlue — класть в корзину проклейку вместе с деталью
-const DEFAULT_SETTINGS = { clientFooter: 'Гарантия на работу 4 месяца.', clientHints: true, supplierNotes: {}, formula: null, ownParts: [], cart: [], cartGlue: true, ts: 0 };
+// cartGlue — класть в корзину проклейку вместе с деталью; promo — скидка дня (discount.js, «Ещё → Скидка дня»):
+// первая — 20% на 11.11.2026, дальше мастер выбирает день и скидку сам
+const DEFAULT_SETTINGS = {
+  clientFooter: 'Гарантия на работу 4 месяца.', clientHints: true, supplierNotes: {}, formula: null, ownParts: [], cart: [], cartGlue: true,
+  promo: { on: true, pct: 20, name: '11.11', from: '2026-11-11', to: '2026-11-11' }, ts: 0,
+};
 // Гарантия стала 4 месяца: прежнюю строку по умолчанию заменяем, свою строку мастера не трогаем
 const OLD_FOOTER = 'Гарантия на работу 3 месяца.';
 function withDefaults(s) {
