@@ -1,4 +1,4 @@
-// Связь приложения «Федя чинит · мастер» с Google Таблицей заказов.
+// Связь приложения «Федя чинит · мастер» с Google Таблицей заказов и выкупленных устройств.
 // Вставь этот код в Расширения → Apps Script и разверни как веб-приложение (инструкция в приложении: «Ещё» → «Google Таблица»).
 // Приложение присылает ключ KEY: без него скрипт ничего не отдаёт и ничего не пишет.
 
@@ -8,6 +8,8 @@ const SHEET_ORDERS = 'Заказы';
 const SHEET_EXPENSES = 'Расходы';
 const SHEET_SETTINGS = 'Настройки';
 const SHEET_APP = 'Приложение (служебный)';
+const SHEET_DEVICES = 'Устройства';
+const SHEET_PARTS = 'Запчасти';
 
 // Столбцы ищутся по заголовкам, порядок в таблице можно менять
 const ORDER_COLS = {
@@ -18,17 +20,28 @@ const ORDER_COLS = {
   wfor: 'Гарантия по №',
 };
 const EXPENSE_COLS = { date: 'Дата', what: 'Что купил', cat: 'Категория', sum: 'Сумма', where: 'Где купил', comment: 'Комментарий' };
-const DATE_KEYS = ['date', 'issued', 'warranty', 'month'];
-const NUMBER_KEYS = ['num', 'price', 'part', 'profit', 'prepay', 'due', 'sum', 'wfor'];
-const TEXT_KEYS = ['client', 'address', 'source', 'device', 'model', 'problem', 'done', 'urgent', 'status', 'refusal', 'comment', 'what', 'cat', 'where'];
+// Выкупленные устройства и их запчасти. Заголовки на этих листах во второй строке (в первой — подсказка).
+// Себестоимость, прибыль, доходность и дни считают формулы таблицы: эти столбцы скрипт не пишет
+const DEVICE_COLS = {
+  num: '№', date: 'Дата покупки', device: 'Устройство', cat: 'Категория', source: 'Где куплено', problem: 'Что сломано',
+  buy: 'Цена покупки', other: 'Прочие расходы', status: 'Статус', plan: 'Цена продажи (план)', sold: 'Цена продажи (факт)',
+  soldDate: 'Дата продажи', note: 'Заметки',
+};
+const PART_COLS = { dnum: '№ устройства', name: 'Запчасть', where: 'Где куплена', price: 'Цена', date: 'Дата', status: 'Статус', note: 'Заметки' };
+// По этим заголовкам узнаём строку заголовков
+const DEVICE_HEAD = ['№', 'Устройство', 'Цена покупки'];
+const PART_HEAD = ['№ устройства', 'Запчасть'];
+const DATE_KEYS = ['date', 'issued', 'warranty', 'month', 'soldDate'];
+const NUMBER_KEYS = ['num', 'price', 'part', 'profit', 'prepay', 'due', 'sum', 'wfor', 'buy', 'other', 'plan', 'sold', 'dnum'];
+const TEXT_KEYS = ['client', 'address', 'source', 'device', 'model', 'problem', 'done', 'urgent', 'status', 'refusal', 'comment', 'what', 'cat', 'where', 'name', 'note'];
 // Эти столбцы считает сама таблица
 const FORMULA_KEYS = ['profit', 'due', 'warranty', 'month'];
 // Этих столбцов в старой таблице может не быть: скрипт добавит их в конец, когда понадобятся
 const OPTIONAL_COLS = ['wfor'];
 // Гарантийные заказы нумеруются отдельно: Г1, Г2…
 const WARRANTY_PREFIX = 'Г';
-// 3 — номер гарантийного пишется и поверх формулы в «№»; 4 — удаление заказа
-const VERSION = 4;
+// 3 — номер гарантийного пишется и поверх формулы в «№»; 4 — удаление заказа; 5 — выкупленные устройства и их запчасти
+const VERSION = 5;
 
 function doGet(e) {
   // Просто открыть адрес в браузере — проверка, что скрипт развёрнут правильно. Данных без ключа не отдаём.
@@ -61,7 +74,9 @@ function respond_(req) {
 
 const API_ = {
   ping: function () { return { title: book_().getName(), lists: lists_(), version: VERSION }; },
-  list: function () { return { title: book_().getName(), orders: readOrders_(), expenses: readExpenses_(), lists: lists_(), version: VERSION }; },
+  list: function () {
+    return Object.assign({ title: book_().getName(), orders: readOrders_(), expenses: readExpenses_(), lists: lists_(), version: VERSION }, devicesData_());
+  },
   batch: function (req) { return withLock_(function () { return (req.ops || []).map(runOp_); }); },
   kvGet: function (req) { return kvGet_(req.name); },
   kvSet: function (req) { return withLock_(function () { return kvSet_(req.name, req.value, req.ts); }); },
@@ -84,8 +99,9 @@ function withLock_(fn) {
 
 function norm_(s) { return String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim(); }
 
-function columns_(sh, spec) {
-  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(norm_);
+// headRow — строка заголовков (по умолчанию первая)
+function columns_(sh, spec, headRow) {
+  const head = sh.getRange(headRow || 1, 1, 1, sh.getLastColumn()).getValues()[0].map(norm_);
   const out = {};
   Object.keys(spec).forEach(function (k) {
     const want = norm_(spec[k]);
@@ -122,14 +138,16 @@ function fromJson_(k, v) {
   return v;
 }
 
-function readRows_(sh, cols, isRow) {
+// start — первая строка данных (по умолчанию вторая)
+function readRows_(sh, cols, isRow, start) {
+  const first = start || 2;
   const last = sh.getLastRow();
-  if (last < 2) return [];
+  if (last < first) return [];
   const width = sh.getLastColumn();
-  const values = sh.getRange(2, 1, last - 1, width).getValues();
+  const values = sh.getRange(first, 1, last - first + 1, width).getValues();
   const out = [];
   values.forEach(function (r, i) {
-    const o = { row: i + 2 };
+    const o = { row: i + first };
     Object.keys(cols).forEach(function (k) { o[k] = toJson_(k, r[cols[k] - 1]); });
     if (isRow(o)) out.push(o);
   });
@@ -186,6 +204,10 @@ function runOp_(op) {
     if (done[op.ref][1] !== null) op.num = done[op.ref][1];
     op.byRef = true;
   }
+  // Запчасть к устройству, которое добавлено в этой же очереди: номер устройства берём из журнала
+  if (op.dref && done[op.dref] && op.fields && (op.fields.dnum === null || op.fields.dnum === undefined || op.fields.dnum === '')) {
+    op.fields.dnum = done[op.dref][1];
+  }
   // Если добавление прервалось на середине, повтор пишет в ту же строку, а не в новую
   const pend = JSON.parse(props.getProperty('pend') || '{}');
   const reserve = function (row, num) {
@@ -199,6 +221,12 @@ function runOp_(op) {
     else if (op.op === 'deleteOrder') res = deleteOrder_(op);
     else if (op.op === 'addExpense') res = addRow_(SHEET_EXPENSES, EXPENSE_COLS, op.fields, isExpense_, false, pend[op.id], reserve);
     else if (op.op === 'updateExpense') res = updateExpense_(op);
+    else if (op.op === 'addDevice') res = addDevice_(op, pend[op.id], reserve);
+    else if (op.op === 'updateDevice') res = updateDevice_(op);
+    else if (op.op === 'deleteDevice') res = deleteDevice_(op);
+    else if (op.op === 'addPart') res = addPart_(op, pend[op.id], reserve);
+    else if (op.op === 'updatePart') res = updatePart_(op);
+    else if (op.op === 'deletePart') res = deletePart_(op);
     else throw new Error('Неизвестная операция: ' + op.op);
     res.ok = true;
   } catch (err) {
@@ -369,6 +397,179 @@ function updateExpense_(op) {
   }
   writeFields_(sh, row, cols, op.fields);
   return { row: row };
+}
+
+// --- Выкупленные устройства («Устройства») и их запчасти («Запчасти»)
+
+// Лист, где заголовки не в первой строке: строка заголовков — первая из пяти верхних, где есть все заголовки must.
+// Листа нет — null
+function table_(name, spec, must) {
+  const sh = book_().getSheetByName(name);
+  if (!sh) return null;
+  const want = must.map(norm_);
+  const last = Math.min(sh.getLastRow(), 5);
+  for (let r = 1; r <= last; r++) {
+    const head = sh.getRange(r, 1, 1, sh.getLastColumn()).getValues()[0].map(norm_);
+    const ok = want.every(function (w) { return head.some(function (h) { return h === w || h.indexOf(w) === 0; }); });
+    if (ok) return { sh: sh, head: r, cols: columns_(sh, spec, r) };
+  }
+  throw new Error('На листе «' + name + '» не нашёл строку заголовков (' + must.join(', ') + ')');
+}
+
+function needTable_(name, spec, must) {
+  const t = table_(name, spec, must);
+  if (!t) throw new Error('Нет листа «' + name + '»');
+  return t;
+}
+
+function isDevice_(o) { return o.num != null || o.device != null || o.buy != null; }
+function isPart_(o) { return o.dnum != null || o.name != null || o.price != null; }
+// Строка без данных (формулы в ней могут быть): сюда можно писать новое
+function blankRow_(o, spec) { return Object.keys(spec).every(function (k) { return o[k] == null; }); }
+
+function rowAt_(sh, cols, row) {
+  const r = sh.getRange(row, 1, 1, sh.getLastColumn()).getValues()[0];
+  const o = { row: row };
+  Object.keys(cols).forEach(function (k) { o[k] = toJson_(k, r[cols[k] - 1]); });
+  return o;
+}
+
+// Для списка в приложении. Листов нет (старая таблица) — null; ошибка в этих листах не мешает заказам
+function devicesData_() {
+  try {
+    const d = table_(SHEET_DEVICES, DEVICE_COLS, DEVICE_HEAD);
+    const p = table_(SHEET_PARTS, PART_COLS, PART_HEAD);
+    return {
+      devices: d ? readRows_(d.sh, d.cols, isDevice_, d.head + 1) : null,
+      parts: p ? readRows_(p.sh, p.cols, isPart_, p.head + 1) : (d ? [] : null),
+    };
+  } catch (err) {
+    return { devices: null, parts: null, devicesError: String(err && err.message ? err.message : err) };
+  }
+}
+
+// Новая строка после строк с готовыми формулами: формулы (себестоимость, прибыль…) берём из строки выше
+function copyFormulas_(sh, row, head) {
+  if (row <= head + 1) return;
+  const width = sh.getLastColumn();
+  const above = sh.getRange(row - 1, 1, 1, width).getFormulas()[0];
+  const here = sh.getRange(row, 1, 1, width).getFormulas()[0];
+  above.forEach(function (f, i) {
+    if (!f || here[i]) return;
+    const cell = sh.getRange(row, i + 1);
+    if (cell.getValue() !== '') return;
+    cell.setFormulaR1C1(sh.getRange(row - 1, i + 1).getFormulaR1C1());
+  });
+}
+
+// Первая строка без данных (там уже стоят формулы) или новая в конце
+function freeRow_(t, spec) {
+  let target = null;
+  readRows_(t.sh, t.cols, function () { return true; }, t.head + 1).forEach(function (o) {
+    if (target === null && blankRow_(o, spec)) target = o.row;
+  });
+  return target === null ? Math.max(t.sh.getLastRow(), t.head) + 1 : target;
+}
+
+// Номер — следующий после наибольшего
+function addDevice_(op, reserved, reserve) {
+  const t = needTable_(SHEET_DEVICES, DEVICE_COLS, DEVICE_HEAD);
+  const f = Object.assign({}, op.fields);
+  let target;
+  if (reserved) {
+    target = reserved[0];
+    f.num = reserved[1];
+  } else {
+    let max = 0;
+    readRows_(t.sh, t.cols, isDevice_, t.head + 1).forEach(function (o) {
+      const n = Number(o.num);
+      if (o.num !== null && !isNaN(n) && n > max) max = n;
+    });
+    target = freeRow_(t, DEVICE_COLS);
+    f.num = max + 1;
+    reserve(target, f.num);
+  }
+  writeFields_(t.sh, target, t.cols, f);
+  copyFormulas_(t.sh, target, t.head);
+  return { row: target, num: f.num };
+}
+
+// Строка устройства: по номеру строки, если там тот же номер, иначе поиском по номеру
+function deviceRow_(t, op) {
+  if (op.num === null || op.num === undefined || op.num === '') throw new Error('У устройства нет номера: обнови список и попробуй ещё раз');
+  const key = numKey_(op.num);
+  if (op.row && op.row > t.head && numKey_(t.sh.getRange(op.row, t.cols.num).getValue()) === key) return op.row;
+  const found = readRows_(t.sh, t.cols, isDevice_, t.head + 1).filter(function (o) { return numKey_(o.num) === key; });
+  if (!found.length) throw new Error('Не нашёл устройство №' + op.num);
+  return found[0].row;
+}
+
+function updateDevice_(op) {
+  const t = needTable_(SHEET_DEVICES, DEVICE_COLS, DEVICE_HEAD);
+  const row = deviceRow_(t, op);
+  const f = Object.assign({}, op.fields);
+  delete f.num;
+  writeFields_(t.sh, row, t.cols, f);
+  return { row: row, num: op.num };
+}
+
+// Удалить устройство вместе с его запчастями. Строки удаляются целиком: формулы других строк сдвигаются сами
+function deleteDevice_(op) {
+  const t = needTable_(SHEET_DEVICES, DEVICE_COLS, DEVICE_HEAD);
+  const row = deviceRow_(t, op);
+  const key = numKey_(t.sh.getRange(row, t.cols.num).getValue());
+  t.sh.deleteRow(row);
+  let parts = 0;
+  const p = table_(SHEET_PARTS, PART_COLS, PART_HEAD);
+  if (p && key !== '') {
+    readRows_(p.sh, p.cols, isPart_, p.head + 1).filter(function (o) { return numKey_(o.dnum) === key; })
+      .reverse().forEach(function (o) { p.sh.deleteRow(o.row); parts++; });
+  }
+  return { row: row, num: op.num, deleted: true, parts: parts };
+}
+
+function addPart_(op, reserved, reserve) {
+  const t = needTable_(SHEET_PARTS, PART_COLS, PART_HEAD);
+  const f = Object.assign({}, op.fields);
+  if (f.dnum === null || f.dnum === undefined || f.dnum === '') throw new Error('Не знаю номер устройства для запчасти: обнови список и попробуй ещё раз');
+  let target;
+  if (reserved) target = reserved[0];
+  else {
+    target = freeRow_(t, PART_COLS);
+    reserve(target, null);
+  }
+  writeFields_(t.sh, target, t.cols, f);
+  copyFormulas_(t.sh, target, t.head);
+  return { row: target, dnum: f.dnum };
+}
+
+// Запчасть ищем по тому, что о ней знало приложение (was: номер устройства, название, цена): строки могли сдвинуться
+function partRow_(t, op) {
+  if (!op.was) {
+    if (op.byRef && op.row) return op.row;
+    throw new Error('Не понял, какую запчасть править: обнови список и попробуй ещё раз');
+  }
+  const same = function (o) {
+    return numKey_(o.dnum) === numKey_(op.was.dnum) && String(o.name || '') === String(op.was.name || '') && Number(o.price || 0) === Number(op.was.price || 0);
+  };
+  if (op.row && op.row > t.head && same(rowAt_(t.sh, t.cols, op.row))) return op.row;
+  const found = readRows_(t.sh, t.cols, isPart_, t.head + 1).filter(same);
+  if (!found.length) throw new Error('Не нашёл запчасть «' + (op.was.name || '') + '»');
+  return found[0].row;
+}
+
+function updatePart_(op) {
+  const t = needTable_(SHEET_PARTS, PART_COLS, PART_HEAD);
+  const row = partRow_(t, op);
+  writeFields_(t.sh, row, t.cols, op.fields);
+  return { row: row };
+}
+
+function deletePart_(op) {
+  const t = needTable_(SHEET_PARTS, PART_COLS, PART_HEAD);
+  const row = partRow_(t, op);
+  t.sh.deleteRow(row);
+  return { row: row, deleted: true };
 }
 
 // --- Служебный лист для резервной копии данных приложения (зашифрованы, читать их без пароля нельзя)

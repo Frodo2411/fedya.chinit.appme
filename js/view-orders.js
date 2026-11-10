@@ -4,6 +4,7 @@ import { h, fill, icon, money, fmtDate, toast, openSheet, field, select, chips, 
 import { ACTIVE, computed, isWarranty } from './orders.js';
 import { store, today } from './store.js';
 import { SCRIPT_VERSION, DELETE_VERSION } from './sheet.js';
+import { DEVICE_OPS } from './devices.js';
 import { SERVICES, ORDER } from './engine.js';
 import { REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
 
@@ -190,7 +191,8 @@ export function createOrdersView(app) {
         + 'Если на другом устройстве всё работает — открой приложение там, и это устройство само переключится на тот же адрес скрипта. '
         + 'Иначе обнови код скрипта.',
       h('div', { style: 'margin-top:8px' }, h('button', { class: 'btn small', text: 'Открыть «Google Таблица»', onclick: () => app.openSheetSetup() }))) : null,
-    s.failed.map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
+    // не записавшееся из выкупа показывает свой раздел
+    s.failed.filter((f) => !DEVICE_OPS.includes(f.op)).map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
       h('div', {}, h('b', { text: 'Не записалось в таблицу: ' }), describeOp(f), ' — ', f.error),
       h('div', { class: 'row', style: 'margin-top:8px' },
         h('button', { class: 'btn small', text: 'Повторить', onclick: () => { s.dropFailed(f.id); s.outbox.push({ ...f, error: undefined }); s.save(); s.flush(); } }),

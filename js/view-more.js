@@ -7,10 +7,10 @@ import { openImport } from './import-flow.js';
 import { withRate, oddRate } from './importer.js';
 import { monthTitle } from './ui.js';
 import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteKey } from './site-publish.js';
-import { SCRIPT_VERSION, DELETE_VERSION } from './sheet.js';
+import { SCRIPT_VERSION, DELETE_VERSION, DEVICES_VERSION } from './sheet.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-11-05.5';
+export const APP_VERSION = '2026-11-10.1';
 
 export function createMoreView(app) {
   const root = h('div');
@@ -73,7 +73,7 @@ export function createMoreView(app) {
 
       h('div', { class: 'card' },
         h('h3', { text: 'Google Таблица' }),
-        h('div', { class: 'small muted', text: app.sheet.connected ? 'Подключена' + (app.sheet.cache && app.sheet.cache.title ? ': ' + app.sheet.cache.title : '') + '. Заказы и расходы пишутся в неё.' : 'Не подключена. Журнал заказов и итоги появятся после подключения.' }),
+        h('div', { class: 'small muted', text: app.sheet.connected ? 'Подключена' + (app.sheet.cache && app.sheet.cache.title ? ': ' + app.sheet.cache.title : '') + '. Заказы, расходы и выкупленные устройства пишутся в неё.' : 'Не подключена. Журнал заказов, выкуп и итоги появятся после подключения.' }),
         h('button', { class: 'btn small', style: 'margin-top:12px', text: app.sheet.connected ? 'Настройки подключения' : 'Подключить', onclick: () => app.openSheetSetup() })),
 
       h('div', { class: 'card' },
@@ -320,7 +320,8 @@ export function openSheetSetup(app) {
   // Что подключено сейчас: версия скрипта и конец адреса — на телефоне и компьютере должны совпадать
   const urlTail = (u) => '…' + String(u || '').replace(/\/exec\/?$/, '').slice(-8) + '/exec';
   const versionLine = (v) => (v === null || v === undefined ? '' : ' · скрипт версии ' + v + (v < SCRIPT_VERSION ? ' — старый, нужна ' + SCRIPT_VERSION + ': обнови код и разверни новую версию'
-    : v < DELETE_VERSION ? ' — удалять заказы можно с версии ' + DELETE_VERSION + ': обнови код и разверни новую версию' : ''));
+    : v < DELETE_VERSION ? ' — удалять заказы можно с версии ' + DELETE_VERSION + ': обнови код и разверни новую версию'
+      : v < DEVICES_VERSION ? ' — выкуп устройств работает с версии ' + DEVICES_VERSION + ': обнови код и разверни новую версию' : ''));
   if (app.sheet.connected) fill(status, h('span', { style: app.sheet.version !== null && app.sheet.version < SCRIPT_VERSION ? 'color:var(--accent)' : null, text: 'Сейчас подключено: адрес ' + urlTail(app.sheet.cfg.url) + versionLine(app.sheet.version) }));
   // Код загружаем заранее: на айфоне копировать можно только сразу в обработчике нажатия, без ожидания сети
   let code = null;

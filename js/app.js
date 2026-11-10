@@ -1,4 +1,4 @@
-// «Федя чинит · мастер»: цены для клиента, поставщики, заработок, журнал заказов.
+// «Федя чинит · мастер»: цены для клиента, поставщики, заработок, журнал заказов, выкуп устройств на перепродажу.
 // Данные прайса лежат в data/prices.enc зашифрованными: открыть их можно только паролем.
 
 import { h, fill, icon, toast } from './ui.js';
@@ -11,6 +11,8 @@ import { SheetSync } from './sheet.js';
 import { createPricesView, REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
 import { createOrdersView, openOrderForm } from './view-orders.js';
 import { createSummaryView } from './view-summary.js';
+import { createDevicesView } from './view-devices.js';
+import { DEVICE_OPS } from './devices.js';
 import { createMoreView, openSheetSetup } from './view-more.js';
 import { createCartView } from './view-cart.js';
 import { cartAdd, cartQty, cartCount } from './cart.js';
@@ -301,20 +303,26 @@ async function syncBackups() {
 }
 
 // --- Оболочка
-const TABS = [['prices', 'Цены', 'tag'], ['cart', 'Корзина', 'cart'], ['orders', 'Заказы', 'list'], ['summary', 'Итоги', 'chart'], ['more', 'Ещё', 'more']];
+const TABS = [['prices', 'Цены', 'tag'], ['cart', 'Корзина', 'cart'], ['orders', 'Заказы', 'list'], ['devices', 'Выкуп', 'phone'], ['summary', 'Итоги', 'chart'], ['more', 'Ещё', 'more']];
+// Разделы, которые показывают данные таблицы: перерисовать, когда она ответила
+const SHEET_TABS = ['orders', 'summary', 'devices'];
 const scrolls = {};
 let tabbar = null;
 let mainEl = null;
 
 function drawTabbar() {
   if (!tabbar) return;
-  const pending = app.sheet.outbox.length + app.sheet.failed.length;
+  // не отправленное и не записавшееся — значком на своём разделе: заказы и расходы или выкуп
+  const ops = [...app.sheet.outbox, ...app.sheet.failed];
+  const pendingDevices = ops.filter((o) => DEVICE_OPS.includes(o.op)).length;
+  const pending = ops.length - pendingDevices;
   const toBuy = cartCount(app.settings.cart);
   // название с логотипом — только в меню слева на компьютере
   fill(tabbar, h('div', { class: 'brand' }, h('img', { src: 'icons/icon-180.png', alt: '' }), 'Федя чинит'), ...TABS.map(([id, label, ic]) => h('button', {
     class: 'tab' + (app.tab === id ? ' on' : ''), 'aria-label': label, 'aria-current': app.tab === id ? 'page' : null,
     onclick: () => switchTab(id),
   }, icon(ic), label, id === 'orders' && pending ? h('span', { class: 'dot', text: String(pending) }) : null,
+  id === 'devices' && pendingDevices ? h('span', { class: 'dot', text: String(pendingDevices) }) : null,
   id === 'cart' && toBuy ? h('span', { class: 'dot cart', text: String(toBuy) }) : null)));
 }
 
@@ -330,18 +338,19 @@ function switchTab(id) {
   app.views[id].draw();
   drawTabbar();
   window.scrollTo(0, scrolls[id] || 0);
-  if ((id === 'orders' || id === 'summary') && app.sheet.connected && (!app.sheet.cache || Date.now() - app.sheet.cache.at > 60000)) app.sheet.refresh();
+  if (SHEET_TABS.includes(id) && app.sheet.connected && (!app.sheet.cache || Date.now() - app.sheet.cache.at > 60000)) app.sheet.refresh();
 }
 
 function startUI() {
   app.sheet = new SheetSync(() => {
-    if (app.tab === 'orders' || app.tab === 'summary') app.views[app.tab].draw();
+    if (SHEET_TABS.includes(app.tab)) app.views[app.tab].draw();
     drawTabbar();
   });
   app.views = {
     prices: createPricesView(app),
     cart: createCartView(app),
     orders: createOrdersView(app),
+    devices: createDevicesView(app),
     summary: createSummaryView(app),
     more: createMoreView(app),
   };

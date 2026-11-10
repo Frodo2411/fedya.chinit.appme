@@ -10,6 +10,8 @@ const blank = (v) => (v === '' || v === undefined ? null : v);
 export const SCRIPT_VERSION = 3;
 // С какой версии скрипт умеет удалять заказ
 export const DELETE_VERSION = 4;
+// С какой версии скрипт работает с выкупленными устройствами (листы «Устройства» и «Запчасти»)
+export const DEVICES_VERSION = 5;
 
 export class SheetSync {
   constructor(onChange) {
@@ -102,16 +104,25 @@ export class SheetSync {
     this.flush();
   }
 
-  // Удалить заказ. Ещё не ушедший в таблицу просто убираем из очереди вместе с его правками
-  remove(target) {
+  // Удалить заказ (kind — deleteDevice, deletePart для выкупа). Ещё не ушедшее в таблицу просто убираем из очереди
+  // вместе с его правками, а у устройства — и с его запчастями
+  remove(target, kind = 'deleteOrder') {
     const ref = target.pendingId || null;
     if (ref && !this.inflight.has(ref) && this.outbox.some((o) => o.id === ref)) {
-      this.outbox = this.outbox.filter((o) => o.id !== ref && o.ref !== ref);
+      const gone = new Set([ref]);
+      for (let more = true; more;) {
+        more = false;
+        for (const o of this.outbox) {
+          if (!gone.has(o.id) && (gone.has(o.ref) || gone.has(o.dref))) { gone.add(o.id); more = true; }
+        }
+      }
+      this.outbox = this.outbox.filter((o) => !gone.has(o.id));
     } else {
       const sent = ref ? this.sent[ref] : null;
       this.outbox.push({
-        id: newId(), op: 'deleteOrder', ref: ref || undefined,
-        num: target.num ?? (sent ? sent.num : null), row: target.row ?? (sent ? sent.row : null), fields: {}, at: Date.now(),
+        id: newId(), op: kind, ref: ref || undefined,
+        num: target.num ?? (sent ? sent.num : null), row: target.row ?? (sent ? sent.row : null),
+        was: target.was || (sent ? sent.was : undefined), fields: {}, at: Date.now(),
       });
     }
     this.save();
@@ -153,12 +164,13 @@ export class SheetSync {
       for (const op of ops) {
         const r = byId.get(op.id);
         if (r && !r.ok) this.failed.push({ ...op, error: r.error });
-        if (r && r.ok && (op.op === 'addOrder' || op.op === 'addExpense')) {
+        if (r && r.ok && ['addOrder', 'addExpense', 'addDevice', 'addPart'].includes(op.op)) {
           const f = op.fields || {};
-          this.sent[op.id] = {
-            num: r.num ?? null, row: r.row,
-            was: op.op === 'addExpense' ? { date: blank(f.date), what: blank(f.what), sum: blank(f.sum) } : undefined,
-          };
+          let was;
+          if (op.op === 'addExpense') was = { date: blank(f.date), what: blank(f.what), sum: blank(f.sum) };
+          // номер устройства у запчасти могла подставить таблица (запчасть к только что добавленному устройству)
+          if (op.op === 'addPart') was = { dnum: r.dnum ?? blank(f.dnum), name: blank(f.name), price: blank(f.price) };
+          this.sent[op.id] = { num: r.num ?? null, row: r.row, was };
         }
       }
       const ids = Object.keys(this.sent);
@@ -236,6 +248,55 @@ export class SheetSync {
       }
     }
     return list;
+  }
+
+  // Листы выкупа («Устройства», «Запчасти») прочитаны: скрипт версии 5 и листы есть в таблице
+  get devicesReady() {
+    return !!(this.cache && Array.isArray(this.cache.devices));
+  }
+
+  // Выкупленные устройства с учётом ещё не отправленных изменений
+  devices() {
+    const list = ((this.cache && this.cache.devices) || []).map((d) => ({ ...d }));
+    const byNum = new Map(list.map((d) => [String(d.num), d]));
+    for (const op of this.outbox) {
+      if (op.op === 'updateDevice' || op.op === 'deleteDevice') {
+        const num = op.num ?? (op.ref && this.sent[op.ref] ? this.sent[op.ref].num : null);
+        const d = num !== null && num !== undefined ? byNum.get(String(num)) : list.find((x) => x.pendingId && x.pendingId === op.ref);
+        if (d && op.op === 'deleteDevice') d.deleted = true;
+        else if (d) Object.assign(d, op.fields, { pending: true });
+      } else if (op.op === 'addDevice') {
+        list.push({ ...op.fields, num: null, row: null, pending: true, pendingId: op.id });
+      }
+    }
+    return list.filter((d) => !d.deleted);
+  }
+
+  // Запчасти выкупленных устройств. was — по чему таблица найдёт строку при правке (строки сдвигаются при удалении)
+  parts() {
+    const wasOf = (p) => ({ dnum: blank(p.dnum), name: blank(p.name), price: blank(p.price) });
+    const list = ((this.cache && this.cache.parts) || []).map((p) => ({ ...p, was: wasOf(p) }));
+    const devices = this.devices();
+    for (const op of this.outbox) {
+      if (op.op === 'updatePart' || op.op === 'deletePart') {
+        const row = op.row ?? (op.ref && this.sent[op.ref] ? this.sent[op.ref].row : null);
+        const p = row !== null && row !== undefined ? list.find((x) => x.row === row) : list.find((x) => x.pendingId && x.pendingId === op.ref);
+        if (p && op.op === 'deletePart') p.deleted = true;
+        else if (p) {
+          Object.assign(p, op.fields, { pending: true });
+          if (p.row) p.was = wasOf(p);
+        }
+      } else if (op.op === 'addPart') {
+        // к устройству, которое тоже ещё не дошло до таблицы: номер узнаем из ответа таблицы
+        const dev = op.dref ? this.sent[op.dref] : null;
+        const dnum = op.fields.dnum ?? (dev ? dev.num : null);
+        list.push({ ...op.fields, dnum, row: null, pending: true, pendingId: op.id, dref: dnum === null ? op.dref : undefined });
+      }
+    }
+    // запчасти удалённого устройства в таблице тоже удалятся
+    const nums = new Set(devices.filter((d) => d.num !== null && d.num !== undefined).map((d) => String(d.num)));
+    const refs = new Set(devices.filter((d) => d.pendingId).map((d) => d.pendingId));
+    return list.filter((p) => !p.deleted && (p.dref ? refs.has(p.dref) : (p.dnum === null || p.dnum === undefined || nums.has(String(p.dnum)))));
   }
 
   // Адрес скрипта — один на все устройства. Новое развертывание скрипта даёт новый адрес: устройство с самым новым

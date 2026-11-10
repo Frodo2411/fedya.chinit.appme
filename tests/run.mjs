@@ -715,7 +715,7 @@ await test('Apps Script: ключ, список, запись, повтор, ф�
   assert.equal(gas.post({ op: 'kvGet', key: 'test-key', name: 'p' }).data.value.slice(0, 4), '+abc');
   assert.ok(fr > 0);
   // гарантийные заказы: своя нумерация Г1, Г2…, обычная не сбивается; столбец «Гарантия по №» появляется сам
-  assert.equal(gas.post({ op: 'list', key: 'test-key' }).data.version, 4);
+  assert.equal(gas.post({ op: 'list', key: 'test-key' }).data.version, 5);
   const nextNum = Math.max(...gas.post({ op: 'list', key: 'test-key' }).data.orders.map((o) => (typeof o.num === 'number' ? o.num : 0))) + 1;
   const wr = gas.post({ op: 'batch', key: 'test-key', ops: [
     { id: 'w1', op: 'addOrder', warranty: true, fields: { model: 'iPhone 11', client: 'Иван', phone: '291112233', wfor: 2, price: 0, part: 25 } },
@@ -794,7 +794,7 @@ await test('Apps Script: номер «№» считает формула — г
   const fix = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'retry1', op: 'updateOrder', ref: 'old1', num: 'Г2', row: n.row, fields: { status: 'Принят' } }] }).data[0];
   assert.equal(fix.ok, true, fix.error);
   assert.deepEqual([sh.getRange(n.row, 1).getValue(), sh.getRange(n.row, 5).getValue()], ['Г2', 'Принят'], '«Повторить» после обновления скрипта чинит номер');
-  assert.equal(gas.post({ op: 'list', key: 'k' }).data.version, 4);
+  assert.equal(gas.post({ op: 'list', key: 'k' }).data.version, 5);
   // удаление при формуле в «№»: строка остаётся с номером-числом (номера ниже не съедут), остальное очищено, в списке её нет
   const d = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'd1', op: 'deleteOrder', num: 1, row: 2 }] }).data[0];
   assert.deepEqual([d.ok, d.cleared, d.row], [true, true, 2], d.error);
@@ -860,7 +860,7 @@ await test('очередь приложения: правка заказа во 
   assert.equal(s.failed.length, 0);
   const g = s.orders().find((o) => o.num === 'Г1');
   assert.ok(g && isWarranty(g), 'после отправки номер Г1');
-  assert.equal(s.version, 4);
+  assert.equal(s.version, 5);
   assert.deepEqual([sh.getRange(g.row, 1).getValue(), sh.getRange(g.row, 3).getValue()], ['Г1', 'iPhone 11']);
   s.update('updateOrder', g, { status: 'Выдан' });
   while (s.outbox.length || s.running) await (s.running || s.flush());
@@ -870,7 +870,7 @@ await test('очередь приложения: правка заказа во 
   const plain = globalThis.fetch;
   globalThis.fetch = async (url, o) => {
     const t = await (await plain(url, o)).text();
-    return new Response(url.endsWith('/old') ? t.replace(/"version":4/g, '"version":1') : t);
+    return new Response(url.endsWith('/old') ? t.replace(/"version":5/g, '"version":1') : t);
   };
   const phone = new SheetSync();
   phone.configure({ url: 'https://script.google.com/old', key: 'k' });
@@ -879,7 +879,7 @@ await test('очередь приложения: правка заказа во 
   assert.equal(await phone.followUrl(), false, 'адреса нового скрипта в таблице ещё нет');
   assert.equal(await s.followUrl(), false, 'компьютер только оставляет адрес');
   assert.equal(await phone.followUrl(), true);
-  assert.deepEqual([phone.cfg.url, phone.version], ['https://script.google.com/x', 4]);
+  assert.deepEqual([phone.cfg.url, phone.version], ['https://script.google.com/x', 5]);
   assert.equal(await phone.followUrl(), false, 'уже на новом адресе');
   globalThis.fetch = plain;
   // удаление: не ушедший в таблицу заказ убирается из очереди, ушедший — операцией в таблице
@@ -900,6 +900,194 @@ await test('очередь приложения: правка заказа во 
   assert.equal(s.failed.length, 0, JSON.stringify(s.failed));
   assert.ok(!s.orders().some((o) => o.model === 'Тест'), 'и в таблице его нет');
   assert.ok(s.orders().some((o) => o.num === 'Г1'), 'остальные на месте');
+});
+
+// --- Выкуп: листы «Устройства» и «Запчасти» как в таблице мастера: подсказка в первой строке, заголовки во второй,
+// формулы (запчасти, себестоимость, прибыль…) заранее протянуты вниз
+function vykupBook(makeBook, extra = {}) {
+  const cell = (v, f = '') => ({ v, f, fmt: '' });
+  const devHead = ['№', 'Дата покупки', 'Устройство', 'Категория', 'Где куплено', 'Что сломано', 'Цена покупки, BYN', 'Запчасти, BYN', 'Прочие расходы, BYN',
+    'Себестоимость, BYN', 'Статус', 'Цена продажи (план), BYN', 'Прибыль (план), BYN', 'Цена продажи (факт), BYN', 'Дата продажи', 'Прибыль (факт), BYN',
+    'Доходность, %', 'Дней в работе', 'Заметки'];
+  const devF = (r) => ({ 8: '=IF(C' + r + '="","",SUMIFS(E:E,A:A,A' + r + '))', 10: '=IF(C' + r + '="","",G' + r + '+H' + r + '+I' + r + ')', 13: '=IF(L' + r + '="","",L' + r + '-J' + r + ')',
+    16: '=IF(N' + r + '="","",N' + r + '-J' + r + ')', 17: '=IF(N' + r + '="","",P' + r + '/J' + r + ')', 18: '=IF(B' + r + '="","",TODAY()-B' + r + ')' });
+  const devices = [[cell('Устройства на перепродажу. Синий текст вводишь сам, серые столбцы считаются сами.')], devHead.map((x) => cell(x))];
+  const DEV = { 3: [1, { date: '2026-11-01' }, 'Apple Watch S6 44 мм', 'Другое', '', '', 17.5], 4: [2, '', 'AirPods 1', 'Другое', '', 'нет одного наушника', 17.5] };
+  for (let r = 3; r <= 7; r++) devices.push(devHead.map((_, c) => cell(DEV[r] && DEV[r][c] !== undefined ? DEV[r][c] : '', devF(r)[c + 1] || '')));
+  devices[2][10].v = 'Куплено';
+  const partHead = ['№ устройства', 'Устройство', 'Запчасть', 'Где куплена', 'Цена, BYN', 'Дата', 'Статус', 'Заметки'];
+  const parts = [[cell('Запчасти к устройствам. Номер устройства бери из листа «Устройства».')], partHead.map((x) => cell(x))];
+  for (let r = 3; r <= 5; r++) parts.push(partHead.map((_, c) => cell(r === 3 ? [1, '', 'Ремешок', 'AliExpress', 5][c] ?? '' : '', c === 1 ? '=IF(A' + r + '="","",INDEX(C:C,MATCH(A' + r + ',A:A,0)))' : '')));
+  return makeBook({
+    'Заказы': [['№', 'Дата приёма', 'Модель', 'Статус'].map((x) => cell(x))], 'Расходы': [['Дата', 'Что купил', 'Сумма, р.'].map((x) => cell(x))],
+    'Настройки': [[cell('Настройки')]], 'Устройства': devices, 'Запчасти': parts, ...extra,
+  });
+}
+
+await test('выкуп: расчёты как на листе «Сводка», лот поровну, калькулятор перед покупкой', async () => {
+  const { deviceCalc, deviceSummary, splitEven, buyCalc, statusMismatch, partsOf, dayDiff } = await imp('js/devices.js');
+  // те же вымышленные данные, на которых проверены формулы в таблице
+  const devices = [
+    { num: 1, date: '2026-10-01', device: 'Тест телефон', buy: 100, other: 10, status: 'Продано', plan: 300, sold: 320, soldDate: '2026-10-20' },
+    { num: 2, date: '2026-10-05', device: 'Тест ноутбук', buy: 200, other: 0, status: 'В ремонте', plan: 450 },
+    { num: 3, date: '2026-10-10', device: 'Тест приставка', buy: 150, other: 5, status: 'Ждёт запчасть', plan: 300 },
+  ];
+  const parts = [{ dnum: 1, name: 'Дисплей', price: 50 }, { dnum: 2, name: 'Матрица', price: 80 }, { dnum: 2, name: 'Шлейф', price: 20 }, { dnum: 3, name: 'HDMI порт', price: 30 }];
+  const c1 = deviceCalc(devices[0], parts, '2026-11-08');
+  assert.deepEqual([c1.parts, c1.cost, c1.planProfit, c1.profit, c1.roi, c1.days], [50, 160, 140, 160, 1, 19]);
+  const c2 = deviceCalc(devices[1], parts, '2026-11-08');
+  assert.deepEqual([c2.cost, c2.planProfit, c2.profit, c2.roi, c2.days], [300, 150, null, null, 34], 'не продан: дни до сегодня');
+  const s = deviceSummary(devices, parts, '2026-11-08');
+  assert.deepEqual([s.count, s.sold, s.open, s.invested, s.investedSold, s.investedOpen, s.revenue, s.profit, s.expected, s.total, s.roi, s.avgDays],
+    [3, 1, 2, 645, 160, 485, 320, 160, 265, 425, 1, 19]);
+  assert.equal(deviceCalc({ device: 'x', buy: 10, sold: 30, status: 'Продано' }, [], '2026-11-08').days, null, 'продан без дат — дней нет');
+  assert.equal(statusMismatch({ status: 'Продано' }), true);
+  assert.equal(statusMismatch({ status: 'Готово', sold: 100 }), true);
+  assert.equal(statusMismatch({ status: 'Продано', sold: 100 }), false);
+  // запчасть к ещё не отправленному устройству — по id его добавления
+  assert.equal(partsOf({ num: null, pendingId: 'op7' }, [{ dref: 'op7', price: 3 }, { dnum: 7, price: 4 }]).length, 1);
+  assert.deepEqual(splitEven(35, 2), [17.5, 17.5]);
+  assert.deepEqual(splitEven(50, 3), [16.67, 16.67, 16.66]);
+  assert.equal(splitEven(50, 3).reduce((a, x) => a + Math.round(x * 100), 0), 5000, 'сумма до копейки');
+  assert.equal(dayDiff('2026-02-27', '2026-03-02'), 3);
+  // калькулятор: те же числа, что на листе «Калькулятор»
+  const k = buyCalc({ ask: 200, parts: 50, other: 10, sale: 400, target: 0.35, min: 0.2 });
+  assert.deepEqual([k.cost, k.profit, Math.round(k.roi * 1000) / 10, k.maxTarget, k.maxMin, k.verdict], [260, 140, 53.8, 236.3, 273.33, 'good']);
+  assert.equal(buyCalc({ ask: 250, parts: 50, other: 10, sale: 400, target: 0.35, min: 0.2 }).verdict, 'haggle');
+  assert.equal(buyCalc({ ask: 300, parts: 50, other: 10, sale: 400, target: 0.35, min: 0.2 }).verdict, 'expensive');
+  const noSale = buyCalc({ ask: 200, target: 0.35, min: 0.2 });
+  assert.deepEqual([noSale.cost, noSale.maxTarget, noSale.verdict], [200, null, null]);
+});
+
+await test('Apps Script: выкуп — устройства и запчасти, заголовки во второй строке, формулы не трогает', async () => {
+  const { makeBook, loadScript } = await import('./gas-mock.mjs');
+  const book = vykupBook(makeBook);
+  const gas = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, 'k');
+  const dev = book.getSheetByName('Устройства');
+  const prt = book.getSheetByName('Запчасти');
+  const list = gas.post({ op: 'list', key: 'k' }).data;
+  assert.equal(list.version, 5);
+  assert.deepEqual(list.devices.map((d) => [d.num, d.device, d.buy, d.row]), [[1, 'Apple Watch S6 44 мм', 17.5, 3], [2, 'AirPods 1', 17.5, 4]]);
+  assert.deepEqual([list.devices[0].date, list.devices[0].status, list.devices[1].problem, list.devices[1].date], ['2026-11-01', 'Куплено', 'нет одного наушника', null]);
+  assert.deepEqual(list.parts.map((p) => [p.dnum, p.name, p.where, p.price]), [[1, 'Ремешок', 'AliExpress', 5]]);
+  // новое: номер после наибольшего, первая строка без данных (формулы в ней уже есть), формулы на месте, текст остаётся текстом
+  const add = { id: 'a1', op: 'addDevice', fields: { device: 'Mi 9T', cat: 'Телефон', buy: 35, date: '2026-11-10', status: 'Куплено', problem: '-не включается' } };
+  const r1 = gas.post({ op: 'batch', key: 'k', ops: [add] }).data[0];
+  assert.deepEqual([r1.ok, r1.num, r1.row], [true, 3, 5], r1.error);
+  assert.equal(gas.post({ op: 'batch', key: 'k', ops: [add] }).data[0].repeat, true, 'повтор не создаёт вторую строку');
+  assert.deepEqual([dev.getRange(5, 1).getValue(), dev.getRange(5, 3).getValue(), dev.getRange(5, 7).getValue(), dev.getRange(5, 6).getValue()], [3, 'Mi 9T', 35, '-не включается']);
+  assert.ok(dev.getRange(5, 10).getFormula().includes('G5'), 'формула себестоимости на месте');
+  assert.equal(dev.getRange(1, 1).getValue().startsWith('Устройства на перепродажу'), true, 'подсказка не тронута');
+  // устройство и запчасть к нему одной очередью: номер устройства запчасть берёт из ответа на добавление
+  const r2 = gas.post({ op: 'batch', key: 'k', ops: [
+    { id: 'a2', op: 'addDevice', fields: { device: 'Планшет', cat: 'Планшет', buy: 25 } },
+    { id: 'p1', op: 'addPart', dref: 'a2', fields: { name: 'Аккумулятор', price: 20, status: 'Заказана' } },
+    { id: 'u1', op: 'updateDevice', ref: 'a2', num: null, fields: { status: 'В ремонте' } },
+  ] }).data;
+  assert.deepEqual(r2.map((x) => x.ok), [true, true, true], JSON.stringify(r2));
+  assert.deepEqual([r2[0].num, r2[1].dnum, r2[1].row], [4, 4, 4], 'вторая строка запчастей — первая свободная');
+  assert.equal(dev.getRange(r2[0].row, 11).getValue(), 'В ремонте');
+  assert.ok(prt.getRange(4, 2).getFormula(), 'формула «Устройство» на листе запчастей на месте');
+  assert.equal(gas.post({ op: 'batch', key: 'k', ops: [{ id: 'p0', op: 'addPart', fields: { name: 'Без устройства' } }] }).data[0].ok, false, 'запчасть без номера устройства не пишется');
+  // правка по номеру, даже если строка в приложении устарела; продажа
+  const u2 = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'u2', op: 'updateDevice', num: 3, row: 3, fields: { sold: 120, soldDate: '2026-11-20', status: 'Продано', num: 99 } }] }).data[0];
+  assert.deepEqual([u2.ok, u2.row], [true, 5], u2.error);
+  assert.deepEqual([dev.getRange(5, 14).getValue() , dev.getRange(5, 1).getValue()], [120, 3], 'номер правкой не меняется');
+  assert.ok(dev.getRange(5, 15).getValue() instanceof Date);
+  assert.equal(gas.post({ op: 'batch', key: 'k', ops: [{ id: 'u3', op: 'updateDevice', num: 42, fields: { status: 'Готово' } }] }).data[0].ok, false);
+  // правка запчасти: строку находит по тому, что о ней знало приложение
+  const up = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'u4', op: 'updatePart', row: 3, was: { dnum: 4, name: 'Аккумулятор', price: 20 }, fields: { price: 22, status: 'Получена' } }] }).data[0];
+  assert.deepEqual([up.ok, up.row], [true, 4], up.error);
+  assert.deepEqual([prt.getRange(4, 5).getValue(), prt.getRange(4, 7).getValue(), prt.getRange(3, 5).getValue()], [22, 'Получена', 5], 'ремешок не тронут');
+  // строки кончились — новая в конце, формулы из строки выше
+  for (let i = 0; i < 3; i++) gas.post({ op: 'batch', key: 'k', ops: [{ id: 'm' + i, op: 'addDevice', fields: { device: 'Телефон ' + i, buy: 10 } }] });
+  const last = gas.post({ op: 'list', key: 'k' }).data.devices.pop();
+  assert.deepEqual([last.num, last.row], [7, 9]);
+  assert.ok(dev.getRange(9, 10).getFormula().includes('G9'), 'формула скопирована в новую строку');
+  // удаление устройства — вместе с его запчастями; номера других не меняются
+  const del = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'd1', op: 'deleteDevice', num: 1, row: 3 }] }).data[0];
+  assert.deepEqual([del.ok, del.deleted, del.parts], [true, true, 1], del.error);
+  const after = gas.post({ op: 'list', key: 'k' }).data;
+  assert.deepEqual(after.devices.map((d) => d.num), [2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(after.parts.map((p) => [p.dnum, p.name]), [[4, 'Аккумулятор']], 'ремешок удалён вместе с часами');
+  // удаление запчасти
+  const dp = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'd2', op: 'deletePart', row: 9, was: { dnum: 4, name: 'Аккумулятор', price: 22 } }] }).data[0];
+  assert.equal(dp.ok, true, dp.error);
+  assert.deepEqual(gas.post({ op: 'list', key: 'k' }).data.parts, []);
+  // старая таблица без листов выкупа: заказы работают, выкупа нет
+  const plain = loadScript(path.join(ROOT, 'apps-script/Code.gs'), makeBook({ 'Заказы': [[{ v: '№', f: '' }]], 'Расходы': [[{ v: 'Дата', f: '' }]] }), 'k');
+  const pl = plain.post({ op: 'list', key: 'k' }).data;
+  assert.deepEqual([pl.devices, pl.parts], [null, null]);
+  assert.equal(plain.post({ op: 'batch', key: 'k', ops: [{ id: 'x', op: 'addDevice', fields: { device: 'a' } }] }).data[0].error, 'Нет листа «Устройства»');
+});
+
+await test('очередь приложения: выкуп без связи — устройство с запчастью, правка, удаление', async () => {
+  const { makeBook, loadScript } = await import('./gas-mock.mjs');
+  const { partsOf, deviceCalc } = await imp('js/devices.js');
+  const book = vykupBook(makeBook);
+  const gas = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, 'k');
+  const ls = new Map();
+  globalThis.localStorage = { getItem: (k) => (ls.has(k) ? ls.get(k) : null), setItem: (k, v) => ls.set(k, String(v)), removeItem: (k) => ls.delete(k) };
+  let offline = false;
+  globalThis.fetch = async (url, o) => {
+    await new Promise((r) => setTimeout(r, 5));
+    if (offline) throw new TypeError('offline');
+    return new Response(gas.ctx.doPost({ postData: { contents: o.body } }).content);
+  };
+  const { SheetSync } = await import(path.join(ROOT, 'js/sheet.js') + '?v=' + Date.now());
+  const s = new SheetSync();
+  s.configure({ url: 'https://script.google.com/x', key: 'k' });
+  await s.load();
+  assert.equal(s.devicesReady, true);
+  const settle = async () => { while (s.outbox.length || s.running) await (s.running || s.flush()); };
+  // без связи: устройство и запчасть к нему ждут на телефоне, себестоимость уже считается
+  offline = true;
+  s.add('addDevice', { device: 'Mi 9T', buy: 35, status: 'Куплено' });
+  while (s.running) await s.running;
+  const pend = s.devices().find((d) => d.pendingId);
+  s.add('addPart', { name: 'Экран', price: 60 }, { dref: pend.pendingId });
+  s.update('updateDevice', pend, { plan: 180 });
+  while (s.running) await s.running;
+  const pp = partsOf(pend, s.parts());
+  assert.equal(pp.length, 1);
+  assert.equal(deviceCalc({ ...pend, plan: 180 }, s.parts(), '2026-11-10').cost, 95);
+  offline = false;
+  s.again = true;
+  await settle();
+  assert.equal(s.failed.length, 0, JSON.stringify(s.failed));
+  const mi = s.devices().find((d) => d.device === 'Mi 9T');
+  assert.deepEqual([mi.num, mi.plan], [3, 180]);
+  const miParts = partsOf(mi, s.parts());
+  assert.deepEqual(miParts.map((p) => [p.dnum, p.name, p.price]), [[3, 'Экран', 60]], 'запчасть пришла к номеру устройства');
+  // правка и удаление запчасти
+  s.update('updatePart', miParts[0], { price: 65 });
+  await settle();
+  assert.equal(partsOf(mi, s.parts())[0].price, 65);
+  s.remove(partsOf(mi, s.parts())[0], 'deletePart');
+  assert.equal(partsOf(mi, s.parts()).length, 0, 'сразу пропала из списка');
+  await settle();
+  assert.equal(s.failed.length, 0, JSON.stringify(s.failed));
+  assert.equal(partsOf(mi, s.parts()).length, 0);
+  // ошибочное устройство без связи: удаляется из очереди вместе со своей запчастью
+  offline = true;
+  s.add('addDevice', { device: 'Ошибка' });
+  while (s.running) await s.running;
+  const wrong = s.devices().find((d) => d.device === 'Ошибка');
+  s.add('addPart', { name: 'Лишняя' }, { dref: wrong.pendingId });
+  while (s.running) await s.running;
+  s.remove(wrong, 'deleteDevice');
+  assert.equal(s.outbox.length, 0, 'в таблицу ничего не уйдёт');
+  offline = false;
+  // отправленное устройство удаляется в таблице вместе с запчастями
+  const watch = s.devices().find((d) => d.num === 1);
+  assert.equal(partsOf(watch, s.parts()).length, 1);
+  s.remove(watch, 'deleteDevice');
+  assert.ok(!s.devices().some((d) => d.num === 1));
+  assert.ok(!s.parts().some((p) => p.dnum === 1), 'его запчасти тоже пропали из списка');
+  await settle();
+  assert.equal(s.failed.length, 0, JSON.stringify(s.failed));
+  assert.deepEqual(s.devices().map((d) => d.num), [2, 3]);
+  assert.deepEqual(s.parts(), []);
 });
 
 await test('корзина: +1 к той же детали, по поставщикам, цена из нынешнего прайса, замена поставщика', async () => {

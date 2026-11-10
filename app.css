@@ -40,7 +40,7 @@ a { color: var(--info); }
 .screen { min-height: 100dvh; padding: calc(var(--safe-t) + 8px) 16px calc(var(--tabbar) + var(--safe-b) + 96px); max-width: 720px; margin: 0 auto; }
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   height: calc(var(--tabbar) + var(--safe-b)); padding-bottom: var(--safe-b);
   background: rgba(13, 15, 18, 0.94); border-top: 1px solid var(--line);
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
@@ -237,6 +237,13 @@ input[type="date"].input { display: block; min-width: 0; -webkit-appearance: non
 .order .price { font-weight: 800; font-variant-numeric: tabular-nums; }
 .syncbar { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); margin: 6px 0 12px; min-height: 36px; }
 .syncbar .btn { margin-left: auto; }
+
+/* --- выкуп: устройства из лота в форме нового устройства */
+.lotrow { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.lotrow .input { flex: 1; min-width: 0; }
+.lotrow .select { flex: none; width: 138px; }
+/* шесть разделов внизу узкого экрана */
+@media (max-width: 370px) { .tab { font-size: 11px; } }
 .st-lead { background: rgba(98, 176, 255, 0.14); color: var(--info); }
 .st-work { background: rgba(182, 147, 255, 0.14); color: var(--violet); }
 .st-wait { background: rgba(255, 178, 36, 0.14); color: var(--accent); }
@@ -329,7 +336,7 @@ details > summary::-webkit-details-marker { display: none; }
   :root { --side: 232px; }
   .screen { max-width: none; min-height: 100vh; margin: 0 0 0 var(--side); padding: 24px 40px 120px; }
   .screen > * { max-width: var(--content, 1080px); margin-left: auto; margin-right: auto; }
-  .view-orders, .view-summary, .view-more, .view-cart { --content: 880px; }
+  .view-orders, .view-summary, .view-more, .view-cart, .view-devices { --content: 880px; }
 
   .tabbar {
     top: 0; right: auto; width: var(--side); height: auto; padding: 20px 12px;
