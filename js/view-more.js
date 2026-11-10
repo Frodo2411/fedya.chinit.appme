@@ -9,10 +9,12 @@ import { monthTitle } from './ui.js';
 import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteKey } from './site-publish.js';
 import { SCRIPT_VERSION, DELETE_VERSION, DEVICES_VERSION } from './sheet.js';
 import { discounted, discountNote, promoEnd } from './discount.js';
+
+const numText = (x) => String(Math.round(Number(x) * 100) / 100).replace('.', ',');
 import { today } from './store.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-11-10.2';
+export const APP_VERSION = '2026-11-10.3';
 
 export function createMoreView(app) {
   const root = h('div');
@@ -138,8 +140,12 @@ function promoCard(app) {
     else if (day < p.from) text = 'Начнётся ' + fmtDate(p.from) + (promoEnd(p) > p.from ? ', до ' + fmtDate(promoEnd(p)) + ' включительно' : '') + '.';
     else if (day > promoEnd(p)) text = 'Закончилась ' + fmtDate(promoEnd(p)) + '.';
     else { now = true; text = 'Идёт сегодня' + (promoEnd(p) > day ? ', до ' + fmtDate(promoEnd(p)) + ' включительно' : '') + '.'; }
+    // пример: цена 125 р., запчасть 45 р. — скидка только с работы (80 р.)
+    const sale = discounted(125, p.pct, 45);
     fill(status, h('b', { style: now ? 'color:var(--accent)' : null, text }),
-      p.pct > 0 && p.pct < 100 ? h('div', { class: 'tiny faint', style: 'margin-top:4px', text: 'В комментарии заказа: «' + discountNote({ ...p, base: 125 }, discounted(125, p.pct)) + '»' }) : null);
+      p.pct > 0 && p.pct < 100 ? h('div', { class: 'tiny faint', style: 'margin-top:4px' },
+        'Пример: цена 125 р., запчасть 45 р. → работа 80 р., скидка ' + numText(125 - sale) + ' р., клиент платит ' + sale + ' р. ',
+        'В комментарии заказа: «' + discountNote({ ...p, base: 125 }, sale) + '»') : null);
   };
   const save = () => {
     app.saveSettings({ promo: { ...p } }, { redraw: false });
@@ -167,13 +173,13 @@ function promoCard(app) {
   showStatus();
   return h('div', { class: 'card' },
     h('h3', { text: 'Скидка дня' }),
-    h('div', { class: 'small muted', text: 'Выбери день и скидку: в этот день она сама ставится в каждый новый заказ. В «Ценах» видна цена со скидкой, «Скопировать клиенту» пишет цены со скидкой.' }),
+    h('div', { class: 'small muted', text: 'Выбери день и скидку: в этот день она сама ставится в каждый новый заказ. Скидка — только на работу (цена минус запчасть), запчасть клиент оплачивает по своей цене. В «Ценах» видна цена со скидкой, «Скопировать клиенту» пишет цены со скидкой.' }),
     h('div', { class: 'grid2' },
       field('День', fromInput),
       field('По', toInput)),
     h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Несколько дней подряд — в «По» последний день, один день — тот же день.' }),
     h('div', { class: 'grid2' },
-      field('Скидка, %', h('input', {
+      field('На работу, %', h('input', {
         class: 'input num', inputmode: 'decimal', value: p.pct === null || p.pct === undefined ? '' : String(p.pct).replace('.', ','),
         oninput: (e) => { p.pct = parseNum(e.target.value); save(); },
       })),

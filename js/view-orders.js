@@ -7,7 +7,7 @@ import { SCRIPT_VERSION, DELETE_VERSION } from './sheet.js';
 import { DEVICE_OPS } from './devices.js';
 import { SERVICES, ORDER } from './engine.js';
 import { REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
-import { discounted, discountLabel, discountNote, setDiscountNote, orderDiscount, promoActive, promoName } from './discount.js';
+import { discounted, discountLabel, discountNote, setDiscountNote, orderDiscount, promoActive, promoName, workOf } from './discount.js';
 
 const STATUS_CLASS = {
   'Обращение': 'lead', 'Принят': 'work', 'Диагностика': 'work', 'Жду запчасть': 'wait', 'В работе': 'work',
@@ -255,8 +255,9 @@ export function openOrderForm(app, order, prefill) {
   const statusHint = h('div', { class: 'tiny faint', style: 'margin-top:6px' });
   const refusalBox = h('div');
 
-  // Скидка: { pct, name, base }, base — цена без скидки; в o.price — уже со скидкой (её и пишем в «Цену для клиента»),
-  // запись о скидке — в начале комментария. Записанный заказ — со скидкой из этой записи; новый в день скидки — сразу со скидкой
+  // Скидка на работу (цена без скидки − запчасть): { pct, name, base }, base — цена без скидки; в o.price — уже со скидкой
+  // (её и пишем в «Цену для клиента»), запись о скидке — в начале комментария. Записанный заказ — со скидкой из этой записи;
+  // новый в день скидки — сразу со скидкой
   const promo = app.settings.promo;
   const promoNow = promoActive(promo, today()) ? promo : null;
   let disc = isNew ? null : orderDiscount(o);
@@ -268,14 +269,14 @@ export function openOrderForm(app, order, prefill) {
     applyDisc();
   }
 
-  // Цена со скидкой и запись о ней в комментарии — по base и pct
+  // Цена со скидкой и запись о ней в комментарии — по base, pct и запчасти
   function applyDisc() {
     if (!disc) return;
-    o.price = disc.base === null || disc.base === undefined ? null : discounted(disc.base, disc.pct);
+    o.price = disc.base === null || disc.base === undefined ? null : discounted(disc.base, disc.pct, o.part);
     o.comment = setDiscountNote(o.comment, o.price !== null && o.price < disc.base ? discountNote(disc, o.price) : '');
   }
 
-  // Поменялась цена без скидки или процент: поля не перерисовываем (иначе пропадёт клавиатура), только комментарий и итог
+  // Поменялась цена без скидки, запчасть или процент: поля не перерисовываем (иначе пропадёт клавиатура), только комментарий и итог
   function discChanged() {
     applyDisc();
     if (commentEl) commentEl.value = o.comment ?? '';
@@ -300,7 +301,11 @@ export function openOrderForm(app, order, prefill) {
   const text = (key, label, opts = {}) => field(label, h(opts.area ? 'textarea' : 'input', {
     class: 'input', value: o[key] ?? '', type: opts.area ? null : (opts.type || 'text'), inputmode: opts.inputmode, placeholder: opts.placeholder || '',
     autocomplete: 'off', autocapitalize: opts.type === 'tel' ? 'off' : 'sentences',
-    oninput: (e) => { o[key] = opts.num ? parseNum(e.target.value) : e.target.value; recalc(); },
+    oninput: (e) => {
+      o[key] = opts.num ? parseNum(e.target.value) : e.target.value;
+      // скидка — на работу: другая запчасть — другая скидка
+      if (key === 'part' && disc) discChanged(); else recalc();
+    },
   }));
 
   function recalc() {
@@ -312,9 +317,13 @@ export function openOrderForm(app, order, prefill) {
     statusHint.textContent = lists.hints[o.status] || '';
     refusalBox.hidden = o.status !== 'Отказ';
     if (disc) {
-      fill(discInfo, disc.base === null || disc.base === undefined ? 'Впиши цену без скидки — посчитаю.'
-        : o.price < disc.base ? ['−' + money(Math.round((disc.base - o.price) * 100) / 100) + ' · клиент платит ', h('b', { text: money(o.price) })]
-          : 'Цена слишком маленькая: скидки не получается.');
+      const noBase = disc.base === null || disc.base === undefined;
+      const noPart = !(Number(o.part) > 0);
+      fill(discInfo, noBase ? 'Впиши цену без скидки — посчитаю.'
+        : o.price < disc.base ? ['Работа ' + money(workOf(disc.base, o.part)) + ', скидка −' + money(Math.round((disc.base - o.price) * 100) / 100) + ' · ',
+          h('span', { class: 'nowrap' }, 'клиент платит ', h('b', { text: money(o.price) })),
+        noPart ? h('div', { style: 'color:var(--accent);margin-top:4px', text: 'Запчасть не вписана — скидка на всю цену. Впиши запчасть: скидка будет только на работу.' }) : null]
+          : 'Работы в цене нет (запчасть не дешевле цены) — скидки нет.');
     }
   }
   fill(refusalBox, field('Если отказ: запчасть', select(['Вернул', 'Осталась у меня'], o.refusal || '', (v) => { o.refusal = v || null; recalc(); }, { empty: '—' })));
@@ -416,7 +425,7 @@ export function openOrderForm(app, order, prefill) {
         h('button', { type: 'button', class: 'btn small', text: promoNow ? 'Другая скидка' : 'Сделать скидку', onclick: () => setDisc(store.get('discountPct', 10), '', true) }));
     }
     const pct = h('input', {
-      class: 'input num', value: String(disc.pct).replace('.', ','), inputmode: 'decimal', autocomplete: 'off', 'aria-label': 'Скидка, %',
+      class: 'input num', value: String(disc.pct).replace('.', ','), inputmode: 'decimal', autocomplete: 'off', 'aria-label': 'Скидка на работу, %',
       style: 'width:72px;min-height:44px;padding:8px 10px;text-align:center',
       oninput: (e) => {
         const v = parseNum(e.target.value);
@@ -523,7 +532,7 @@ export function openOrderForm(app, order, prefill) {
         app.sheet.add('addOrder', fields, w ? { warranty: true } : undefined);
         const toCart = cartPlan && cartPlan.items.length && toCartOn;
         if (toCart) app.addToCart(cartPlan.items.map(forOrder), cartPlan.glues);
-        const off = disc && o.price !== null && o.price < disc.base ? ' со скидкой ' + String(disc.pct).replace('.', ',') + '%' : '';
+        const off = disc && o.price !== null && o.price < disc.base ? ' со скидкой ' + String(disc.pct).replace('.', ',') + '% на работу' : '';
         toast((w ? 'Гарантийный заказ записан' : 'Заказ записан') + off + (app.sheet.connected ? '' : ' в очередь') + (toCart ? ', детали в корзине' : ''));
       } else {
         const changed = {};

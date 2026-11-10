@@ -326,11 +326,11 @@ export function createPricesView(app) {
   // Скидка дня (акция): идёт сегодня — её настройки, иначе null
   const promoNow = () => (promoActive(app.settings.promo, today()) ? app.settings.promo : null);
 
-  // В день скидки — цена со скидкой и заработок с ней (деталь и проклейка те же: spend)
+  // В день скидки — цена со скидкой на работу и заработок с ней. spend — деталь и проклейка: они по своей цене
   function promoLine(price, spend) {
     const pr = promoNow();
     if (!pr) return null;
-    const sale = discounted(price, pr.pct);
+    const sale = discounted(price, pr.pct, spend);
     const earn = Math.round((sale - spend) * 100) / 100;
     return h('div', { class: 'promo' }, discountLabel(pr) + ': ', h('b', { text: sale + ' р.' }),
       ' · заработок ', h('b', { class: earn < 0 ? 'minus' : null, text: money(earn) }));
@@ -533,8 +533,10 @@ export function createPricesView(app) {
     lines.push('Итого: ' + t.total + ' р.');
     const pr = promoNow();
     if (pr) {
+      // скидка на работу: детали и проклейка на весь комплекс — по своей цене
+      const spend = items.reduce((a, x) => a + x.cost, 0) + P().glueFor(entry.model, items.map((x) => x.svc)).total;
       const words = promoWords(pr);
-      lines.push(words[0].toUpperCase() + words.slice(1) + ': ' + discounted(t.total, pr.pct) + ' р.');
+      lines.push(words[0].toUpperCase() + words.slice(1) + ': ' + discounted(t.total, pr.pct, spend) + ' р.');
     }
     const foot = (app.settings.clientFooter || '').trim();
     if (foot) lines.push('', foot);
@@ -567,7 +569,7 @@ export function createPricesView(app) {
 
   function clientText(entry, svcs) {
     const hints = app.settings.clientHints !== false;
-    // в день скидки — цены со скидкой: «100 р. вместо 125 р.»
+    // в день скидки — цены со скидкой на работу (деталь и проклейка по своей цене): «100 р. вместо 115 р.»
     const pr = promoNow();
     const lines = [entry.model + (svcs.length === 1 ? ' — ' + REPAIR[svcs[0]].toLowerCase() : '')];
     lines.push('Цена под ключ (деталь и работа)' + (pr ? ' ' + promoWords(pr) : '') + ':');
@@ -578,7 +580,7 @@ export function createPricesView(app) {
       for (const o of opts) {
         const p = priceOf(entry, svc, o);
         const hint = hints ? clientHint(svc, o.tier, entry.model, p.part) : '';
-        const price = pr ? discounted(p.price, pr.pct) + ' р. вместо ' + p.price + ' р.' : p.price + ' р.';
+        const price = pr ? discounted(p.price, pr.pct, p.cost + P().glueFor(entry.model, svc).total) + ' р. вместо ' + p.price + ' р.' : p.price + ' р.';
         lines.push('• ' + VAR_CLIENT[o.tier] + ' — ' + price + (hint ? ' (' + hint + ')' : ''));
       }
     }
