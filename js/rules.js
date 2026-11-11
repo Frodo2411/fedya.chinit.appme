@@ -375,13 +375,17 @@ export function glueType(name) {
   return 'gd';
 }
 
+// Задняя крышка вместе с рамкой («Задняя крышка для iPhone 11 + стекло»; по цене как корпус), не «+ стекло камеры»
+export const FRAME_BACK = /^Задняя крышка\s.*\+\s*стекло(?!\s*камер)/i;
+
 export function kindOf(name) {
   const n = name.trim();
   if (glueType(n)) return 'g';
   if (/^(Аккумулятор|АКБ)\s/i.test(n)) return 'b';
   if (/^Дисплей/i.test(n)) return 'd';
-  // «Задняя крышка для iPhone… + стекло» — крышка вместе с рамкой, тоже задняя крышка: на айфонах, где одно стекло
-  // снимается только лазером, её меняют без лазера (FRAME_BACK в engine.js)
+  // «Задняя крышка для iPhone… + стекло» — крышка вместе с рамкой, по сути корпус: во вкладке «Корпус».
+  // В «Задней крышке» — само заднее стекло («Заднее стекло…», у ibolit — «Задняя крышка iPhone…»)
+  if (FRAME_BACK.test(n)) return 'hs';
   if (/^(Задняя крышка|Заднее стекло)/i.test(n)) return 'c';
   if (/^LCD\s/i.test(n)) return 'd';
   if (/^Плата для/i.test(n)) return null;

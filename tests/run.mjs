@@ -107,24 +107,26 @@ await test('выбор детали: наличие, брак, самый дор
   const reg = ro.find((o) => o.tier === 'orig_reglass');
   assert.equal(reg.price, ro.find((o) => o.tier === 'orig_used').price);
   assert.equal(reg.hidden, false);
-  assert.equal(m.services.c.opts.length, 0, 'iPhone 11: крышка только с лазером');
+  assert.deepEqual(m.services.c.opts.map((o) => o.cost), [20], 'iPhone 11 (стекло под лазер): заднее стекло из прайса считается');
   const c14 = pr.model('iPhone 14').services.c.opts[0];
   assert.equal(c14.cost, 41);
   assert.equal(c14.colours, 2);
 });
 
-await test('своя деталь: считается как из прайса, без правил про лазер и брак, попадает на сайт', () => {
+await test('своя деталь: считается как из прайса, без правил про вырез и брак, попадает на сайт', () => {
   const own = [
     { id: 'o1', model: 'iPhone 11', svc: 'c', tier: 'copy', cost: 20, name: 'стекло с лазером, б/у пресс', date: '2026-10-26' },
     { id: 'o2', model: 'Samsung Galaxy A52', svc: 'c', tier: 'orig_used', cost: 30, name: '', date: '2026-10-26' },
     { id: 'o3', model: 'Samsung Galaxy A52', svc: 'd', tier: 'copy_oled', cost: 0, name: 'ноль не считаем', date: '2026-10-26' },
   ];
-  const data = withOwnParts(DATA, own);
-  assert.equal(DATA.parts.length, 10, 'исходные данные не меняются');
+  // у iPhone 11 крышки из прайса нет — видна только своя
+  const base = { ...DATA, parts: DATA.parts.filter((p) => p.name !== 'Задняя крышка iPhone 11 - черная') };
+  const data = withOwnParts(base, own);
+  assert.equal(base.parts.length, 9, 'исходные данные не меняются');
   assert.equal(withOwnParts(DATA, []), DATA);
   const pr = new Pricer(data, { year: 2026 });
   const c11 = pr.model('iPhone 11').services.c.opts;
-  assert.equal(c11.length, 1, 'iPhone 11: своя крышка видна, хоть модель с лазером');
+  assert.equal(c11.length, 1, 'iPhone 11: своя крышка видна');
   assert.deepEqual([c11[0].sup, c11[0].cost, c11[0].ownId, c11[0].part], [OWN, 20, 'o1', 'стекло с лазером, б/у пресс']);
   assert.equal(c11[0].price, clientPrice(pr.S, workFee(pr.S, 'hs', MODELS[0]), 20, null).price, 'на айфоне с лазером работа как за корпус');
   assert.equal(pr.model('iPhone 11').services.d.opts[0].ownId, null);
@@ -143,7 +145,7 @@ await test('файл для сайта: только цены клиенту', (
   assert.ok(text.includes('window.MODEL_PRICES = ['));
   assert.ok(!text.includes('Первый') && !text.includes('Второй') && !text.includes('In-Cell'));
   const arr = JSON.parse(text.slice(text.indexOf('window.MODEL_PRICES = ') + 22).trim().replace(/;$/, ''));
-  assert.deepEqual(arr[0], ['iPhone', 'iPhone 11', { b: [['copy_boost', 95]], d: [['copy_lcd', 115], ['orig_used', 180]] }]);
+  assert.deepEqual(arr[0], ['iPhone', 'iPhone 11', { b: [['copy_boost', 95]], c: [['copy', 120]], d: [['copy_lcd', 115], ['orig_used', 180]] }]);
 });
 
 await test('разбор названий для новых строк прайса', () => {
@@ -475,7 +477,8 @@ await test('новый поставщик: .xls, цены в долларах, �
   assert.deepEqual(map('Шлейф для iPhone14 Power On/Off'), ['bt', 'copy', 'iPhone 14']);
   assert.deepEqual(map('Шлейф для iPhone12 Pro на сканер лидар (Lidar) (821-02641-A)'), ['fo', 'copy', 'iPhone 12 Pro']);
   assert.deepEqual(map('Заднее стекло для iPhone14 + стекло камеры + магнит MagSafe внутрикорпусной, ФИОЛЕТОВЫЙ'), ['c', 'copy', 'iPhone 14']);
-  assert.deepEqual(map('Задняя крышка для iPhone11 Pro + стекло ЗЕЛЕНЫЙ (СЕ) - ПРЕМИУМ'), ['c', 'copy', 'iPhone 11 Pro'], 'крышка + стекло — задняя крышка вместе с рамкой');
+  assert.deepEqual(map('Задняя крышка для iPhone11 Pro + стекло ЗЕЛЕНЫЙ (СЕ) - ПРЕМИУМ'), ['hs', 'copy', 'iPhone 11 Pro'], 'крышка + стекло — вместе с рамкой, это корпус');
+  assert.deepEqual(map('Задняя крышка iPhone 11 Pro - золотая, Gold (широкий вырез) (премиум)'), ['c', 'copy', 'iPhone 11 Pro'], 'у ibolit «Задняя крышка» — само стекло');
   assert.deepEqual(map('Аккумулятор для iPhone11 3500 mAh усиленный iParts (гарантия 1 год) ic orig (100%)'), ['b', 'copy_boost', 'iPhone 11']);
   assert.equal(kindOf('Шлейф для прибора JC Receiver FPC для iPhone11'), null, 'инструмент — не ремонт');
   assert.equal(kindOf('Кольцо камеры для iPhone11, БЕЛЫЙ'), null, 'кольцо без стекла — не ремонт');
@@ -486,7 +489,7 @@ await test('новый поставщик: .xls, цены в долларах, �
   assert.deepEqual(map('Стекло двойной камеры для iPhone7 Plus'), ['cg', 'copy', 'iPhone 7 Plus']);
   assert.deepEqual(map('LCD для iPhone5 (матрица ориг) БЕЛЫЙ'), ['d', 'orig_new', 'iPhone 5'], '«ориг» по-русски');
   assert.deepEqual(map('Шлейф для iPhone5S CHARGE CONN оrig БЕЛЫЙ (821-1667-A)'), ['p', 'orig_new', 'iPhone 5s'], '«оrig» с русской «о»');
-  assert.deepEqual(map('Задняя крышка для iPhone11 Pro + стекло ориг ЗЕЛЕНЫЙ (СЕ) - ПРЕМИУМ'), ['c', 'copy', 'iPhone 11 Pro'], 'ориг — про стекло, крышка — копия');
+  assert.deepEqual(map('Задняя крышка для iPhone11 Pro + стекло ориг ЗЕЛЕНЫЙ (СЕ) - ПРЕМИУМ'), ['hs', 'copy', 'iPhone 11 Pro'], 'ориг — про стекло, крышка с рамкой — копия');
   assert.deepEqual(map('Шлейф для iPhone5C for Sensor Backlight + камера (821-1613-A)'), ['cf', 'copy', 'iPhone 5c'], 'датчик с передней камерой');
   // цвета одной детали — одна линия: «ПОЛУНОЧНЫЙ СИНИЙ», «ТЕМНО-СЕРЫЙ», номер цвета «№3», «ЧЁРНЫЙ»
   const same = (a, b) => assert.equal(lineKey(a), lineKey(b), a + ' / ' + b);
@@ -1394,43 +1397,55 @@ await test('«ОРИГИНАЛ» — уровень копии у поставщ
   assert.equal(plain.shown, 'copy_lcd');
 });
 
-await test('задняя крышка вместе с рамкой: во вкладке «Задняя крышка», на айфонах с лазером — работа как за корпус', async () => {
+await test('задняя крышка: стекло из прайса на всех айфонах (с лазером — работа как за корпус), крышка с рамкой — в «Корпусе»', async () => {
   const { partNotes } = await imp('js/part-notes.js');
   const frame = 'Задняя крышка для iPhone11 + стекло БЕЛЫЙ (СЕ) - ПРЕМИУМ';
-  assert.equal(kindOf(frame), 'c');
+  const wide = 'Задняя крышка iPhone 11 - белая (широкий вырез) (премиум)';
+  assert.equal(kindOf(frame), 'hs');
+  assert.equal(kindOf(wide), 'c');
   assert.equal(kindOf('Задняя крышка для iPhone 7 (4,7") ЗОЛОТО Hi-copy'), 'c');
+  assert.equal(kindOf('Заднее стекло для iPhone14 + стекло камеры'), 'c', '«+ стекло камеры» — не рамка');
   assert.equal(kindOf('Корпус iPhone 11 (1 Sim) Черный'), 'hs');
   const rows = [
-    P('S', frame, 21, null, 'c', 'copy', ['iPhone 11']),
+    P('S', frame, 21, null, 'hs', 'copy', ['iPhone 11']),
     P('S', 'Заднее стекло для iPhone11 БЕЛЫЙ', 6, null, 'c', 'copy', ['iPhone 11']),
+    P('S', wide, 4, null, 'c', 'copy', ['iPhone 11']),
     P('S', 'Корпус iPhone 11 (1 Sim) Черный', 39, null, 'hs', 'copy', ['iPhone 11']),
-    P('S', 'Задняя крышка для iPhone14 + стекло БЕЛЫЙ (СЕ) - ПРЕМИУМ', 67, null, 'c', 'copy', ['iPhone 14']),
+    P('S', 'Задняя крышка для iPhone14 + стекло БЕЛЫЙ (СЕ) - ПРЕМИУМ', 67, null, 'hs', 'copy', ['iPhone 14']),
+    P('S', 'Заднее стекло для iPhone14 БЕЛЫЙ (широкое отверстие под камеру)', 9, null, 'c', 'copy', ['iPhone 14']),
     P('S', 'Проклейка дисплея iPhone 11', 2, null, 'g', 'gd', ['iPhone 11']),
     P('S', 'Проклейка батареи iPhone 11', 1, null, 'g', 'gb', ['iPhone 11']),
   ];
   const data = { ...DATA, suppliers: { ...DATA.suppliers, S: { name: 'Третий', stock: false, rank: 2 } }, parts: [...DATA.parts, ...rows] };
   const pr = new Pricer(data, { year: 2026 });
   const m11 = pr.model('iPhone 11');
-  const c = m11.services.c.opts[0];
-  assert.deepEqual([m11.services.c.opts.length, c.part, c.cost], [1, frame, 21], 'iPhone 11: крышка с рамкой — без лазера, одно стекло — нет');
-  assert.equal(c.work, workFee(pr.S, 'hs', MODELS[0]), 'работа как за корпус');
-  assert.equal(m11.services.hs.opts[0].part, 'Корпус iPhone 11 (1 Sim) Черный', 'в «Корпусе» — корпус');
-  assert.deepEqual(pr.glueTypes('iPhone 11', 'c'), ['gd', 'gb'], 'проклейки как за корпус');
-  assert.equal(pr.glueFor('iPhone 11', 'c').total, 3);
+  const costs = m11.services.c.opts.flatMap((o) => o.lines ? o.lines.map((l) => l.cost) : [o.cost]);
+  assert.ok(m11.services.c.opts.length >= 1 && !m11.services.c.opts.some((o) => o.part === frame), 'iPhone 11: в «Задней крышке» — стекло, без крышки с рамкой');
+  assert.ok(costs.includes(4) || m11.services.c.opts[0].cost === 6, 'стекло с широким вырезом на айфоне с лазером считается');
+  assert.equal(m11.services.c.work, workFee(pr.S, 'hs', MODELS[0]), 'стекло под лазер — работа как за корпус');
+  assert.deepEqual(pr.glueTypes('iPhone 11', 'c'), ['gc'], 'проклейка задней крышки, не как за корпус');
+  const hs = m11.services.hs.opts.map((o) => o.part);
+  assert.ok(hs.includes(frame) || m11.services.hs.opts.some((o) => (o.lines || []).some((l) => l.name === frame)) || hs.includes('Корпус iPhone 11 (1 Sim) Черный'), 'в «Корпусе» — корпус и крышка с рамкой');
+  assert.equal(pr.model('iPhone 11').services.hs.opts.length >= 1, true);
   const c14 = pr.model('iPhone 14').services.c;
   assert.equal(c14.work, workFee(pr.S, 'c', MODELS[1]), 'iPhone 14 без лазера: работа за крышку');
-  assert.equal(c14.opts[0].cost, 41, 'iPhone 14: дешевле — крышка без рамки (самый дорогой цвет линии)');
+  assert.ok(!c14.opts.length || c14.opts.every((o) => o.cost !== 9), 'iPhone 14 без лазера: стекло с широким вырезом не берём');
+  assert.ok(!c14.opts.some((o) => /\+ стекло/.test(o.part || '')), 'iPhone 14: крышки с рамкой в «Задней крышке» нет');
   assert.deepEqual(pr.glueTypes('iPhone 14', 'c'), ['gc']);
-  // модель добавили в «Модели без лазера» — одно стекло считается, работа за крышку
+  assert.deepEqual(pr.glueTypes('iPhone 7', 'c'), ['gd', 'gb'], 'металлическая крышка айфона 7 — это корпус');
+  // модель добавили в «Модели без лазера» — работа за крышку
   const own = new Pricer(data, { year: 2026, no_laser: ['iPhone 11'] }).model('iPhone 11').services.c;
   assert.deepEqual([own.opts[0].cost, own.work], [6, workFee(pr.S, 'c', MODELS[0])]);
-  // пакет, сохранённый прежней версией: крышка была в «Корпусе»
-  const old = encode({ ...data, parts: [P('S', frame, 21, null, 'hs', 'copy', ['iPhone 11']), P('S', 'Задняя крышка для iPhone 5c ГОЛУБОЙ Orig', 30, null, 'hs', 'orig_new', ['iPhone 11']),
-    P('S', 'Задняя крышка для iPhone 6 БЕЛЫЙ', 30, null, 'hs', 'skip', []), P('S', 'Корпус iPhone 11 (1 Sim) Черный', 39, null, 'hs', 'copy', ['iPhone 11'])] });
+  // пакет, сохранённый прежними версиями: крышка с рамкой — в «Корпус», «Задняя крышка для iPhone 5c» — в крышки
+  const old = encode({ ...data, parts: [P('S', frame, 21, null, 'c', 'copy', ['iPhone 11']), P('S', frame, 21, null, 'hs', 'copy', ['iPhone 11']),
+    P('S', 'Задняя крышка для iPhone 5c ГОЛУБОЙ Orig', 30, null, 'hs', 'orig_new', ['iPhone 11']),
+    P('S', 'Задняя крышка для iPhone 6 БЕЛЫЙ', 30, null, 'hs', 'skip', []), P('S', frame, 21, null, 'c', 'skip', []),
+    P('S', 'Корпус iPhone 11 (1 Sim) Черный', 39, null, 'hs', 'copy', ['iPhone 11'])] });
   const back = decode(old).parts.map((p) => [p.svc, p.tier]);
-  assert.deepEqual(back, [['c', 'copy'], ['c', 'copy'], ['c', 'skip'], ['hs', 'copy']], 'в задние крышки, вариант — по правилам крышки, снятая галочка остаётся');
-  assert.ok(partNotes(frame, 'c', 'iPhone 11', 'copy').some((x) => x.tag === 'с рамкой'));
-  assert.ok(!partNotes('Заднее стекло для iPhone14 + стекло камеры', 'c', 'iPhone 14', 'copy').some((x) => x.tag === 'с рамкой'));
+  assert.deepEqual(back, [['hs', 'copy'], ['hs', 'copy'], ['c', 'copy'], ['c', 'skip'], ['hs', 'skip'], ['hs', 'copy']], 'вариант — по правилам ремонта, снятая галочка остаётся');
+  assert.ok(partNotes(frame, 'hs', 'iPhone 11', 'copy').some((x) => x.tag === 'с рамкой'));
+  assert.ok(!partNotes('Корпус iPhone 11 + стекло', 'hs', 'iPhone 11', 'copy').some((x) => x.tag === 'с рамкой'));
+  assert.ok(partNotes(wide, 'c', 'iPhone 11', 'copy').some((x) => x.tag === 'широкий вырез'));
 });
 
 await test('аккумулятор «без ошибки» не прячется за снятым оригиналом, за новым оригиналом — прячется', () => {

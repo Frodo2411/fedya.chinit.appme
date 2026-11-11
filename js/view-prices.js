@@ -1,7 +1,8 @@
 // Экран «Цены»: поиск модели, ремонты, варианты деталей с ценой клиенту, поставщиком и заработком.
 
 import { h, fill, icon, money, toast, copyText, openSheet, field, select, parseNum, fmtDate } from './ui.js';
-import { SERVICES, SITE_SERVICES, ORDER, OWN, FRAME_BACK, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, sfKey, GLUE_NAME } from './engine.js';
+import { SERVICES, SITE_SERVICES, ORDER, OWN, clientPrice, riskReserve, comboTotal, diffCoef, noveltyCoef, sfKey, GLUE_NAME } from './engine.js';
+import { FRAME_BACK } from './rules.js';
 import { store, newId, today } from './store.js';
 import { telHref } from './view-orders.js';
 import { cartQty } from './cart.js';
@@ -83,7 +84,7 @@ export function cartGlues(pricer, model, svcs) {
 // Пояснения для клиента, по тексту с сайта
 function clientHint(svc, tier, model, part) {
   const iphone = model.startsWith('iPhone');
-  if (svc === 'c' && FRAME_BACK.test(part || '')) return 'крышка вместе с рамкой: телефон переносится в новый корпус';
+  if (svc === 'hs' && FRAME_BACK.test(part || '')) return 'крышка вместе с рамкой: телефон переносится в новый корпус';
   if (svc === 'b') {
     return {
       copy: iphone ? 'не от производителя; на iPhone может появиться сообщение о неизвестной детали, процент износа не виден' : 'батарея не от производителя телефона',
@@ -490,9 +491,8 @@ export function createPricesView(app) {
     const hsFrom = hs.length ? Math.min(...hs.map((o) => priceOf(e, 'hs', o).price)) : null;
     let why;
     if (laser) {
-      why = h('div', {}, 'На этой модели заднее стекло снимается только лазером: из прайса здесь считается только крышка вместе с рамкой («Задняя крышка … + стекло»), а её у поставщиков нет.',
-        h('br'), 'Если меняешь одно стекло лазером (сам или отдаёшь) — впиши свою деталь или добавь модель в «Ещё → Расчёт цены → Модели без лазера».',
-        hsFrom ? h('div', { style: 'margin-top:8px' }, 'Без лазера меняют корпус целиком.') : null);
+      why = h('div', {}, 'Заднего стекла для этой модели у поставщиков нет. Купил его в другом месте — впиши свою деталь.',
+        hsFrom ? h('div', { style: 'margin-top:8px' }, 'Без лазера меняют корпус целиком (там же крышка вместе с рамкой).') : null);
     } else if (chosen().length) {
       why = h('div', {}, 'У ' + supNames(chosen()) + ' нет ' + (noParts ? 'деталей для этой модели.' : 'детали для этого ремонта.'));
     } else if (noParts) {
