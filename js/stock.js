@@ -33,3 +33,10 @@ export function stockPositions(rows, orders = []) {
   }
   return [...items.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru') || a.model.localeCompare(b.model, 'ru'));
 }
+
+export function currentStock(sheet, orders = sheet.orders()) {
+  const archiving = new Set(sheet.outbox.filter((op) => op.op === 'archiveStock').map((op) => op.fields.item));
+  const items = stockPositions(sheet.cache?.stock ?? [], orders);
+  for (const item of items) if (archiving.has(item.id)) item.archived = true;
+  return items;
+}

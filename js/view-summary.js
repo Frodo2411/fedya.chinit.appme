@@ -4,6 +4,7 @@ import { h, fill, money, fmtDate, monthTitle, toast, openSheet, field, select, p
 import { summary, statusCounts, months, sourceSummary } from './orders.js';
 import { today } from './store.js';
 import { connectCard } from './view-orders.js';
+import { currentStock, stockCost } from './stock.js';
 
 export function createSummaryView(app) {
   const st = { month: today().slice(0, 7) };
@@ -25,6 +26,8 @@ export function createSummaryView(app) {
     const expenses = app.sheet.expenses();
     const wm = app.sheet.lists.warrantyMonths;
     const s = summary(orders, expenses, st.month, wm);
+    const stockValue = Array.isArray(app.sheet.cache?.stock)
+      ? stockCost(currentStock(app.sheet, orders).filter((item) => !item.archived && item.qty > 0)) : null;
     const now = statusCounts(orders);
     const ms = [...new Set([today().slice(0, 7), ...months(orders, expenses)])].sort().reverse().slice(0, 12);
     const monthExpenses = expenses.filter((e) => (e.date || '').startsWith(st.month)).sort((a, b) => String(b.date).localeCompare(String(a.date)));
@@ -39,6 +42,10 @@ export function createSummaryView(app) {
         tile('Принято заказов', String(s.taken)), tile('Выдано', String(s.issued)),
         tile('Выручка', money(s.revenue)), tile('Прибыль с заказов', money(s.profit)),
         tile('Расходы', money(s.expenses)), tile('Чистая прибыль', money(s.net), true)),
+      stockValue !== null ? h('div', { class: 'card row wrap', style: 'margin-top:12px' },
+        h('div', { class: 'grow' }, h('b', { text: 'Склад сейчас' }),
+          h('div', { class: 'small muted', text: 'Закупочная стоимость текущих остатков' })),
+        h('b', { class: 'nowrap', text: money(stockValue) })) : null,
       s.stockCost ? h('div', { class: 'small muted', style: 'margin-top:10px' },
         'Детали со склада в себестоимости заказов: ', h('b', { text: money(s.stockCost) }), '. Уже учтены в прибыли.') : null,
       s.warranty ? h('div', { class: 'small muted', style: 'margin-top:10px' },
