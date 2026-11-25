@@ -1,15 +1,9 @@
 // Склад: позиции и журнал движений общей Google Таблицы.
 import { h, fill, field, select, openSheet, parseNum, money, fmtDate, toast } from './ui.js';
 import { STOCK_VERSION, STOCK_ARCHIVE_VERSION, STOCK_OPS } from './sheet.js';
-import { stockPositions } from './stock.js';
+import { currentStock } from './stock.js';
 import { norm } from './search.js';
 
-function getItems(app) {
-  const archiving = new Set(app.sheet.outbox.filter((op) => op.op === 'archiveStock').map((op) => op.fields.item));
-  const items = stockPositions(app.sheet.cache?.stock ?? [], app.sheet.orders());
-  for (const item of items) if (archiving.has(item.id)) item.archived = true;
-  return items;
-}
 export const stockReady = (app) => app.sheet.connected && Array.isArray(app.sheet.cache?.stock);
 const MAX = 1000000;
 
@@ -22,6 +16,8 @@ function stockQueue(app, kind, fields, modal) {
 function stockInput(value = '', attrs = {}) {
   return h('input', { class: 'input', value, autocomplete: 'off', ...attrs });
 }
+
+const modelKey = (text) => norm(text).split(' ').sort().join(' ');
 
 function modelPicker(app, value = '') {
   const customValue = ':custom';
@@ -38,8 +34,8 @@ function modelPicker(app, value = '') {
     const query = search.value.trim();
     const hits = query ? app.search.find(query).map((model) => model.model) : catalog;
     if (typing) {
-      const words = (text) => norm(text).split(' ').sort().join(' ');
-      const exact = query && hits.find((model) => words(model) === words(query));
+      const key = modelKey(query);
+      const exact = key && hits.find((model) => modelKey(model) === key);
       if (exact || selectedBySearch) chosen = exact || '';
       selectedBySearch = !!exact;
       customField.hidden = chosen !== customValue;
@@ -69,7 +65,7 @@ export function createStockView(app) {
 
   function drawItems() {
     const q = search.value.trim().toLowerCase().replace(/ё/g, 'е');
-    const items = getItems(app).filter((x) => !x.archived && (x.name + ' ' + x.model).toLowerCase().replace(/ё/g, 'е').includes(q));
+    const items = currentStock(app.sheet).filter((x) => !x.archived && (x.name + ' ' + x.model).toLowerCase().replace(/ё/g, 'е').includes(q));
     fill(list, items.length ? h('div', { class: 'list', style: 'margin-top:12px' }, items.map((item) =>
       h('button', { class: 'item', type: 'button', onclick: () => openPosition(app, item.id) },
         h('div', { class: 'grow' }, h('div', { class: 't', text: item.name }),
@@ -144,7 +140,7 @@ function openStockEditor(app, item) {
 }
 
 function openPosition(app, id) {
-  const item = getItems(app).find((x) => x.id === id && !x.archived);
+  const item = currentStock(app.sheet).find((x) => x.id === id && !x.archived);
   if (!item) return;
   const body = h('div', {},
     h('p', { class: 'muted', text: [item.model, item.qty + ' шт. в наличии', money(item.cost) + ' / шт.'].filter(Boolean).join(' · ') }),
@@ -169,7 +165,7 @@ function openPosition(app, id) {
         app.openSheetSetup();
         return toast('Для удаления со склада обнови Apps Script до версии ' + STOCK_ARCHIVE_VERSION);
       }
-      const latest = getItems(app).find((position) => position.id === id && !position.archived);
+      const latest = currentStock(app.sheet).find((position) => position.id === id && !position.archived);
       if (!latest) { modal.close(); return; }
       if (!confirm('Удалить «' + latest.name + '» со склада? В архив уйдёт позиция с остатком ' + latest.qty + ' шт.')) return;
       stockQueue(app, 'archiveStock', { item: id, expectedQty: latest.qty }, modal);
@@ -189,17 +185,23 @@ function openMovement(app, { item, restock = false }) {
     h('button', { class: 'btn primary', text: restock ? 'Пополнить' : 'Списать', onclick: () => {
       const count = parseNum(qty.value);
       if (!Number.isSafeInteger(count) || count < 1 || count > MAX) return toast('Впиши целое количество от 1 до ' + MAX);
-      const latest = getItems(app).find((x) => x.id === item.id);
+      const latest = currentStock(app.sheet).find((x) => x.id === item.id);
       if (!restock && count > (latest?.qty || 0)) return toast('На складе осталось ' + (latest?.qty || 0) + ' шт.');
       stockQueue(app, 'moveStock', { item: item.id, qty: restock ? count : -count, note: note.value.trim() }, modal);
     } }),
   ]);
 }
 
+function compatibleModels(model) {
+  const names = model.split(/\s*(?:[,;/|]|\s+и\s+)\s*/i);
+  const prefix = names[0].match(/^[^\d]+/)?.[0] || '';
+  return names.map((name, i) => modelKey(i && /^\d/.test(name) ? prefix + name : name));
+}
+
 export function openOrderStockPicker(app, { model, initial, current, editing, estimates, onPick }) {
   const original = new Map(initial.map((part) => [part.item, part]));
   const canonical = app.findModel(model);
-  const options = getItems(app)
+  const options = currentStock(app.sheet)
     .map((item) => {
       const reserved = original.get(item.id)?.qty || 0;
       return { ...item, qty: item.archived ? reserved : item.qty + reserved };
@@ -212,14 +214,35 @@ export function openOrderStockPicker(app, { model, initial, current, editing, es
   const taken = new Set(current.filter((part) => part !== editing).map((part) => part.replaces).filter(Boolean));
   const planned = estimates.filter((part) => !taken.has(part.id));
   const inputQty = stockInput(editing?.qty || '1', { inputmode: 'numeric' });
-  const choices = options.map((item) => ({
-    value: item.id,
-    label: [item.name, item.model, item.qty + ' шт.', money(original.get(item.id)?.cost ?? item.cost) + ' / шт.'].filter(Boolean).join(' · '),
-  }));
+  const label = (item) => [item.model, item.qty + ' шт.', money(original.get(item.id)?.cost ?? item.cost) + ' / шт.']
+    .filter(Boolean).join(' · ');
+  const matches = h('div');
+  const search = stockInput(canonical || '', { type: 'search', placeholder: 'Например, айфон 12 или проклейка',
+    oninput: () => drawMatches() });
+  function drawMatches() {
+    const query = search.value.trim().toLowerCase().replace(/ё/g, 'е');
+    const key = modelKey(query);
+    const terms = key.split(' ').filter(Boolean);
+    const modelQuery = key && app.search.find(query).some((entry) => modelKey(entry.model) === key);
+    const rows = query ? options.filter((item) => {
+      if (modelQuery) return compatibleModels(item.model).includes(key);
+      const text = (item.name + ' ' + item.model).toLowerCase().replace(/ё/g, 'е');
+      const words = norm(text).split(' ');
+      return text.includes(query) || (terms.length > 0 && terms.every((term) => words.some((word) => word.startsWith(term))));
+    }) : options;
+    if (chosen && !rows.includes(chosen)) chosen = null;
+    fill(matches, rows.length ? h('div', { class: 'list', style: 'max-height:min(38vh,280px);overflow-y:auto' },
+      rows.map((item) => h('button', { class: 'item', type: 'button', 'aria-pressed': String(chosen === item),
+        onclick: () => { chosen = item; drawMatches(); } },
+      h('div', { class: 'grow' }, h('div', { class: 't', text: item.name }), h('div', { class: 's', text: label(item) })),
+      chosen === item ? h('span', { class: 'badge', text: 'Выбрано' }) : null)))
+      : h('div', { class: 'empty', text: 'По этому запросу деталей в наличии нет.' }));
+  }
+  if (!editing && options.length) drawMatches();
   const body = h('div', {},
     options.length ? [
-      editing ? h('p', { class: 'muted', text: choices[0].label })
-        : field('Позиция на складе', select(choices, '', (id) => { chosen = options.find((item) => item.id === id); }, { empty: 'Выбрать' })),
+      editing ? h('p', { class: 'muted', text: chosen.name + ' · ' + label(chosen) })
+        : [field('Найти модель или деталь', search), matches],
       field('Количество, шт.', inputQty),
       planned.length ? field('Вместо позиции из расчёта', select(planned.map((part) => ({ value: part.id, label: part.name + ' · ' + money(part.cost) })),
         replacement, (value) => { replacement = value; }, { empty: 'Дополнительная деталь' }),
