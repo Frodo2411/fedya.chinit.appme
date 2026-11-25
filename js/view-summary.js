@@ -39,6 +39,8 @@ export function createSummaryView(app) {
         tile('Принято заказов', String(s.taken)), tile('Выдано', String(s.issued)),
         tile('Выручка', money(s.revenue)), tile('Прибыль с заказов', money(s.profit)),
         tile('Расходы', money(s.expenses)), tile('Чистая прибыль', money(s.net), true)),
+      s.stockCost ? h('div', { class: 'small muted', style: 'margin-top:10px' },
+        'Детали со склада в себестоимости заказов: ', h('b', { text: money(s.stockCost) }), '. Уже учтены в прибыли.') : null,
       s.warranty ? h('div', { class: 'small muted', style: 'margin-top:10px' },
         'Гарантийных ремонтов: ', h('b', { text: String(s.warranty) }), ', запчасти на них ', h('b', { text: money(s.warrantyCost) }),
         ' — уже вычтены из прибыли.') : null,

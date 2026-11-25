@@ -1,6 +1,7 @@
 // Заказы и расходы: те же расчёты, что формулы в Google Таблице (Прибыль, К оплате, Гарантия до, Итоги).
 
 import { orderDiscount } from './discount.js';
+import { stockCost } from './stock.js';
 
 export const DEFAULT_LISTS = {
   sources: ['Kufar', 'Onliner', 'Threads', 'Instagram', 'Сарафан', 'Повторное обращение', 'Другое'],
@@ -52,7 +53,7 @@ export function computed(o, warrantyMonths) {
 // Гарантийные ремонты считаются, как в таблице (запчасть уходит в минус прибыли), и отдельно: сколько их и во что обошлись.
 // Скидки уже в цене заказа (выручка и прибыль с ними), отдельно — сколько выдано со скидкой и сколько ею отдано
 export function summary(orders, expenses, month, warrantyMonths) {
-  const s = { taken: 0, issued: 0, revenue: 0, profit: 0, expenses: 0, net: 0, warranty: 0, warrantyCost: 0, discounted: 0, discountSum: 0 };
+  const s = { taken: 0, issued: 0, revenue: 0, profit: 0, expenses: 0, net: 0, warranty: 0, warrantyCost: 0, discounted: 0, discountSum: 0, stockCost: 0 };
   for (const o of orders) {
     const c = computed(o, warrantyMonths);
     if (monthOf(o.date) === month) s.taken++;
@@ -68,6 +69,7 @@ export function summary(orders, expenses, month, warrantyMonths) {
     }
     if (o.status === 'Выдан' || o.status === 'Отказ') {
       s.profit += c.profit || 0;
+      if (o.status !== 'Отказ' || o.refusal !== 'Вернул') s.stockCost += stockCost(o.stockUse?.items);
       if (isWarranty(o)) {
         s.warranty++;
         s.warrantyCost += num(o.part);
@@ -76,6 +78,7 @@ export function summary(orders, expenses, month, warrantyMonths) {
   }
   for (const e of expenses) if (monthOf(e.date) === month) s.expenses += num(e.sum);
   s.net = s.profit - s.expenses;
+  s.stockCost = Math.round(s.stockCost * 100) / 100;
   return s;
 }
 

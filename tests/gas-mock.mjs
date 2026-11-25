@@ -32,13 +32,26 @@ export function makeBook(json) {
     return v;
   }
   class Sheet {
-    constructor(name, cells) { this.name = name; this.rows = cells; this.hidden = false; this.writes = 0; this.maxColumns = Math.max(26, ...cells.map((r) => r.length)); }
+    constructor(name, cells) { this.name = name; this.rows = cells; this.hidden = false; this.writes = 0; this.maxColumns = Math.max(26, ...cells.map((r) => r.length)); this.hiddenColumns = new Set(); }
     cell(r, c) { while (this.rows.length < r) this.rows.push([]); const row = this.rows[r - 1]; while (row.length < c) row.push({ v: '', f: '', fmt: '' }); return row[c - 1]; }
     getName() { return this.name; }
     getLastRow() { let last = 0; this.rows.forEach((row, i) => { if (row.some((x) => x.v !== '' || x.f)) last = i + 1; }); return last; }
     getLastColumn() { let last = 0; for (const row of this.rows) row.forEach((x, j) => { if ((x.v !== '' || x.f) && j + 1 > last) last = j + 1; }); return last; }
     getMaxColumns() { return this.maxColumns; }
     insertColumnsAfter(c, n) { if (c !== this.maxColumns) throw new Error('mock only supports adding columns at the end'); this.maxColumns += n; }
+    insertColumnAfter(c) {
+      this.rows.forEach((row) => { if (c < row.length) row.splice(c, 0, { v: '', f: '', fmt: '' }); });
+      this.maxColumns++;
+      return this;
+    }
+    moveColumns(range, destination) {
+      for (const row of this.rows) {
+        while (row.length < Math.max(range.c, destination)) row.push({ v: '', f: '', fmt: '' });
+        const [col] = row.splice(range.c - 1, 1);
+        row.splice(destination - (range.c < destination ? 2 : 1), 0, col);
+      }
+    }
+    hideColumns(c, n = 1) { for (let i = c; i < c + n; i++) this.hiddenColumns.add(i); }
     appendRow(values) { this.getRange(this.getLastRow() + 1, 1, 1, values.length).setValues([values]); return this; }
     setFrozenRows(rows) { this.frozenRows = rows; }
     getRange(r, c, nr = 1, nc = 1) { if (r < 1 || c < 1) throw new Error('bad range'); return new Range(this, r, c, nr, nc); }
