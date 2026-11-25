@@ -15,7 +15,8 @@ export const DEVICES_VERSION = 5;
 // Склад, причина отказа и предложенная сумма
 export const STOCK_VERSION = 6;
 export const ORDER_STOCK_VERSION = 7;
-export const STOCK_OPS = ['addStock', 'editStock', 'moveStock'];
+export const STOCK_ARCHIVE_VERSION = 8;
+export const STOCK_OPS = ['addStock', 'editStock', 'moveStock', 'archiveStock'];
 
 export class SheetSync {
   constructor(onChange) {
