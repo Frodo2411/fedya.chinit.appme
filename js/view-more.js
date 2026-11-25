@@ -7,14 +7,14 @@ import { openImport } from './import-flow.js';
 import { withRate, oddRate } from './importer.js';
 import { monthTitle } from './ui.js';
 import { publishSite, publishHosting, siteToken, setSiteToken, siteKey, setSiteKey } from './site-publish.js';
-import { SCRIPT_VERSION, DELETE_VERSION, DEVICES_VERSION } from './sheet.js';
+import { SCRIPT_VERSION, DELETE_VERSION, DEVICES_VERSION, STOCK_VERSION } from './sheet.js';
 import { discounted, discountNote, promoEnd } from './discount.js';
 
 const numText = (x) => String(Math.round(Number(x) * 100) / 100).replace('.', ',');
 import { today } from './store.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-11-11.1';
+export const APP_VERSION = '2026-11-25.1';
 
 export function createMoreView(app) {
   const root = h('div');
@@ -394,7 +394,8 @@ export function openSheetSetup(app) {
   const urlTail = (u) => '…' + String(u || '').replace(/\/exec\/?$/, '').slice(-8) + '/exec';
   const versionLine = (v) => (v === null || v === undefined ? '' : ' · скрипт версии ' + v + (v < SCRIPT_VERSION ? ' — старый, нужна ' + SCRIPT_VERSION + ': обнови код и разверни новую версию'
     : v < DELETE_VERSION ? ' — удалять заказы можно с версии ' + DELETE_VERSION + ': обнови код и разверни новую версию'
-      : v < DEVICES_VERSION ? ' — выкуп устройств работает с версии ' + DEVICES_VERSION + ': обнови код и разверни новую версию' : ''));
+      : v < DEVICES_VERSION ? ' — выкуп устройств работает с версии ' + DEVICES_VERSION + ': обнови код и разверни новую версию'
+        : v < STOCK_VERSION ? ' — для склада и новых полей отказа обнови скрипт до версии ' + STOCK_VERSION : ''));
   if (app.sheet.connected) fill(status, h('span', { style: app.sheet.version !== null && app.sheet.version < SCRIPT_VERSION ? 'color:var(--accent)' : null, text: 'Сейчас подключено: адрес ' + urlTail(app.sheet.cfg.url) + versionLine(app.sheet.version) }));
   // Код загружаем заранее: на айфоне копировать можно только сразу в обработчике нажатия, без ожидания сети
   let code = null;

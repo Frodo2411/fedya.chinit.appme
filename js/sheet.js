@@ -12,6 +12,9 @@ export const SCRIPT_VERSION = 3;
 export const DELETE_VERSION = 4;
 // С какой версии скрипт работает с выкупленными устройствами (листы «Устройства» и «Запчасти»)
 export const DEVICES_VERSION = 5;
+// Склад, причина отказа и предложенная сумма
+export const STOCK_VERSION = 6;
+export const STOCK_OPS = ['addStock', 'editStock', 'moveStock'];
 
 export class SheetSync {
   constructor(onChange) {

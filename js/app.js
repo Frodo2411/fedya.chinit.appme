@@ -7,7 +7,7 @@ import { decode, encode } from './data.js';
 import { Pricer, withOwnParts } from './engine.js';
 import { ModelSearch } from './search.js';
 import { store } from './store.js';
-import { SheetSync } from './sheet.js';
+import { SheetSync, STOCK_OPS } from './sheet.js';
 import { createPricesView, REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
 import { createOrdersView, openOrderForm } from './view-orders.js';
 import { createSummaryView } from './view-summary.js';
@@ -15,6 +15,7 @@ import { createDevicesView } from './view-devices.js';
 import { DEVICE_OPS } from './devices.js';
 import { createMoreView, openSheetSetup } from './view-more.js';
 import { createCartView } from './view-cart.js';
+import { createStockView } from './view-stock.js';
 import { cartAdd, cartQty, cartCount } from './cart.js';
 
 // ownParts — свои детали (цену вписал сам), см. withOwnParts в engine.js; cart — корзина (cart.js),
@@ -307,9 +308,10 @@ async function syncBackups() {
 }
 
 // --- Оболочка
-const TABS = [['prices', 'Цены', 'tag'], ['cart', 'Корзина', 'cart'], ['orders', 'Заказы', 'list'], ['devices', 'Выкуп', 'phone'], ['summary', 'Итоги', 'chart'], ['more', 'Ещё', 'more']];
+const TABS = [['prices', 'Цены', 'tag'], ['cart', 'Корзина', 'cart'], ['orders', 'Заказы', 'list'], ['stock', 'Склад', 'box'],
+  ['devices', 'Выкуп', 'phone'], ['summary', 'Итоги', 'chart'], ['more', 'Ещё', 'more']];
 // Разделы, которые показывают данные таблицы: перерисовать, когда она ответила
-const SHEET_TABS = ['orders', 'summary', 'devices'];
+const SHEET_TABS = ['orders', 'summary', 'devices', 'stock'];
 const scrolls = {};
 let tabbar = null;
 let mainEl = null;
@@ -319,7 +321,8 @@ function drawTabbar() {
   // не отправленное и не записавшееся — значком на своём разделе: заказы и расходы или выкуп
   const ops = [...app.sheet.outbox, ...app.sheet.failed];
   const pendingDevices = ops.filter((o) => DEVICE_OPS.includes(o.op)).length;
-  const pending = ops.length - pendingDevices;
+  const pendingStock = ops.filter((o) => STOCK_OPS.includes(o.op)).length;
+  const pending = ops.length - pendingDevices - pendingStock;
   const toBuy = cartCount(app.settings.cart);
   // название с логотипом — только в меню слева на компьютере
   fill(tabbar, h('div', { class: 'brand' }, h('img', { src: 'icons/icon-180.png', alt: '' }), 'Федя чинит'), ...TABS.map(([id, label, ic]) => h('button', {
@@ -327,6 +330,7 @@ function drawTabbar() {
     onclick: () => switchTab(id),
   }, icon(ic), label, id === 'orders' && pending ? h('span', { class: 'dot', text: String(pending) }) : null,
   id === 'devices' && pendingDevices ? h('span', { class: 'dot', text: String(pendingDevices) }) : null,
+  id === 'stock' && pendingStock ? h('span', { class: 'dot', text: String(pendingStock) }) : null,
   id === 'cart' && toBuy ? h('span', { class: 'dot cart', text: String(toBuy) }) : null)));
 }
 
@@ -354,6 +358,7 @@ function startUI() {
     prices: createPricesView(app),
     cart: createCartView(app),
     orders: createOrdersView(app),
+    stock: createStockView(app),
     devices: createDevicesView(app),
     summary: createSummaryView(app),
     more: createMoreView(app),

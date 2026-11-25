@@ -10,6 +10,8 @@ const SHEET_SETTINGS = 'Настройки';
 const SHEET_APP = 'Приложение (служебный)';
 const SHEET_DEVICES = 'Устройства';
 const SHEET_PARTS = 'Запчасти';
+const SHEET_STOCK = 'Склад (журнал)';
+const STOCK_HEAD = ['ID операции', 'ID позиции', 'Действие', 'Дата', 'Название', 'Модель', 'Цена, BYN', 'Количество', 'Заказ №', 'Примечание'];
 
 // Столбцы ищутся по заголовкам, порядок в таблице можно менять
 const ORDER_COLS = {
@@ -17,7 +19,7 @@ const ORDER_COLS = {
   device: 'Устройство', model: 'Модель', problem: 'Неисправность', done: 'Что сделано', price: 'Цена для клиента',
   part: 'Запчасть', profit: 'Прибыль', prepay: 'Предоплата', due: 'К оплате', urgent: 'Срочно', status: 'Статус',
   issued: 'Дата выдачи', warranty: 'Гарантия до', refusal: 'Если отказ', comment: 'Комментарий', month: 'Месяц',
-  wfor: 'Гарантия по №',
+  wfor: 'Гарантия по №', refusalReason: 'Причина отказа', quoted: 'Предложенная сумма',
 };
 const EXPENSE_COLS = { date: 'Дата', what: 'Что купил', cat: 'Категория', sum: 'Сумма', where: 'Где купил', comment: 'Комментарий' };
 // Выкупленные устройства и их запчасти. Заголовки на этих листах во второй строке (в первой — подсказка).
@@ -32,16 +34,16 @@ const PART_COLS = { dnum: '№ устройства', name: 'Запчасть', 
 const DEVICE_HEAD = ['№', 'Устройство', 'Цена покупки'];
 const PART_HEAD = ['№ устройства', 'Запчасть'];
 const DATE_KEYS = ['date', 'issued', 'warranty', 'month', 'soldDate'];
-const NUMBER_KEYS = ['num', 'price', 'part', 'profit', 'prepay', 'due', 'sum', 'wfor', 'buy', 'other', 'plan', 'sold', 'dnum'];
-const TEXT_KEYS = ['client', 'address', 'source', 'device', 'model', 'problem', 'done', 'urgent', 'status', 'refusal', 'comment', 'what', 'cat', 'where', 'name', 'note'];
+const NUMBER_KEYS = ['num', 'price', 'part', 'profit', 'prepay', 'due', 'sum', 'wfor', 'buy', 'other', 'plan', 'sold', 'dnum', 'quoted'];
+const TEXT_KEYS = ['client', 'address', 'source', 'device', 'model', 'problem', 'done', 'urgent', 'status', 'refusal', 'comment', 'what', 'cat', 'where', 'name', 'note', 'refusalReason'];
 // Эти столбцы считает сама таблица
 const FORMULA_KEYS = ['profit', 'due', 'warranty', 'month'];
 // Этих столбцов в старой таблице может не быть: скрипт добавит их в конец, когда понадобятся
-const OPTIONAL_COLS = ['wfor'];
+const OPTIONAL_COLS = ['wfor', 'refusalReason', 'quoted'];
 // Гарантийные заказы нумеруются отдельно: Г1, Г2…
 const WARRANTY_PREFIX = 'Г';
-// 3 — номер гарантийного пишется и поверх формулы в «№»; 4 — удаление заказа; 5 — выкупленные устройства и их запчасти
-const VERSION = 5;
+// 3 — номер гарантийного поверх формулы в «№»; 4 — удаление заказа; 5 — выкуп; 6 — склад и поля отказа
+const VERSION = 6;
 
 function doGet(e) {
   // Просто открыть адрес в браузере — проверка, что скрипт развёрнут правильно. Данных без ключа не отдаём.
@@ -75,7 +77,7 @@ function respond_(req) {
 const API_ = {
   ping: function () { return { title: book_().getName(), lists: lists_(), version: VERSION }; },
   list: function () {
-    return Object.assign({ title: book_().getName(), orders: readOrders_(), expenses: readExpenses_(), lists: lists_(), version: VERSION }, devicesData_());
+    return Object.assign({ title: book_().getName(), orders: readOrders_(), expenses: readExpenses_(), lists: lists_(), version: VERSION, stock: readStock_() }, devicesData_());
   },
   batch: function (req) { return withLock_(function () { return (req.ops || []).map(runOp_); }); },
   kvGet: function (req) { return kvGet_(req.name); },
@@ -227,6 +229,7 @@ function runOp_(op) {
     else if (op.op === 'addPart') res = addPart_(op, pend[op.id], reserve);
     else if (op.op === 'updatePart') res = updatePart_(op);
     else if (op.op === 'deletePart') res = deletePart_(op);
+    else if (op.op === 'addStock' || op.op === 'editStock' || op.op === 'moveStock') res = appendStock_(op);
     else throw new Error('Неизвестная операция: ' + op.op);
     res.ok = true;
   } catch (err) {
@@ -264,6 +267,7 @@ function ensureCols_(sh, cols, spec, fields) {
   Object.keys(fields || {}).forEach(function (k) {
     if (cols[k] || !spec[k] || OPTIONAL_COLS.indexOf(k) < 0) return;
     const c = sh.getLastColumn() + 1;
+    if (c > sh.getMaxColumns()) sh.insertColumnsAfter(sh.getMaxColumns(), c - sh.getMaxColumns());
     sh.getRange(1, c).setValue(spec[k]);
     cols[k] = c;
   });
@@ -570,6 +574,72 @@ function deletePart_(op) {
   const row = partRow_(t, op);
   t.sh.deleteRow(row);
   return { row: row, deleted: true };
+}
+
+// --- Склад. Каждое действие записывается одной строкой. Остаток проверяет сервер под блокировкой batch.
+function stockRows_(sh) {
+  if (!sh || !sh.getLastRow()) return [];
+  const values = sh.getRange(1, 1, sh.getLastRow(), STOCK_HEAD.length).getValues();
+  if (STOCK_HEAD.some(function (title, i) { return values[0][i] !== title; })) return null;
+  return values.slice(1).filter(function (r) { return r[0] && r[1] && r[2]; });
+}
+
+function readStock_() {
+  const rows = stockRows_(book_().getSheetByName(SHEET_STOCK));
+  return rows && rows.map(function (r) {
+    return { id: r[0], item: r[1], kind: r[2], date: toJson_('date', r[3]), name: r[4], model: r[5], cost: r[6], qty: r[7], order: r[8], note: r[9] };
+  });
+}
+
+function stockText_(value, max) { return String(value === undefined || value === null ? '' : value).trim().slice(0, max); }
+
+function appendStock_(op) {
+  if (typeof op.id !== 'string' || !/^[\w-]{5,100}$/.test(op.id)) throw new Error('Нет идентификатора складской операции');
+  const f = op.fields || {};
+  const book = book_();
+  let sh = book.getSheetByName(SHEET_STOCK);
+  const rows = stockRows_(sh);
+  if (!rows) throw new Error('Проверь заголовки листа «' + SHEET_STOCK + '»');
+  if (rows.some(function (r) { return r[0] === op.id; })) return { row: null, repeat: true };
+  const adding = op.op === 'addStock';
+  const editing = op.op === 'editStock';
+  const item = adding ? op.id : f.item;
+  const history = rows.filter(function (r) { return r[1] === item; });
+  const position = history.filter(function (r) { return r[2] === 'addStock' || r[2] === 'editStock'; }).pop();
+  if (!adding && !position) throw new Error('Позиция на складе не найдена. Обнови список.');
+  const qty = editing ? 0 : f.qty;
+  if (!Number.isSafeInteger(qty) || Math.abs(qty) > 1000000 || (adding && qty < 0) || (!adding && !editing && qty === 0)) {
+    throw new Error('Проверь количество');
+  }
+  const cost = adding || editing ? f.cost : position[6];
+  const name = adding || editing ? stockText_(f.name, 160) : '';
+  if (adding || editing) {
+    if (!name || typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0 || cost > 1000000) throw new Error('Заполни название и закупочную цену');
+  }
+  const available = history.reduce(function (sum, r) { return sum + Number(r[7] || 0); }, 0);
+  if (available + qty < 0) throw new Error('Недостаточно на складе. Сейчас в наличии: ' + available + ' шт.');
+  let order = '';
+  if (f.order !== undefined && f.order !== null && f.order !== '') {
+    if (op.op !== 'moveStock' || qty >= 0) throw new Error('К заказу можно привязать только списание');
+    const orders = sheet_(SHEET_ORDERS);
+    const columns = columns_(orders, ORDER_COLS);
+    const row = orderRow_(orders, columns, { num: f.order });
+    const values = orders.getRange(row, 1, 1, orders.getLastColumn()).getValues()[0];
+    const record = {};
+    Object.keys(columns).forEach(function (k) { record[k] = toJson_(k, values[columns[k] - 1]); });
+    if (!hasData_(record)) {
+      throw new Error('Заказ закрыт или удалён');
+    }
+    order = numKey_(f.order);
+  }
+  if (!sh) sh = book.insertSheet(SHEET_STOCK);
+  if (!sh.getLastRow()) {
+    sh.appendRow(STOCK_HEAD);
+    sh.setFrozenRows(1);
+  }
+  sh.appendRow([asText_(op.id), asText_(item), op.op, new Date(), asText_(name), asText_(adding || editing ? stockText_(f.model, 120) : ''),
+    Math.round(cost * 100) / 100, qty, asText_(order), asText_(stockText_(f.note, 500))]);
+  return { row: sh.getLastRow() };
 }
 
 // --- Служебный лист для резервной копии данных приложения (зашифрованы, читать их без пароля нельзя)
