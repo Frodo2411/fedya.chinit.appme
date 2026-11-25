@@ -6,6 +6,7 @@ import { norm } from './search.js';
 
 export const stockReady = (app) => app.sheet.connected && Array.isArray(app.sheet.cache?.stock);
 const MAX = 1000000;
+const MODEL_TEXT_LIMIT = 120;
 
 function stockQueue(app, kind, fields, modal) {
   app.sheet.add(kind, fields);
@@ -20,38 +21,47 @@ function stockInput(value = '', attrs = {}) {
 const modelKey = (text) => norm(text).split(' ').sort().join(' ');
 
 function modelPicker(app, value = '') {
-  const customValue = ':custom';
-  const catalog = [...new Set(app.data.models.map((model) => model.model))]
-    .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
-  let chosen = !value || catalog.includes(value) ? value : customValue;
-  let selectedBySearch = false;
-  const custom = stockInput(chosen === customValue ? value : '', { maxLength: 120 });
-  const customField = field('Своя модель или совместимость', custom);
-  const target = h('div');
-  const search = stockInput('', { type: 'search', placeholder: 'Например, iPhone 12 или Galaxy A54',
-    oninput: () => draw(true) });
-  function draw(typing = false) {
-    const query = search.value.trim();
-    const hits = query ? app.search.find(query).map((model) => model.model) : catalog;
-    if (typing) {
-      const key = modelKey(query);
-      const exact = key && hits.find((model) => modelKey(model) === key);
-      if (exact || selectedBySearch) chosen = exact || '';
-      selectedBySearch = !!exact;
-      customField.hidden = chosen !== customValue;
-    }
-    const models = [...new Set([...hits, ...(chosen && chosen !== customValue ? [chosen] : [])])];
-    fill(target, field('Модель телефона', select([...models, { value: customValue, label: 'Указать самостоятельно' }],
-      chosen, (next) => {
-        chosen = next;
-        selectedBySearch = false;
-        customField.hidden = next !== customValue;
-      }, { empty: 'Универсальная / без модели' })));
+  const catalog = new Map(app.data.models.map(({ model }) => [modelKey(model), model]));
+  const chosen = new Set();
+  const unlisted = [];
+  for (const name of compatibleModelNames(value)) {
+    const canonical = catalog.get(modelKey(name));
+    if (canonical) chosen.add(canonical);
+    else unlisted.push(name);
   }
-  customField.hidden = chosen !== customValue;
-  draw();
-  return { el: h('div', {}, field('Найти модель', search), target, customField),
-    value: () => chosen === customValue ? custom.value.trim() : chosen };
+  const selected = h('div');
+  const results = h('div');
+  const custom = stockInput(unlisted.join(', '), { maxLength: MODEL_TEXT_LIMIT, placeholder: 'Названия через запятую' });
+  const search = stockInput('', { type: 'search', placeholder: 'Например, айфон 15 или Galaxy A54',
+    oninput: () => drawResults() });
+  function drawSelected() {
+    fill(selected, chosen.size ? h('div', { class: 'chips', style: 'margin:8px 0' }, [...chosen].map((name) =>
+      h('button', { type: 'button', class: 'chip on', 'aria-label': 'Убрать ' + name, text: name + ' ×',
+        onclick: () => {
+          chosen.delete(name);
+          drawSelected();
+          drawResults();
+        } }))) : null);
+  }
+  function drawResults() {
+    const query = search.value.trim();
+    const hits = query ? [...new Set(app.search.find(query).map((entry) => entry.model))] : [];
+    fill(results, hits.length ? h('div', { class: 'list', style: 'max-height:min(32vh,230px);overflow-y:auto' },
+      hits.map((name) => h('label', { class: 'item' },
+        h('input', { type: 'checkbox', checked: chosen.has(name), onchange: (e) => {
+          if (e.target.checked) chosen.add(name);
+          else chosen.delete(name);
+          drawSelected();
+        } }), name)))
+      : query ? h('div', { class: 'small muted', text: 'Модели не найдены.' }) : null);
+  }
+  drawSelected();
+  return {
+    el: h('div', {}, field('Совместимые модели', search), selected, results,
+      h('details', { open: unlisted.length > 0, style: 'margin-top:8px' },
+        h('summary', { class: 'small muted', text: 'Указать модели вручную' }), field('Совместимость', custom))),
+    value: () => [...new Set([...chosen, ...compatibleModelNames(custom.value)])].join(', '),
+  };
 }
 
 export function createStockView(app) {
@@ -64,8 +74,8 @@ export function createStockView(app) {
   root.append(h('h1', { text: 'Склад' }), sync, actions, search, list);
 
   function drawItems() {
-    const q = search.value.trim().toLowerCase().replace(/ё/g, 'е');
-    const items = currentStock(app.sheet).filter((x) => !x.archived && (x.name + ' ' + x.model).toLowerCase().replace(/ё/g, 'е').includes(q));
+    const q = search.value.trim();
+    const items = filterStock(app, currentStock(app.sheet).filter((item) => !item.archived), q);
     fill(list, items.length ? h('div', { class: 'list', style: 'margin-top:12px' }, items.map((item) =>
       h('button', { class: 'item', type: 'button', onclick: () => openPosition(app, item.id) },
         h('div', { class: 'grow' }, h('div', { class: 't', text: item.name }),
@@ -129,11 +139,13 @@ function openStockEditor(app, item) {
     h('button', { class: 'btn primary', text: 'Сохранить', onclick: () => {
       const price = parseNum(cost.value);
       const count = parseNum(qty.value);
+      const compatibility = model.value();
       if (!name.value.trim()) return toast('Впиши название');
       if (price === null || price < 0 || price > MAX) return toast('Проверь закупочную цену');
       if (!item && (!Number.isSafeInteger(count) || count < 0 || count > MAX)) return toast('Впиши целое количество от 0 до ' + MAX);
+      if (compatibility.length > MODEL_TEXT_LIMIT) return toast('Сократи список совместимых моделей до ' + MODEL_TEXT_LIMIT + ' символов');
       stockQueue(app, item ? 'editStock' : 'addStock', {
-        item: item?.id, name: name.value.trim(), model: model.value(), cost: price, qty: item ? 0 : count,
+        item: item?.id, name: name.value.trim(), model: compatibility, cost: price, qty: item ? 0 : count,
       }, modal);
     } }),
   ]);
@@ -192,22 +204,42 @@ function openMovement(app, { item, restock = false }) {
   ]);
 }
 
-function compatibleModels(model) {
-  const names = model.split(/\s*(?:[,;/|]|\s+и\s+)\s*/i);
+function compatibleModelNames(model) {
+  const names = String(model || '').trim().split(/\s*(?:[,;/|]|\s+и\s+)\s*/i);
   const prefix = names[0].match(/^[^\d]+/)?.[0] || '';
-  return names.map((name, i) => modelKey(i && /^\d/.test(name) ? prefix + name : name));
+  return names.map((name, i) => i && /^\d/.test(name) ? prefix + name : name).filter(Boolean);
+}
+
+function hasModel(item, key) {
+  return compatibleModelNames(item.model).some((name) => modelKey(name) === key);
+}
+
+function filterStock(app, items, input) {
+  const query = input.trim().toLowerCase().replace(/ё/g, 'е');
+  if (!query) return items;
+  const key = modelKey(query);
+  if (key && app.search.find(query).some((entry) => modelKey(entry.model) === key)) {
+    return items.filter((item) => hasModel(item, key));
+  }
+  const terms = key.split(' ').filter(Boolean);
+  return items.filter((item) => {
+    const text = (item.name + ' ' + item.model).toLowerCase().replace(/ё/g, 'е');
+    const words = norm(text).split(' ');
+    return text.includes(query) || (terms.length > 0 && terms.every((term) => words.some((word) => word.startsWith(term))));
+  });
 }
 
 export function openOrderStockPicker(app, { model, initial, current, editing, estimates, onPick }) {
   const original = new Map(initial.map((part) => [part.item, part]));
   const canonical = app.findModel(model);
+  const key = canonical ? modelKey(canonical) : '';
   const options = currentStock(app.sheet)
     .map((item) => {
       const reserved = original.get(item.id)?.qty || 0;
       return { ...item, qty: item.archived ? reserved : item.qty + reserved };
     })
     .filter((item) => editing ? item.id === editing.item : !item.archived && item.qty > 0 && !current.some((part) => part.item === item.id))
-    .map((item) => ({ ...item, priority: !item.model ? 1 : canonical && canonical === app.findModel(item.model) ? 2 : 0 }))
+    .map((item) => ({ ...item, priority: !item.model ? 1 : key && hasModel(item, key) ? 2 : 0 }))
     .sort((a, b) => b.priority - a.priority);
   let chosen = editing ? options[0] : null;
   let replacement = editing?.replaces || '';
@@ -220,16 +252,7 @@ export function openOrderStockPicker(app, { model, initial, current, editing, es
   const search = stockInput(canonical || '', { type: 'search', placeholder: 'Например, айфон 12 или проклейка',
     oninput: () => drawMatches() });
   function drawMatches() {
-    const query = search.value.trim().toLowerCase().replace(/ё/g, 'е');
-    const key = modelKey(query);
-    const terms = key.split(' ').filter(Boolean);
-    const modelQuery = key && app.search.find(query).some((entry) => modelKey(entry.model) === key);
-    const rows = query ? options.filter((item) => {
-      if (modelQuery) return compatibleModels(item.model).includes(key);
-      const text = (item.name + ' ' + item.model).toLowerCase().replace(/ё/g, 'е');
-      const words = norm(text).split(' ');
-      return text.includes(query) || (terms.length > 0 && terms.every((term) => words.some((word) => word.startsWith(term))));
-    }) : options;
+    const rows = filterStock(app, options, search.value);
     if (chosen && !rows.includes(chosen)) chosen = null;
     fill(matches, rows.length ? h('div', { class: 'list', style: 'max-height:min(38vh,280px);overflow-y:auto' },
       rows.map((item) => h('button', { class: 'item', type: 'button', 'aria-pressed': String(chosen === item),
