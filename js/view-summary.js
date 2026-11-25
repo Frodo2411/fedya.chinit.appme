@@ -1,7 +1,7 @@
 // Экран «Итоги»: месяц, выручка, прибыль, расходы. Считается так же, как лист «Итоги» в таблице.
 
 import { h, fill, money, fmtDate, monthTitle, toast, openSheet, field, select, parseNum } from './ui.js';
-import { summary, statusCounts, months } from './orders.js';
+import { summary, statusCounts, months, sourceSummary } from './orders.js';
 import { today } from './store.js';
 import { connectCard } from './view-orders.js';
 
@@ -45,6 +45,7 @@ export function createSummaryView(app) {
       s.discounted ? h('div', { class: 'small muted', style: 'margin-top:10px' },
         'Выдано со скидкой: ', h('b', { text: String(s.discounted) }), ', скидки на ', h('b', { text: money(s.discountSum) }),
         ' — выручка и прибыль уже с ними.') : null,
+      sourceTable(sourceSummary(orders, st.month)),
       h('h2', { text: 'Сейчас' }),
       h('div', { class: 'tiles four' },
         tile('Обращений (ещё не принёс)', String(now.lead)), tile('В ремонте', String(now.repair)),
@@ -72,6 +73,18 @@ export function createSummaryView(app) {
   }
 
   return { el: root, draw };
+}
+
+function sourceTable(rows) {
+  return h('section', {},
+    h('h2', { text: 'Откуда пришли клиенты' }),
+    rows.length ? h('div', {},
+      h('p', { class: 'small muted', text: 'Заказы, принятые в выбранном месяце, и их текущие статусы. Гарантии в статистику не входят.' }),
+      h('div', { class: 'card scrollx', style: 'padding:6px 10px' }, h('table', { class: 'tbl' },
+        h('thead', {}, h('tr', {}, ['Источник', 'Обращения', 'Выдано', 'Отказы'].map((title) => h('th', { scope: 'col', text: title })))),
+        h('tbody', {}, rows.map((row) => h('tr', {},
+          [row.source, row.total, row.issued, row.refused].map((value) => h('td', { text: String(value) }))))))))
+      : h('div', { class: 'empty', text: 'В этом месяце обращений нет.' }));
 }
 
 export function openExpenseForm(app, exp) {

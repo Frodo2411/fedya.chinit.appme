@@ -90,6 +90,22 @@ export function statusCounts(orders) {
   return c;
 }
 
+// Источник относится к месяцу первого обращения по заказу. Гарантия не добавляет нового обращения.
+export function sourceSummary(orders, month) {
+  const groups = new Map();
+  for (const order of orders) {
+    if (isWarranty(order) || monthOf(order.date) !== month) continue;
+    const source = String(order.source || '').trim().replace(/\s+/g, ' ') || 'Без источника';
+    const key = source.toLowerCase().replace(/ё/g, 'е');
+    if (!groups.has(key)) groups.set(key, { source, total: 0, issued: 0, refused: 0 });
+    const counts = groups.get(key);
+    counts.total++;
+    if (order.status === 'Выдан') counts.issued++;
+    if (order.status === 'Отказ') counts.refused++;
+  }
+  return [...groups.values()].sort((a, b) => b.total - a.total || a.source.localeCompare(b.source, 'ru'));
+}
+
 export function months(orders, expenses) {
   const set = new Set();
   for (const o of orders) {
