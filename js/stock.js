@@ -18,6 +18,7 @@ export function stockPositions(rows, orders = []) {
     if (row.kind === 'addStock' || row.kind === 'editStock') {
       Object.assign(item, { name: String(row.name || ''), model: String(row.model || ''), cost: row.cost });
     }
+    if (row.kind === 'archiveStock') item.archived = true;
     item.qty += Number(row.qty) || 0;
     item.history.push(row);
   }

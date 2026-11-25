@@ -1,9 +1,15 @@
 // Склад: позиции и журнал движений общей Google Таблицы.
 import { h, fill, field, select, openSheet, parseNum, money, fmtDate, toast } from './ui.js';
-import { STOCK_VERSION, STOCK_OPS } from './sheet.js';
+import { STOCK_VERSION, STOCK_ARCHIVE_VERSION, STOCK_OPS } from './sheet.js';
 import { stockPositions } from './stock.js';
+import { norm } from './search.js';
 
-const getItems = (app) => stockPositions(app.sheet.cache?.stock ?? [], app.sheet.orders());
+function getItems(app) {
+  const archiving = new Set(app.sheet.outbox.filter((op) => op.op === 'archiveStock').map((op) => op.fields.item));
+  const items = stockPositions(app.sheet.cache?.stock ?? [], app.sheet.orders());
+  for (const item of items) if (archiving.has(item.id)) item.archived = true;
+  return items;
+}
 export const stockReady = (app) => app.sheet.connected && Array.isArray(app.sheet.cache?.stock);
 const MAX = 1000000;
 
@@ -22,18 +28,27 @@ function modelPicker(app, value = '') {
   const catalog = [...new Set(app.data.models.map((model) => model.model))]
     .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
   let chosen = !value || catalog.includes(value) ? value : customValue;
+  let selectedBySearch = false;
   const custom = stockInput(chosen === customValue ? value : '', { maxLength: 120 });
   const customField = field('Своя модель или совместимость', custom);
   const target = h('div');
   const search = stockInput('', { type: 'search', placeholder: 'Например, iPhone 12 или Galaxy A54',
-    oninput: () => draw() });
-  function draw() {
+    oninput: () => draw(true) });
+  function draw(typing = false) {
     const query = search.value.trim();
     const hits = query ? app.search.find(query).map((model) => model.model) : catalog;
+    if (typing) {
+      const words = (text) => norm(text).split(' ').sort().join(' ');
+      const exact = query && hits.find((model) => words(model) === words(query));
+      if (exact || selectedBySearch) chosen = exact || '';
+      selectedBySearch = !!exact;
+      customField.hidden = chosen !== customValue;
+    }
     const models = [...new Set([...hits, ...(chosen && chosen !== customValue ? [chosen] : [])])];
     fill(target, field('Модель телефона', select([...models, { value: customValue, label: 'Указать самостоятельно' }],
       chosen, (next) => {
         chosen = next;
+        selectedBySearch = false;
         customField.hidden = next !== customValue;
       }, { empty: 'Универсальная / без модели' })));
   }
@@ -54,7 +69,7 @@ export function createStockView(app) {
 
   function drawItems() {
     const q = search.value.trim().toLowerCase().replace(/ё/g, 'е');
-    const items = getItems(app).filter((x) => (x.name + ' ' + x.model).toLowerCase().replace(/ё/g, 'е').includes(q));
+    const items = getItems(app).filter((x) => !x.archived && (x.name + ' ' + x.model).toLowerCase().replace(/ё/g, 'е').includes(q));
     fill(list, items.length ? h('div', { class: 'list', style: 'margin-top:12px' }, items.map((item) =>
       h('button', { class: 'item', type: 'button', onclick: () => openPosition(app, item.id) },
         h('div', { class: 'grow' }, h('div', { class: 't', text: item.name }),
@@ -82,6 +97,7 @@ export function createStockView(app) {
         ? h('button', { class: 'btn small', text: 'Открыть «Google Таблица»', onclick: () => app.openSheetSetup() }) : refresh)) : null,
     progress ? h('div', { class: 'syncbar', role: 'status' }, h('span', { class: 'grow', text: progress }),
       !ready && !status && !s.busy ? refresh : null) : null,
+    s.cache?.stockViewError ? h('div', { class: 'small muted', text: 'Лист остатков: ' + s.cache.stockViewError }) : null,
     failed.map((op) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
       h('div', { text: 'Складская операция не записалась. ' + op.error }),
       h('div', { class: 'row wrap', style: 'margin-top:8px' },
@@ -128,7 +144,7 @@ function openStockEditor(app, item) {
 }
 
 function openPosition(app, id) {
-  const item = getItems(app).find((x) => x.id === id);
+  const item = getItems(app).find((x) => x.id === id && !x.archived);
   if (!item) return;
   const body = h('div', {},
     h('p', { class: 'muted', text: [item.model, item.qty + ' шт. в наличии', money(item.cost) + ' / шт.'].filter(Boolean).join(' · ') }),
@@ -146,7 +162,19 @@ function openPosition(app, id) {
         h('div', { class: 's', text: [fmtDate(String(row.date || '').slice(0, 10), true), money(row.cost) + ' / шт.', row.note].filter(Boolean).join(' · ') })),
       row.qty ? h('b', { class: 'nowrap', text: (row.qty > 0 ? '+' : '') + row.qty + ' шт.' }) : null);
     })));
-  const modal = openSheet(item.name, body);
+  const deleteAvailable = app.sheet.version >= STOCK_ARCHIVE_VERSION;
+  const modal = openSheet(item.name, body, [
+    h('button', { class: 'btn danger', text: 'Удалить со склада', onclick: () => {
+      if (!deleteAvailable) {
+        app.openSheetSetup();
+        return toast('Для удаления со склада обнови Apps Script до версии ' + STOCK_ARCHIVE_VERSION);
+      }
+      const latest = getItems(app).find((position) => position.id === id && !position.archived);
+      if (!latest) { modal.close(); return; }
+      if (!confirm('Удалить «' + latest.name + '» со склада? В архив уйдёт позиция с остатком ' + latest.qty + ' шт.')) return;
+      stockQueue(app, 'archiveStock', { item: id, expectedQty: latest.qty }, modal);
+    } }),
+  ]);
 }
 
 function openMovement(app, { item, restock = false }) {
@@ -172,8 +200,11 @@ export function openOrderStockPicker(app, { model, initial, current, editing, es
   const original = new Map(initial.map((part) => [part.item, part]));
   const canonical = app.findModel(model);
   const options = getItems(app)
-    .map((item) => ({ ...item, qty: item.qty + (original.get(item.id)?.qty || 0) }))
-    .filter((item) => editing ? item.id === editing.item : item.qty > 0 && !current.some((part) => part.item === item.id))
+    .map((item) => {
+      const reserved = original.get(item.id)?.qty || 0;
+      return { ...item, qty: item.archived ? reserved : item.qty + reserved };
+    })
+    .filter((item) => editing ? item.id === editing.item : !item.archived && item.qty > 0 && !current.some((part) => part.item === item.id))
     .map((item) => ({ ...item, priority: !item.model ? 1 : canonical && canonical === app.findModel(item.model) ? 2 : 0 }))
     .sort((a, b) => b.priority - a.priority);
   let chosen = editing ? options[0] : null;

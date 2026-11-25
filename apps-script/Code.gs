@@ -11,8 +11,10 @@ const SHEET_APP = 'Приложение (служебный)';
 const SHEET_DEVICES = 'Устройства';
 const SHEET_PARTS = 'Запчасти';
 const SHEET_STOCK = 'Склад (журнал)';
+const SHEET_STOCK_VIEW = 'Склад';
 const STOCK_HEAD = ['ID операции', 'ID позиции', 'Действие', 'Дата', 'Название', 'Модель', 'Цена, BYN', 'Количество', 'Заказ №', 'Примечание'];
-const STOCK_LABELS = { addStock: 'Позиция добавлена', editStock: 'Позиция изменена', receipt: 'Пополнение', issue: 'Списание' };
+const STOCK_VIEW_HEAD = ['Название', 'Модель', 'Закупочная цена, BYN/шт.', 'Остаток, шт.'];
+const STOCK_LABELS = { addStock: 'Позиция добавлена', editStock: 'Позиция изменена', archiveStock: 'Убрано со склада', receipt: 'Пополнение', issue: 'Списание' };
 
 // Столбцы ищутся по заголовкам, порядок в таблице можно менять
 const ORDER_COLS = {
@@ -44,8 +46,8 @@ const FORMULA_KEYS = ['profit', 'due', 'warranty', 'month'];
 const OPTIONAL_COLS = ['wfor', 'refusalReason', 'quoted'];
 // Гарантийные заказы нумеруются отдельно: Г1, Г2…
 const WARRANTY_PREFIX = 'Г';
-// 3 — гарантия; 4 — удаление заказа; 5 — выкуп; 6 — склад и отказы; 7 — списание и себестоимость в заказе
-const VERSION = 7;
+// 3 — гарантия; 4 — удаление заказа; 5 — выкуп; 6 — склад и отказы; 7 — списание в заказе; 8 — остатки и архив
+const VERSION = 8;
 
 function doGet(e) {
   // Просто открыть адрес в браузере — проверка, что скрипт развёрнут правильно. Данных без ключа не отдаём.
@@ -79,9 +81,24 @@ function respond_(req) {
 const API_ = {
   ping: function () { return { title: book_().getName(), lists: lists_(), version: VERSION }; },
   list: function () {
-    return Object.assign({ title: book_().getName(), orders: readOrders_(), expenses: readExpenses_(), lists: lists_(), version: VERSION, stock: readStock_() }, devicesData_());
+    const props = PropertiesService.getScriptProperties();
+    if (book_().getSheetByName(SHEET_STOCK) && (!props.getProperty('stockViewId') || props.getProperty('stockViewDirty'))) {
+      try { withLock_(syncStockView_); } catch (err) { /* повторится при следующей загрузке */ }
+    }
+    return Object.assign({ title: book_().getName(), orders: readOrders_(), expenses: readExpenses_(), lists: lists_(),
+      version: VERSION, stock: readStock_(), stockViewError: props.getProperty('stockViewError') }, devicesData_());
   },
-  batch: function (req) { return withLock_(function () { return (req.ops || []).map(runOp_); }); },
+  batch: function (req) {
+    return withLock_(function () {
+      const ops = req.ops || [];
+      const results = ops.map(runOp_);
+      if (ops.some(function (op, i) {
+        return results[i].ok && (STOCK_LABELS[op.op] || op.op === 'moveStock' || op.fields && op.fields.stockUse
+          || (op.op === 'deleteOrder' && op.stockBase));
+      })) syncStockView_();
+      return results;
+    });
+  },
   kvGet: function (req) { return kvGet_(req.name); },
   kvSet: function (req) { return withLock_(function () { return kvSet_(req.name, req.value, req.ts); }); },
 };
@@ -237,7 +254,7 @@ function runOp_(op) {
     else if (op.op === 'addPart') res = addPart_(op, pend[op.id], reserve);
     else if (op.op === 'updatePart') res = updatePart_(op);
     else if (op.op === 'deletePart') res = deletePart_(op);
-    else if (op.op === 'addStock' || op.op === 'editStock' || op.op === 'moveStock') res = appendStock_(op);
+    else if (op.op === 'addStock' || op.op === 'editStock' || op.op === 'moveStock' || op.op === 'archiveStock') res = appendStock_(op);
     else throw new Error('Неизвестная операция: ' + op.op);
     res.ok = true;
   } catch (err) {
@@ -631,6 +648,7 @@ function deletePart_(op) {
 function stockKind_(value) {
   if (value === STOCK_LABELS.addStock) return 'addStock';
   if (value === STOCK_LABELS.editStock) return 'editStock';
+  if (value === STOCK_LABELS.archiveStock) return 'archiveStock';
   if (value === STOCK_LABELS.receipt || value === STOCK_LABELS.issue) return 'moveStock';
   return value;
 }
@@ -668,6 +686,7 @@ function stockInventory_(rows, orders, exceptRow) {
     const item = stock.get(id);
     if (!item) return;
     if (r[2] === 'addStock' || r[2] === 'editStock') Object.assign(item, { name: r[4], model: r[5], cost: r[6] });
+    if (r[2] === 'archiveStock') item.archived = true;
     item.qty += Number(r[7]) || 0;
   });
   orders.forEach(function (o) {
@@ -708,8 +727,10 @@ function prepareOrderStock_(request, current, orders, row, fields, creating) {
     if (!item || seen.has(id) || !Number.isSafeInteger(part.qty) || part.qty < 1 || part.qty > 1000000 || typeof part.cost !== 'number') {
       throw new Error('Проверь складскую позицию и количество');
     }
-    if (part.qty > item.qty) throw new Error(item.name + ': на складе доступно ' + Math.max(0, item.qty) + ' шт.');
-    const price = original.get(id) || item;
+    const previous = original.get(id);
+    if (item.archived && (!previous || part.qty > previous.qty)) throw new Error(item.name + ': позиция убрана со склада.');
+    if (!item.archived && part.qty > item.qty) throw new Error(item.name + ': на складе доступно ' + Math.max(0, item.qty) + ' шт.');
+    const price = previous || item;
     const cost = moneyCents_(price.cost);
     if (!Number.isSafeInteger(cost) || cost < 0 || cost !== moneyCents_(part.cost)) {
       throw new Error(item.name + ': закупочная цена изменилась. Проверь позицию и сохрани заказ снова.');
@@ -752,8 +773,43 @@ function stockOrderColumns_(sh, cols) {
 
 function writeOrderStock_(sh, row, cols, stock) {
   sh.getRange(row, cols.part, 1, 2).setValues([[stock.total, JSON.stringify(stock.usage)]]);
-  if (stock.usage.items.length) {
-    try { formatStockJournal_(sheet_(SHEET_STOCK)); } catch (err) { /* оформление не должно мешать записи остатка */ }
+}
+
+// Лист остатков строится из журнала и заказов. Сверка и запись проходят под тем же замком, что складские операции.
+function syncStockView_() {
+  const book = book_();
+  const journal = book.getSheetByName(SHEET_STOCK);
+  if (!journal) return;
+  const props = PropertiesService.getScriptProperties();
+  try {
+    props.setProperty('stockViewDirty', '1');
+    const raw = stockRows_(journal);
+    if (!raw) throw new Error('Проверь заголовки листа «' + SHEET_STOCK + '»');
+    const items = Array.from(stockInventory_(raw, readOrders_(), null).values()).filter(function (item) { return !item.archived; });
+    items.sort(function (a, b) { return String(a.name).localeCompare(String(b.name), 'ru') || String(a.model).localeCompare(String(b.model), 'ru'); });
+    const table = [STOCK_VIEW_HEAD].concat(items.map(function (item) {
+      return [asText_(String(item.name || '')), asText_(String(item.model || '')), item.cost, item.qty];
+    }));
+    const id = props.getProperty('stockViewId');
+    let view = id && book.getSheets().find(function (sh) { return String(sh.getSheetId()) === id; });
+    if (!view) {
+      // Чужой лист с таким именем может быть частью рабочей таблицы.
+      let title = SHEET_STOCK_VIEW;
+      for (let i = 1; book.getSheetByName(title); i++) title = SHEET_STOCK_VIEW + ' (остатки' + (i === 1 ? '' : ' ' + i) + ')';
+      view = book.insertSheet(title);
+      props.setProperty('stockViewId', String(view.getSheetId()));
+      view.setFrozenRows(1);
+    }
+    const last = view.getLastRow();
+    if (table.length > view.getMaxRows()) view.insertRowsAfter(view.getMaxRows(), table.length - view.getMaxRows());
+    view.getRange(1, 1, table.length, STOCK_VIEW_HEAD.length).setValues(table);
+    if (last > table.length) view.getRange(table.length + 1, 1, last - table.length, STOCK_VIEW_HEAD.length).clearContent();
+    formatStockJournal_(journal);
+    if (!journal.isSheetHidden()) journal.hideSheet();
+    props.deleteProperty('stockViewError');
+    props.deleteProperty('stockViewDirty');
+  } catch (err) {
+    props.setProperty('stockViewError', String(err.message || err).slice(0, 250));
   }
 }
 
@@ -791,11 +847,17 @@ function appendStock_(op) {
   if (rows.some(function (r) { return r[0] === op.id; })) return { row: null, repeat: true };
   const adding = op.op === 'addStock';
   const editing = op.op === 'editStock';
+  const archiving = op.op === 'archiveStock';
   const item = adding ? op.id : f.item;
-  const qty = editing ? 0 : f.qty;
-  const position = stockInventory_(rows, qty < 0 ? readOrders_() : [], null).get(item);
+  const qty = editing || archiving ? 0 : f.qty;
+  const position = stockInventory_(rows, qty < 0 || archiving ? readOrders_() : [], null).get(item);
   if (!adding && !position) throw new Error('Позиция на складе не найдена. Обнови список.');
-  if (!Number.isSafeInteger(qty) || Math.abs(qty) > 1000000 || (adding && qty < 0) || (!adding && !editing && qty === 0)) {
+  if (position && position.archived) {
+    if (archiving) return { row: null, repeat: true };
+    throw new Error('Позиция уже убрана со склада.');
+  }
+  if (archiving && position.qty !== f.expectedQty) throw new Error('Остаток изменился. Обнови склад перед удалением.');
+  if (!Number.isSafeInteger(qty) || Math.abs(qty) > 1000000 || (adding && qty < 0) || (op.op === 'moveStock' && qty === 0)) {
     throw new Error('Проверь количество');
   }
   const cost = adding || editing ? f.cost : position.cost;
@@ -827,7 +889,6 @@ function appendStock_(op) {
   }
   sh.appendRow([asText_(op.id), asText_(item), stockLabel_(op.op, qty), new Date(), asText_(name), asText_(model || ''),
     moneyCents_(cost) / 100, qty, asText_(order), asText_(stockText_(f.note, 500))]);
-  try { formatStockJournal_(sh); } catch (err) { /* оформление не должно мешать записи остатка */ }
   return { row: sh.getLastRow() };
 }
 

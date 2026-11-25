@@ -4,6 +4,7 @@ import vm from 'node:vm';
 
 export function makeBook(json) {
   const sheets = new Map();
+  let sheetId = 0;
   const toVal = (v) => (v && typeof v === 'object' && v.date ? new Date(v.date + 'T00:00:00Z') : v);
   class Range {
     constructor(sh, r, c, nr, nc) { Object.assign(this, { sh, r, c, nr, nc }); }
@@ -32,9 +33,12 @@ export function makeBook(json) {
     return v;
   }
   class Sheet {
-    constructor(name, cells) { this.name = name; this.rows = cells; this.hidden = false; this.writes = 0; this.maxColumns = Math.max(26, ...cells.map((r) => r.length)); this.hiddenColumns = new Set(); }
+    constructor(name, cells) { this.name = name; this.rows = cells; this.hidden = false; this.writes = 0; this.maxColumns = Math.max(26, ...cells.map((r) => r.length)); this.hiddenColumns = new Set(); this.id = ++sheetId; this.maxRows = Math.max(1000, cells.length); }
     cell(r, c) { while (this.rows.length < r) this.rows.push([]); const row = this.rows[r - 1]; while (row.length < c) row.push({ v: '', f: '', fmt: '' }); return row[c - 1]; }
     getName() { return this.name; }
+    getSheetId() { return this.id; }
+    getMaxRows() { return this.maxRows; }
+    insertRowsAfter(r, n) { if (r !== this.maxRows) throw new Error('mock only supports adding rows at the end'); this.maxRows += n; }
     getLastRow() { let last = 0; this.rows.forEach((row, i) => { if (row.some((x) => x.v !== '' || x.f)) last = i + 1; }); return last; }
     getLastColumn() { let last = 0; for (const row of this.rows) row.forEach((x, j) => { if ((x.v !== '' || x.f) && j + 1 > last) last = j + 1; }); return last; }
     getMaxColumns() { return this.maxColumns; }
@@ -57,12 +61,14 @@ export function makeBook(json) {
     getRange(r, c, nr = 1, nc = 1) { if (r < 1 || c < 1) throw new Error('bad range'); return new Range(this, r, c, nr, nc); }
     getDataRange() { return new Range(this, 1, 1, this.getLastRow(), this.getLastColumn()); }
     hideSheet() { this.hidden = true; }
+    isSheetHidden() { return this.hidden; }
     deleteRow(r) { this.rows.splice(r - 1, 1); }
   }
   for (const [name, cells] of Object.entries(json)) sheets.set(name, new Sheet(name, cells.map((row) => row.map((x) => ({ v: toVal(x.v), f: x.f, fmt: x.fmt })))));
   const book = {
     getName: () => 'Учёт заказов', getSpreadsheetTimeZone: () => 'Europe/Minsk',
     getSheetByName: (n) => sheets.get(n) || null,
+    getSheets: () => [...sheets.values()],
     insertSheet: (n) => { const s = new Sheet(n, []); sheets.set(n, s); return s; },
     sheets,
   };
@@ -78,7 +84,9 @@ export function loadScript(codePath, book, key) {
       parseDate: (s) => new Date(s + 'T00:00:00Z'),
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props.get(k) ?? null, setProperty: (k, v) => { if (v.length > 9000) throw new Error('property too large'); props.set(k, v); } }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props.get(k) ?? null,
+      setProperty: (k, v) => { if (v.length > 9000) throw new Error('property too large'); props.set(k, v); },
+      deleteProperty: (k) => props.delete(k) }) },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (s) => ({ content: s, setMimeType() { return this; } }) },
     JSON, Date, Number, String, Object, Math, Error,
   };
