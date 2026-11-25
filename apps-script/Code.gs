@@ -12,6 +12,7 @@ const SHEET_DEVICES = 'Устройства';
 const SHEET_PARTS = 'Запчасти';
 const SHEET_STOCK = 'Склад (журнал)';
 const STOCK_HEAD = ['ID операции', 'ID позиции', 'Действие', 'Дата', 'Название', 'Модель', 'Цена, BYN', 'Количество', 'Заказ №', 'Примечание'];
+const STOCK_LABELS = { addStock: 'Позиция добавлена', editStock: 'Позиция изменена', receipt: 'Пополнение', issue: 'Списание' };
 
 // Столбцы ищутся по заголовкам, порядок в таблице можно менять
 const ORDER_COLS = {
@@ -20,6 +21,7 @@ const ORDER_COLS = {
   part: 'Запчасть', profit: 'Прибыль', prepay: 'Предоплата', due: 'К оплате', urgent: 'Срочно', status: 'Статус',
   issued: 'Дата выдачи', warranty: 'Гарантия до', refusal: 'Если отказ', comment: 'Комментарий', month: 'Месяц',
   wfor: 'Гарантия по №', refusalReason: 'Причина отказа', quoted: 'Предложенная сумма',
+  stockUse: 'Склад в заказе (служебное)',
 };
 const EXPENSE_COLS = { date: 'Дата', what: 'Что купил', cat: 'Категория', sum: 'Сумма', where: 'Где купил', comment: 'Комментарий' };
 // Выкупленные устройства и их запчасти. Заголовки на этих листах во второй строке (в первой — подсказка).
@@ -42,8 +44,8 @@ const FORMULA_KEYS = ['profit', 'due', 'warranty', 'month'];
 const OPTIONAL_COLS = ['wfor', 'refusalReason', 'quoted'];
 // Гарантийные заказы нумеруются отдельно: Г1, Г2…
 const WARRANTY_PREFIX = 'Г';
-// 3 — номер гарантийного поверх формулы в «№»; 4 — удаление заказа; 5 — выкуп; 6 — склад и поля отказа
-const VERSION = 6;
+// 3 — гарантия; 4 — удаление заказа; 5 — выкуп; 6 — склад и отказы; 7 — списание и себестоимость в заказе
+const VERSION = 7;
 
 function doGet(e) {
   // Просто открыть адрес в браузере — проверка, что скрипт развёрнут правильно. Данных без ключа не отдаём.
@@ -115,6 +117,12 @@ function columns_(sh, spec, headRow) {
 
 function toJson_(k, v) {
   if (v === '' || v === null || v === undefined) return null;
+  if (k === 'stockUse') {
+    try {
+      const data = JSON.parse(v);
+      return data && Array.isArray(data.items) ? data : null;
+    } catch (err) { return null; }
+  }
   if (v instanceof Date) return Utilities.formatDate(v, tz_(), 'yyyy-MM-dd');
   if (typeof v === 'number' && (k === 'phone')) return String(v);
   return v;
@@ -218,8 +226,8 @@ function runOp_(op) {
   };
   let res;
   try {
-    if (op.op === 'addOrder') res = addRow_(SHEET_ORDERS, ORDER_COLS, op.fields, isOrder_, true, pend[op.id], reserve, op.warranty === true);
-    else if (op.op === 'updateOrder') res = updateOrder_(op);
+    if (op.op === 'addOrder' || op.op === 'addOrderStock') res = addRow_(SHEET_ORDERS, ORDER_COLS, op.fields, isOrder_, true, pend[op.id], reserve, op.warranty === true);
+    else if (op.op === 'updateOrder' || op.op === 'updateOrderStock') res = updateOrder_(op);
     else if (op.op === 'deleteOrder') res = deleteOrder_(op);
     else if (op.op === 'addExpense') res = addRow_(SHEET_EXPENSES, EXPENSE_COLS, op.fields, isExpense_, false, pend[op.id], reserve);
     else if (op.op === 'updateExpense') res = updateExpense_(op);
@@ -279,7 +287,7 @@ function writeFields_(sh, row, cols, fields) {
   Object.keys(fields || {}).forEach(function (k) {
     // формулу не трогаем; но в текстовом столбце «формула» — это ошибочно сохранённый текст, его можно перезаписать.
     // Номер гарантийного (Г1…) пишем и поверх формулы в «№»: формула дала бы обычный номер
-    if (!cols[k] || FORMULA_KEYS.indexOf(k) >= 0) return;
+    if (!cols[k] || k === 'stockUse' || FORMULA_KEYS.indexOf(k) >= 0) return;
     const warrantyNumber = k === 'num' && warrantyNum_(fields[k]) !== null;
     if (formulas[cols[k] - 1] && TEXT_KEYS.indexOf(k) < 0 && k !== 'phone' && !warrantyNumber) return;
     const cell = sh.getRange(row, cols[k]);
@@ -303,15 +311,15 @@ function fillFormulas_(sh, row, cols) {
 
 function addRow_(name, spec, fields, isRow, numbered, reserved, reserve, warranty) {
   const sh = sheet_(name);
-  const cols = columns_(sh, spec);
+  let cols = columns_(sh, spec);
   const f = Object.assign({}, fields);
-  ensureCols_(sh, cols, spec, f);
+  const stockRequest = name === SHEET_ORDERS ? f.stockUse : null;
   let target = null;
+  const rows = reserved && !stockRequest ? [] : readRows_(sh, cols, function () { return true; });
   if (reserved) {
     target = reserved[0];
     if (numbered) f.num = reserved[1];
   } else {
-    const rows = readRows_(sh, cols, function () { return true; });
     let maxNum = 0;
     let maxWarranty = 0;
     rows.forEach(function (o) {
@@ -322,10 +330,21 @@ function addRow_(name, spec, fields, isRow, numbered, reserved, reserve, warrant
     });
     if (target === null) target = Math.max(sh.getLastRow(), 1) + 1;
     if (numbered && (f.num === undefined || f.num === null || f.num === '')) f.num = warranty ? WARRANTY_PREFIX + (maxWarranty + 1) : maxNum + 1;
-    if (reserve) reserve(target, numbered ? f.num : null);
   }
+  let stock = null;
+  if (stockRequest) {
+    const repeat = rows.find(function (o) { return o.stockUse && o.stockUse.created === stockRequest.rev; });
+    if (repeat) return { row: repeat.row, num: repeat.num, repeat: true };
+    stock = prepareOrderStock_(stockRequest, null, rows, target, f, true);
+    requirePartCell_(sh, target, cols);
+    cols = stockOrderColumns_(sh, cols);
+    delete f.part;
+  }
+  ensureCols_(sh, cols, spec, f);
+  if (!reserved && reserve) reserve(target, numbered ? f.num : null);
   writeFields_(sh, target, cols, f);
   fillFormulas_(sh, target, cols);
+  if (stock) writeOrderStock_(sh, target, cols, stock);
   return { row: target, num: numbered ? f.num : null };
 }
 
@@ -349,13 +368,36 @@ function orderRow_(sh, cols, op) {
 
 function updateOrder_(op) {
   const sh = sheet_(SHEET_ORDERS);
-  const cols = columns_(sh, ORDER_COLS);
+  let cols = columns_(sh, ORDER_COLS);
   const row = orderRow_(sh, cols, op);
   const key = numKey_(op.num);
   const warranty = warrantyNum_(op.num) !== null;
-  ensureCols_(sh, cols, ORDER_COLS, op.fields);
+  const fields = Object.assign({}, op.fields);
+  let stock = null;
+  if (fields.stockUse) {
+    const rows = readRows_(sh, cols, isOrder_);
+    const current = rows.find(function (o) { return o.row === row && hasData_(o); });
+    if (!current) throw new Error('Заказ удалён. Обнови список.');
+    if (current.stockUse && current.stockUse.rev === fields.stockUse.rev) return { row: row, num: op.num, repeat: true };
+    stock = prepareOrderStock_(fields.stockUse, current, rows, row, fields, false);
+    requirePartCell_(sh, row, cols);
+    cols = stockOrderColumns_(sh, cols);
+    delete fields.part;
+  } else if (cols.stockUse) {
+    const usage = toJson_('stockUse', sh.getRange(row, cols.stockUse).getValue());
+    if (usage && usage.items.length) {
+      const status = 'status' in fields ? fields.status : cols.status && sh.getRange(row, cols.status).getValue();
+      const refusal = 'refusal' in fields ? fields.refusal : cols.refusal && sh.getRange(row, cols.refusal).getValue();
+      ensureStockStatus_(usage.items, status, refusal);
+      if ('part' in fields) {
+        throw new Error('В себестоимости уже есть складские детали. Обнови заказ и измени стоимость в разделе «Запчасти со склада».');
+      }
+    }
+  }
+  ensureCols_(sh, cols, ORDER_COLS, fields);
   if (warranty && numKey_(sh.getRange(row, cols.num).getValue()) !== key) sh.getRange(row, cols.num).setValue(op.num);
-  writeFields_(sh, row, cols, op.fields);
+  writeFields_(sh, row, cols, fields);
+  if (stock) writeOrderStock_(sh, row, cols, stock);
   return { row: row, num: op.num };
 }
 
@@ -367,6 +409,8 @@ function deleteOrder_(op) {
   const sh = sheet_(SHEET_ORDERS);
   const cols = columns_(sh, ORDER_COLS);
   const row = orderRow_(sh, cols, op);
+  const usage = cols.stockUse && toJson_('stockUse', sh.getRange(row, cols.stockUse).getValue());
+  if (usage && usage.items.length && op.stockBase !== usage.rev) throw new Error('Детали заказа изменились. Обнови список перед удалением.');
   const last = Math.max(sh.getLastRow(), row);
   const numFormulas = cols.num && sh.getRange(row, cols.num, last - row + 1, 1).getFormulas().some(function (r) { return r[0]; });
   if (!numFormulas) {
@@ -375,8 +419,15 @@ function deleteOrder_(op) {
   }
   const num = sh.getRange(row, cols.num).getValue();
   const formulas = sh.getRange(row, 1, 1, sh.getLastColumn()).getFormulas()[0];
-  formulas.forEach(function (f, i) { if (!f && i + 1 !== cols.num) sh.getRange(row, i + 1).clearContent(); });
+  formulas.forEach(function (f, i) {
+    const col = i + 1;
+    if (!f && col !== cols.num && (!usage || (col !== cols.part && col !== cols.stockUse))) sh.getRange(row, col).clearContent();
+  });
   sh.getRange(row, cols.num).setValue(num);
+  if (usage) {
+    const paired = stockOrderColumns_(sh, cols);
+    sh.getRange(row, paired.part, 1, 2).clearContent();
+  }
   return { row: row, num: op.num, cleared: true };
 }
 
@@ -577,11 +628,25 @@ function deletePart_(op) {
 }
 
 // --- Склад. Каждое действие записывается одной строкой. Остаток проверяет сервер под блокировкой batch.
+function stockKind_(value) {
+  if (value === STOCK_LABELS.addStock) return 'addStock';
+  if (value === STOCK_LABELS.editStock) return 'editStock';
+  if (value === STOCK_LABELS.receipt || value === STOCK_LABELS.issue) return 'moveStock';
+  return value;
+}
+
+function stockLabel_(kind, qty) {
+  return kind === 'moveStock' ? STOCK_LABELS[qty > 0 ? 'receipt' : 'issue'] : STOCK_LABELS[kind];
+}
+
 function stockRows_(sh) {
   if (!sh || !sh.getLastRow()) return [];
   const values = sh.getRange(1, 1, sh.getLastRow(), STOCK_HEAD.length).getValues();
   if (STOCK_HEAD.some(function (title, i) { return values[0][i] !== title; })) return null;
-  return values.slice(1).filter(function (r) { return r[0] && r[1] && r[2]; });
+  return values.slice(1).filter(function (r) { return r[0] && r[1] && r[2]; }).map(function (r) {
+    r[2] = stockKind_(r[2]);
+    return r;
+  });
 }
 
 function readStock_() {
@@ -592,6 +657,129 @@ function readStock_() {
 }
 
 function stockText_(value, max) { return String(value === undefined || value === null ? '' : value).trim().slice(0, max); }
+
+function moneyCents_(value) { return Math.round((Number(value) + Number.EPSILON) * 100); }
+
+function stockInventory_(rows, orders, exceptRow) {
+  const stock = new Map();
+  rows.forEach(function (r) {
+    const id = r[1];
+    if (r[2] === 'addStock') stock.set(id, { qty: 0 });
+    const item = stock.get(id);
+    if (!item) return;
+    if (r[2] === 'addStock' || r[2] === 'editStock') Object.assign(item, { name: r[4], model: r[5], cost: r[6] });
+    item.qty += Number(r[7]) || 0;
+  });
+  orders.forEach(function (o) {
+    if (o.row === exceptRow || !o.stockUse) return;
+    o.stockUse.items.forEach(function (part) {
+      if (stock.has(part.item)) stock.get(part.item).qty -= Number(part.qty) || 0;
+    });
+  });
+  return stock;
+}
+
+function ensureStockStatus_(items, status, refusal) {
+  if (items.length && status === 'Отказ' && refusal === 'Вернул') {
+    throw new Error('Если складские детали возвращены, убери их из заказа. Если использованы, измени отметку о возврате.');
+  }
+}
+
+// Остаток берётся из журнала и заказов, поэтому стоимость и списание можно сохранить в одной строке.
+function prepareOrderStock_(request, current, orders, row, fields, creating) {
+  if (typeof request.rev !== 'string' || !/^[\w-]{5,100}$/.test(request.rev) ||
+      !Array.isArray(request.items) || request.items.length > 40) {
+    throw new Error('Проверь список деталей со склада');
+  }
+  const prior = current && current.stockUse;
+  if (request.before !== (prior && prior.rev || '')) throw new Error('Детали заказа уже изменились. Обнови заказы и проверь остатки.');
+  const direct = request.direct;
+  if (direct !== null && (typeof direct !== 'number' || !Number.isSafeInteger(moneyCents_(direct)) || (request.items.length && direct < 0))) {
+    throw new Error('Проверь стоимость запчастей вне склада');
+  }
+  const raw = request.items.length ? stockRows_(book_().getSheetByName(SHEET_STOCK)) : [];
+  if (!raw) throw new Error('Проверь заголовки листа «' + SHEET_STOCK + '»');
+  const inventory = stockInventory_(raw, orders, row);
+  const seen = new Set();
+  const original = new Map((prior ? prior.items : []).map(function (part) { return [part.item, part]; }));
+  const items = request.items.map(function (part) {
+    const id = part.item;
+    const item = inventory.get(id);
+    if (!item || seen.has(id) || !Number.isSafeInteger(part.qty) || part.qty < 1 || part.qty > 1000000 || typeof part.cost !== 'number') {
+      throw new Error('Проверь складскую позицию и количество');
+    }
+    if (part.qty > item.qty) throw new Error(item.name + ': на складе доступно ' + Math.max(0, item.qty) + ' шт.');
+    const price = original.get(id) || item;
+    const cost = moneyCents_(price.cost);
+    if (!Number.isSafeInteger(cost) || cost < 0 || cost !== moneyCents_(part.cost)) {
+      throw new Error(item.name + ': закупочная цена изменилась. Проверь позицию и сохрани заказ снова.');
+    }
+    seen.add(id);
+    return { item: id, qty: part.qty, cost: cost / 100, name: price.name, model: price.model || '' };
+  });
+  const status = 'status' in fields ? fields.status : current && current.status;
+  const refusal = 'refusal' in fields ? fields.refusal : current && current.refusal;
+  ensureStockStatus_(items, status, refusal);
+  const cents = moneyCents_(direct || 0) + items.reduce(function (sum, part) { return sum + moneyCents_(part.cost) * part.qty; }, 0);
+  if (!Number.isSafeInteger(cents)) throw new Error('Проверь итоговую стоимость запчастей');
+  return {
+    total: !items.length && direct === null ? '' : cents / 100,
+    usage: {
+      rev: request.rev, created: creating ? request.rev : prior && prior.created || '',
+      date: toJson_('date', new Date()), items: items,
+    },
+  };
+}
+
+function requirePartCell_(sh, row, cols) {
+  if (!cols.part || sh.getRange(row, cols.part).getFormula()) {
+    throw new Error('Для списания из заказа нужен столбец «Запчасть» без формулы в строке заказа.');
+  }
+}
+
+function stockOrderColumns_(sh, cols) {
+  if (cols.stockUse === cols.part + 1) return cols;
+  // Две соседние ячейки позволяют записать себестоимость и список деталей одной операцией.
+  if (cols.stockUse) {
+    sh.moveColumns(sh.getRange(1, cols.stockUse), cols.part + 1);
+  } else {
+    sh.insertColumnAfter(cols.part);
+    sh.getRange(1, cols.part + 1).setValue(ORDER_COLS.stockUse);
+    sh.hideColumns(cols.part + 1);
+  }
+  return columns_(sh, ORDER_COLS);
+}
+
+function writeOrderStock_(sh, row, cols, stock) {
+  sh.getRange(row, cols.part, 1, 2).setValues([[stock.total, JSON.stringify(stock.usage)]]);
+  if (stock.usage.items.length) {
+    try { formatStockJournal_(sheet_(SHEET_STOCK)); } catch (err) { /* оформление не должно мешать записи остатка */ }
+  }
+}
+
+// Первый складской ввод после обновления приводит старый журнал к виду для чтения в Google Таблице.
+function formatStockJournal_(sh) {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('stockLabels7')) return;
+  const size = sh.getLastRow() - 1;
+  if (size > 0) {
+    const rows = sh.getRange(2, 1, size, STOCK_HEAD.length).getValues();
+    const items = new Map();
+    rows.forEach(function (r, i) {
+      const kind = stockKind_(r[2]);
+      const label = stockLabel_(kind, r[7]);
+      if (!label) return;
+      const row = i + 2;
+      if (r[2] !== label) sh.getRange(row, 3).setValue(label);
+      if (kind !== 'moveStock') items.set(r[1], [r[4], r[5]]);
+      else if (!r[4] && items.has(r[1])) {
+        sh.getRange(row, 5, 1, 2).setValues([items.get(r[1]).map(asText_)]);
+      }
+    });
+  }
+  sh.hideColumns(1, 2);
+  props.setProperty('stockLabels7', '1');
+}
 
 function appendStock_(op) {
   if (typeof op.id !== 'string' || !/^[\w-]{5,100}$/.test(op.id)) throw new Error('Нет идентификатора складской операции');
@@ -604,19 +792,19 @@ function appendStock_(op) {
   const adding = op.op === 'addStock';
   const editing = op.op === 'editStock';
   const item = adding ? op.id : f.item;
-  const history = rows.filter(function (r) { return r[1] === item; });
-  const position = history.filter(function (r) { return r[2] === 'addStock' || r[2] === 'editStock'; }).pop();
-  if (!adding && !position) throw new Error('Позиция на складе не найдена. Обнови список.');
   const qty = editing ? 0 : f.qty;
+  const position = stockInventory_(rows, qty < 0 ? readOrders_() : [], null).get(item);
+  if (!adding && !position) throw new Error('Позиция на складе не найдена. Обнови список.');
   if (!Number.isSafeInteger(qty) || Math.abs(qty) > 1000000 || (adding && qty < 0) || (!adding && !editing && qty === 0)) {
     throw new Error('Проверь количество');
   }
-  const cost = adding || editing ? f.cost : position[6];
-  const name = adding || editing ? stockText_(f.name, 160) : '';
+  const cost = adding || editing ? f.cost : position.cost;
+  const name = adding || editing ? stockText_(f.name, 160) : position.name;
+  const model = adding || editing ? stockText_(f.model, 120) : position.model;
   if (adding || editing) {
     if (!name || typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0 || cost > 1000000) throw new Error('Заполни название и закупочную цену');
   }
-  const available = history.reduce(function (sum, r) { return sum + Number(r[7] || 0); }, 0);
+  const available = position ? position.qty : 0;
   if (available + qty < 0) throw new Error('Недостаточно на складе. Сейчас в наличии: ' + available + ' шт.');
   let order = '';
   if (f.order !== undefined && f.order !== null && f.order !== '') {
@@ -637,8 +825,9 @@ function appendStock_(op) {
     sh.appendRow(STOCK_HEAD);
     sh.setFrozenRows(1);
   }
-  sh.appendRow([asText_(op.id), asText_(item), op.op, new Date(), asText_(name), asText_(adding || editing ? stockText_(f.model, 120) : ''),
-    Math.round(cost * 100) / 100, qty, asText_(order), asText_(stockText_(f.note, 500))]);
+  sh.appendRow([asText_(op.id), asText_(item), stockLabel_(op.op, qty), new Date(), asText_(name), asText_(model || ''),
+    moneyCents_(cost) / 100, qty, asText_(order), asText_(stockText_(f.note, 500))]);
+  try { formatStockJournal_(sh); } catch (err) { /* оформление не должно мешать записи остатка */ }
   return { row: sh.getLastRow() };
 }
 

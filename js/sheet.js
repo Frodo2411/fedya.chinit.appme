@@ -14,6 +14,7 @@ export const DELETE_VERSION = 4;
 export const DEVICES_VERSION = 5;
 // Склад, причина отказа и предложенная сумма
 export const STOCK_VERSION = 6;
+export const ORDER_STOCK_VERSION = 7;
 export const STOCK_OPS = ['addStock', 'editStock', 'moveStock'];
 
 export class SheetSync {
@@ -92,7 +93,12 @@ export class SheetSync {
     const ref = target.pendingId || null;
     // Правка ещё не отправленной строки: дописываем в саму очередь, если она сейчас не в пути
     const queued = ref && !this.inflight.has(ref) ? this.outbox.find((o) => o.id === ref) : null;
-    if (queued) Object.assign(queued.fields, fields);
+    if (queued) {
+      const usage = fields.stockUse;
+      const previous = queued.fields.stockUse;
+      Object.assign(queued.fields, fields);
+      if (usage && previous) queued.fields.stockUse = { ...usage, before: previous.before };
+    }
     else {
       // Строка уже ушла (или уходит): номер знаем из ответа таблицы, а если ещё нет — таблица найдёт его по ref
       const sent = ref ? this.sent[ref] : null;
@@ -126,6 +132,7 @@ export class SheetSync {
         id: newId(), op: kind, ref: ref || undefined,
         num: target.num ?? (sent ? sent.num : null), row: target.row ?? (sent ? sent.row : null),
         was: target.was || (sent ? sent.was : undefined), fields: {}, at: Date.now(),
+        stockBase: kind === 'deleteOrder' ? target.stockUse?.rev : undefined,
       });
     }
     this.save();
@@ -161,7 +168,10 @@ export class SheetSync {
     const ops = this.outbox.slice();
     this.inflight = new Set(ops.map((o) => o.id));
     try {
-      const results = await this.call('batch', { ops });
+      // Старый скрипт должен отклонить всю операцию со складом, а не сохранить заказ без списания.
+      const wireOps = ops.map((op) => op.fields?.stockUse && ['addOrder', 'updateOrder'].includes(op.op)
+        ? { ...op, op: op.op + 'Stock' } : op);
+      const results = await this.call('batch', { ops: wireOps });
       const byId = new Map(results.map((r) => [r.id, r]));
       this.outbox = this.outbox.filter((o) => !byId.has(o.id));
       for (const op of ops) {

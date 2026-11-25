@@ -2,13 +2,14 @@
 
 import { h, fill, icon, money, fmtDate, toast, openSheet, field, select, chips, parseNum } from './ui.js';
 import { ACTIVE, computed, isWarranty } from './orders.js';
-import { store, today } from './store.js';
-import { SCRIPT_VERSION, DELETE_VERSION, STOCK_VERSION, STOCK_OPS } from './sheet.js';
+import { newId, store, today } from './store.js';
+import { SCRIPT_VERSION, DELETE_VERSION, STOCK_VERSION, ORDER_STOCK_VERSION, STOCK_OPS } from './sheet.js';
 import { DEVICE_OPS } from './devices.js';
 import { SERVICES, ORDER } from './engine.js';
 import { REPAIR, VAR_APP, lcFirst, cartPart, cartGlues } from './view-prices.js';
 import { discounted, discountLabel, discountNote, setDiscountNote, orderDiscount, promoActive, promoName, workOf } from './discount.js';
-import { openOrderStock, stockReady } from './view-stock.js';
+import { openOrderStockPicker, stockReady } from './view-stock.js';
+import { ORDER_STOCK_LIMIT, orderPartTotal, stockCost } from './stock.js';
 
 const STATUS_CLASS = {
   'Обращение': 'lead', 'Принят': 'work', 'Диагностика': 'work', 'Жду запчасть': 'wait', 'В работе': 'work',
@@ -206,7 +207,8 @@ export function createOrdersView(app) {
     // не записавшееся из выкупа показывает свой раздел
     s.failed.filter((f) => !DEVICE_OPS.includes(f.op) && !STOCK_OPS.includes(f.op)).map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
       h('div', {}, h('b', { text: 'Не записалось в таблицу: ' }), describeOp(f), ' — ', f.error),
-      h('div', { class: 'row', style: 'margin-top:8px' },
+      h('div', { class: 'row wrap', style: 'margin-top:8px' },
+        f.fields?.stockUse ? h('button', { class: 'btn small', text: 'Исправить заказ', onclick: () => openFailedStockOrder(app, f) }) : null,
         h('button', { class: 'btn small', text: 'Повторить', onclick: () => { s.dropFailed(f.id); s.outbox.push({ ...f, error: undefined }); s.save(); s.flush(); } }),
         h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => s.dropFailed(f.id) })))));
     fill(chipsBox, select([
@@ -229,6 +231,40 @@ function describeOp(op) {
   return 'расход';
 }
 
+async function openFailedStockOrder(app, failed) {
+  await app.sheet.load().catch(() => {});
+  const num = failed.num ?? app.sheet.sent[failed.ref]?.num;
+  const order = failed.op === 'updateOrder' ? app.sheet.orders().find((o) => num != null
+    ? String(o.num) === String(num) : o.pendingId === failed.ref) : null;
+  if (failed.op === 'updateOrder' && !order) return toast('Обнови список. Этот заказ не найден.');
+  openOrderForm(app, order, { ...failed.fields, warrantyOrder: failed.warranty || order?.warrantyOrder }, failed);
+}
+
+const roundMoney = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+function orderEstimates(plan, total) {
+  if (!plan || plan.same) return [];
+  const estimates = plan.items.map((part, index) => ({ id: 'part' + index, name: part.name, cost: part.cost }));
+  plan.glues.forEach((glues, index) => glues.forEach((glue, g) => {
+    estimates.push({ id: 'glue' + index + '-' + g, name: glue.name, cost: glue.cost });
+  }));
+  const fallback = roundMoney((Number(total) || 0) - estimates.reduce((sum, x) => sum + Number(x.cost || 0), 0));
+  if (fallback > 0) estimates.push({ id: 'glue-default', name: 'Клей или скотч из расчёта', cost: fallback });
+  return estimates;
+}
+
+function remainingCart(plan, excluded, cartGlue) {
+  if (!plan || !excluded.size) return plan;
+  const items = [];
+  const glues = [];
+  plan.items.forEach((part, index) => {
+    const keptGlue = (plan.glues[index] || []).filter((_, g) => !excluded.has('glue' + index + '-' + g));
+    if (!excluded.has('part' + index)) { items.push(part); glues.push(keptGlue); }
+    else if (cartGlue) keptGlue.forEach((glue) => { items.push(glue); glues.push([]); });
+  });
+  return { ...plan, items, glues };
+}
+
 // Гарантия по заказу: клиент и телефон те же, ремонт бесплатный. cart — детали того заказа (галочка «Те же детали
 // в корзину», по умолчанию выключена: по гарантии может понадобиться другая деталь)
 export function warrantyPrefill(app, order) {
@@ -242,7 +278,7 @@ export function warrantyPrefill(app, order) {
 }
 
 // Форма заказа. prefill — из экрана «Цены» или из заказа, по которому оформляется гарантия (warrantyPrefill).
-export function openOrderForm(app, order, prefill) {
+export function openOrderForm(app, order, prefill, failed) {
   const lists = app.sheet.lists;
   const isNew = !order;
   // cart — детали заказа из «Цен» ({ items, glues }): по галочке «Детали в корзину» лягут в корзину
@@ -251,8 +287,19 @@ export function openOrderForm(app, order, prefill) {
   const lastSource = store.get('lastSource', '');
   const o = isNew
     ? { date: today(), status: 'Обращение', urgent: 'Нет', device: 'Телефон', source: lastSource === REPEAT_SOURCE ? '' : lastSource, ...pre }
-    : { ...order };
-  const orig = { ...o };
+    : { ...order, ...pre };
+  const orig = order || { ...o, stockUse: null };
+  const initialStock = orig.stockUse?.items ?? [];
+  let chosenStock = (o.stockUse?.items ?? []).slice();
+  let directPart = o.stockUse && 'direct' in o.stockUse ? o.stockUse.direct : initialStock.length
+    ? roundMoney((parseNum(o.part) || 0) - stockCost(initialStock)) : (parseNum(o.part) ?? null);
+  const estimates = orderEstimates(cartPlan, o.part);
+  const replaced = () => new Set(chosenStock.map((part) => part.replaces).filter(Boolean));
+  const buyPlan = () => remainingCart(cartPlan, replaced(), app.settings.cartGlue !== false);
+  const readyForOrderStock = () => app.sheet.version >= ORDER_STOCK_VERSION && stockReady(app);
+  const stockTotals = h('div', { class: 'small muted', style: 'margin-top:8px' });
+  let partInput = null;
+  let stockChanged = !!failed;
   // цену из «Цен» запоминаем: переключил на гарантию и обратно — она вернётся
   let paid = isWarranty(o) ? null : o.price;
   const body = h('div');
@@ -267,11 +314,11 @@ export function openOrderForm(app, order, prefill) {
   // новый в день скидки — сразу со скидкой
   const promo = app.settings.promo;
   const promoNow = promoActive(promo, today()) ? promo : null;
-  let disc = isNew || (refusalFields() && o.status === 'Отказ') ? null : orderDiscount(o);
+  let disc = (isNew && !failed) || (refusalFields() && o.status === 'Отказ') ? null : orderDiscount(o);
   let paidDisc = null; // скидка, пока заказ переключён на гарантию
   let commentEl = null;
   const discInfo = h('span');
-  if (isNew && promoNow && !isWarranty(o)) {
+  if (isNew && !failed && promoNow && !isWarranty(o)) {
     disc = { pct: promoNow.pct, name: promoName(promoNow.name), base: o.price ?? null };
     applyDisc();
   }
@@ -310,8 +357,7 @@ export function openOrderForm(app, order, prefill) {
     autocomplete: 'off', autocapitalize: opts.type === 'tel' ? 'off' : 'sentences',
     oninput: (e) => {
       o[key] = opts.num ? parseNum(e.target.value) : e.target.value;
-      // скидка — на работу: другая запчасть — другая скидка
-      if (key === 'part' && disc) discChanged(); else recalc();
+      recalc();
     },
   }));
 
@@ -322,6 +368,7 @@ export function openOrderForm(app, order, prefill) {
       ' · к оплате ', h('b', { text: c.due === null ? '—' : money(c.due) }),
       c.warranty ? ' · гарантия до ' + fmtDate(c.warranty) : '');
     statusHint.textContent = lists.hints[o.status] || '';
+    stockTotals.textContent = chosenStock.length ? 'Со склада ' + money(stockCost(chosenStock)) + ' · все запчасти ' + money(o.part) : '';
     if (disc) {
       const noBase = disc.base === null || disc.base === undefined;
       const noPart = !(Number(o.part) > 0);
@@ -331,6 +378,67 @@ export function openOrderForm(app, order, prefill) {
         noPart ? h('div', { style: 'color:var(--accent);margin-top:4px', text: 'Запчасть не вписана — скидка на всю цену. Впиши запчасть: скидка будет только на работу.' }) : null]
           : 'Работы в цене нет (запчасть не дешевле цены) — скидки нет.');
     }
+  }
+
+  function updatePartTotal() {
+    o.part = orderPartTotal(directPart, chosenStock);
+    if (disc) discChanged(); else recalc();
+  }
+
+  function partField() {
+    partInput = h('input', {
+      class: 'input', value: directPart ?? '', inputmode: 'decimal', autocomplete: 'off',
+      oninput: (e) => {
+        directPart = parseNum(e.target.value);
+        updatePartTotal();
+      },
+    });
+    return field(chosenStock.length ? 'Запчасти вне склада, р.' : 'Запчасть, р.', partInput);
+  }
+
+  function changeStock(next) {
+    const estimateCost = () => {
+      const ids = replaced();
+      return estimates.filter((part) => ids.has(part.id)).reduce((sum, part) => sum + Number(part.cost || 0), 0);
+    };
+    const oldCost = estimateCost();
+    chosenStock = next;
+    const difference = roundMoney(oldCost - estimateCost());
+    if (difference) directPart = Math.max(0, roundMoney((directPart || 0) + difference));
+    stockChanged = true;
+    updatePartTotal();
+    draw();
+  }
+
+  function pickStock(editing) {
+    openOrderStockPicker(app, {
+      model: o.model, initial: initialStock, current: chosenStock, editing, estimates,
+      onPick: (part) => changeStock(editing ? chosenStock.map((item) => item === editing ? part : item) : [...chosenStock, part]),
+    });
+  }
+
+  function stockBlock() {
+    const ready = readyForOrderStock();
+    const legacy = !isNew && o.num ? (app.sheet.cache?.stock || []).filter((entry) =>
+      entry.kind === 'moveStock' && entry.qty < 0 && String(entry.order) === String(o.num)) : [];
+    if (!ready && !stockReady(app) && !chosenStock.length && !legacy.length) return null;
+    const label = (part) => [part.model, part.qty + ' шт.', money(part.cost) + ' / шт.'].filter(Boolean).join(' · ');
+    return h('section', { class: 'card', style: 'margin-top:12px' },
+      h('h3', { text: 'Запчасти со склада' }),
+      legacy.length ? h('p', { class: 'small muted', text: 'По этому заказу уже были отдельные списания: '
+        + legacy.map((part) => (part.name || 'деталь') + ' × ' + Math.abs(part.qty)).join(', ') + '. Их стоимость осталась в прежнем учёте заказа.' }) : null,
+      chosenStock.length ? h('div', { class: 'list' }, chosenStock.map((part) => h('div', { class: 'item' },
+        h('div', { class: 'grow' }, h('div', { class: 't', text: part.name }),
+          h('div', { class: 's', text: label(part) })),
+        h('div', { class: 'row wrap' },
+          h('button', { class: 'btn small', text: 'Изменить', disabled: !ready, onclick: () => pickStock(part) }),
+          h('button', { class: 'btn small ghost', text: 'Убрать', disabled: !ready, onclick: () => changeStock(chosenStock.filter((item) => item !== part)) }))))) : null,
+      ready ? h('div', {},
+        h('button', { class: 'btn small', style: 'margin-top:8px', disabled: chosenStock.length >= ORDER_STOCK_LIMIT,
+          text: '+ Взять со склада', onclick: () => pickStock() }),
+        h('div', { class: 'tiny faint', style: 'margin-top:8px', text: 'Списание и возврат в остаток применяются при сохранении заказа.' }))
+        : h('button', { class: 'btn small', text: 'Обновить Apps Script до версии ' + ORDER_STOCK_VERSION, onclick: () => app.openSheetSetup() }),
+      stockTotals);
   }
   function setStatus(value) {
     const wasRefusal = o.status === 'Отказ';
@@ -404,6 +512,7 @@ export function openOrderForm(app, order, prefill) {
       found.length ? h('div', {},
         h('button', {
           class: 'btn small', onclick: (e) => {
+            if (chosenStock.length && !confirm('В заказе есть свои детали. Добавить в корзину позиции из прайса, указанные ниже?')) return;
             app.addToCart(found.map(forOrder), glues);
             toast('В корзине: ' + found.length + ' дет.' + (app.settings.cartGlue !== false && glues.flat().length ? ' с проклейкой' : ''));
             // второй раз по ошибке не положить
@@ -429,7 +538,8 @@ export function openOrderForm(app, order, prefill) {
       return;
     }
     const what = [order.num ? '№' + order.num : null, order.model, order.client].filter(Boolean).join(' · ');
-    if (!confirm('Удалить заказ' + (what ? ' ' + what : '') + '? Из таблицы он тоже удалится.')) return;
+    const returns = initialStock.length ? ' Детали из заказа вернутся в остаток склада.' : '';
+    if (!confirm('Удалить заказ' + (what ? ' ' + what : '') + '? Из таблицы он тоже удалится.' + returns)) return;
     s.remove(order);
     toast('Заказ удалён' + (s.connected ? '' : ' (уйдёт в таблицу, когда будет связь)'));
     sheet.close();
@@ -485,6 +595,7 @@ export function openOrderForm(app, order, prefill) {
 
   function draw() {
     const w = isWarranty(o);
+    const purchasePlan = buyPlan();
     const commentField = text('comment', 'Комментарий', { area: true });
     commentEl = commentField.querySelector('textarea');
     fill(body,
@@ -534,8 +645,9 @@ export function openOrderForm(app, order, prefill) {
       text('done', 'Что сделано'),
       h('div', { class: 'grid3' },
         priceField(),
-        text('part', 'Запчасть, р.', { inputmode: 'decimal', num: true }),
+        partField(),
         text('prepay', 'Предоплата', { inputmode: 'decimal', num: true })),
+      stockBlock(),
       w ? h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'По гарантии клиент не платит: цена 0. Запчасть — твой расход, уйдёт в минус прибыли месяца.' })
         : refusalFields() && o.status === 'Отказ' ? null : discountBlock(),
       info,
@@ -543,16 +655,14 @@ export function openOrderForm(app, order, prefill) {
       h('label', { class: 'switch', style: 'margin-top:8px' },
         h('input', { type: 'checkbox', checked: o.urgent === 'Да', onchange: (e) => { o.urgent = e.target.checked ? 'Да' : 'Нет'; } }), 'Срочно'),
       commentField,
-      isNew && cartPlan && cartPlan.items.length ? h('label', { class: 'switch', style: 'margin-top:10px' },
+      isNew && purchasePlan?.items.length ? h('label', { class: 'switch', style: 'margin-top:10px' },
         h('input', {
           type: 'checkbox', checked: toCartOn,
-          onchange: (e) => { toCartOn = e.target.checked; if (!cartPlan.same) store.set('orderToCart', toCartOn); },
+          onchange: (e) => { toCartOn = e.target.checked; if (!purchasePlan.same) store.set('orderToCart', toCartOn); },
         }),
-        h('span', {}, cartPlan.same ? 'Те же детали в корзину' : 'Детали в корзину',
-          h('span', { class: 'tiny faint', style: 'display:block', text: planText(cartPlan.items, cartPlan.glues) }))) : null,
+        h('span', {}, purchasePlan.same ? 'Те же детали в корзину' : 'Детали в корзину',
+          h('span', { class: 'tiny faint', style: 'display:block', text: planText(purchasePlan.items, purchasePlan.glues) }))) : null,
       isNew ? null : orderActions(),
-      !isNew && order.num && stockReady(app) ? h('button', { class: 'btn small block', style: 'margin-top:16px',
-        text: 'Списать деталь со склада', onclick: () => openOrderStock(app, order) }) : null,
       // по выданному заказу можно сразу оформить гарантию
       !isNew && !w && o.num ? h('button', {
         class: 'btn small block', style: 'margin-top:16px', text: 'Гарантия по этому заказу',
@@ -561,6 +671,20 @@ export function openOrderForm(app, order, prefill) {
       isNew ? null : h('button', { class: 'btn small danger block', style: 'margin-top:16px', text: 'Удалить заказ', onclick: removeOrder }),
     );
     recalc();
+  }
+
+  function sendOrder(fields, warranty) {
+    if (failed) {
+      const s = app.sheet;
+      s.dropFailed(failed.id);
+      s.outbox.push({ ...failed, fields, warranty, error: undefined });
+      s.save();
+      s.flush();
+    } else if (isNew) {
+      app.sheet.add('addOrder', fields, warranty ? { warranty: true } : undefined);
+    } else {
+      app.sheet.update('updateOrder', order, fields);
+    }
   }
 
   const save = h('button', {
@@ -573,22 +697,42 @@ export function openOrderForm(app, order, prefill) {
       if (w && String(o.phone).replace(/\D/g, '').length < 7) { toast('Проверь телефон клиента'); return; }
       if (oldScript()) { toast('Сначала обнови скрипт таблицы: на этом устройстве он старый (версия ' + app.sheet.version + ')', 4000); return; }
       if (quotedInput?.value.trim() && (o.quoted === null || o.quoted < 0)) { toast('Проверь предложенную сумму'); return; }
+      const withStock = Boolean(initialStock.length || chosenStock.length);
+      const writesStock = withStock && (stockChanged || (o.part ?? null) !== (orig.part ?? null));
+      if (withStock && partInput.value.trim() && (directPart === null || (chosenStock.length && directPart < 0))) {
+        return toast('Проверь стоимость запчастей вне склада');
+      }
+      if (writesStock && !readyForOrderStock()) return toast('Для списания из заказа обнови скрипт до версии ' + ORDER_STOCK_VERSION);
+      if (chosenStock.length && o.status === 'Отказ' && o.refusal === 'Вернул') {
+        return toast('Если детали возвращены, убери их из заказа. Если использованы, измени отметку о возврате.', 4500);
+      }
+      const stockUse = writesStock ? {
+        rev: newId(), before: orig.stockUse?.rev || '', date: today(), direct: directPart,
+        items: chosenStock.map(({ item, name, model, qty, cost }) => ({ item, name, model, qty, cost })),
+      } : null;
       if (isNew) {
         const fields = {};
         for (const k of EDITABLE) if (o[k] !== null && o[k] !== undefined && o[k] !== '') fields[k] = o[k];
         if (!fields.model && !fields.problem && !fields.client) { toast('Заполни модель или неисправность'); return; }
         if (fields.source && fields.source !== REPEAT_SOURCE) store.set('lastSource', fields.source);
-        app.sheet.add('addOrder', fields, w ? { warranty: true } : undefined);
-        const toCart = cartPlan && cartPlan.items.length && toCartOn;
-        if (toCart) app.addToCart(cartPlan.items.map(forOrder), cartPlan.glues);
+        if (stockUse) fields.stockUse = stockUse;
+        sendOrder(fields, w);
+        const purchasePlan = buyPlan();
+        const toCart = purchasePlan?.items.length && toCartOn;
+        if (toCart) app.addToCart(purchasePlan.items.map(forOrder), purchasePlan.glues);
         const off = disc && o.price !== null && o.price < disc.base ? ' со скидкой ' + String(disc.pct).replace('.', ',') + '% на работу' : '';
-        toast((w ? 'Гарантийный заказ записан' : 'Заказ записан') + off + (app.sheet.connected ? '' : ' в очередь') + (toCart ? ', детали в корзине' : ''));
+        toast((w ? 'Гарантийный заказ записан' : 'Заказ записан') + off + (app.sheet.connected && !stockUse ? '' : ' в очередь') + (toCart ? ', детали в корзине' : ''));
       } else {
         const changed = {};
         for (const k of EDITABLE) if ((o[k] ?? null) !== (orig[k] ?? null)) changed[k] = o[k] ?? '';
-        if (!Object.keys(changed).length) { sheet.close(); return; }
-        app.sheet.update('updateOrder', order, changed);
-        toast('Сохранено');
+        if (stockUse) changed.stockUse = stockUse;
+        if (!Object.keys(changed).length) {
+          if (failed) app.sheet.dropFailed(failed.id);
+          sheet.close();
+          return;
+        }
+        sendOrder(changed, w);
+        toast(stockUse ? 'Заказ и склад обновятся после синхронизации' : 'Сохранено');
       }
       sheet.close();
       app.redraw();

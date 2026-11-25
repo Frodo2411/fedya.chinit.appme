@@ -637,7 +637,7 @@ await test('заказы: формулы таблицы', () => {
   assert.equal(computed({ price: null, part: 40, status: 'Отказ', refusal: 'Вернул' }, 3).profit, 0);
   assert.equal(computed({ price: null, part: 40, status: 'Отказ', refusal: 'Осталась у меня' }, 3).profit, -40);
   const s = summary([{ date: '2026-10-01', status: 'Выдан', price: 100, part: 40, issued: '2026-10-02' }], [{ date: '2026-10-03', sum: 15 }], '2026-10', 3);
-  assert.deepEqual(s, { taken: 1, issued: 1, revenue: 100, profit: 60, expenses: 15, net: 45, warranty: 0, warrantyCost: 0, discounted: 0, discountSum: 0 });
+  assert.deepEqual(s, { taken: 1, issued: 1, revenue: 100, profit: 60, expenses: 15, net: 45, warranty: 0, warrantyCost: 0, discounted: 0, discountSum: 0, stockCost: 0 });
 });
 
 await test('гарантийные заказы: признак и итоги', () => {
@@ -652,7 +652,7 @@ await test('гарантийные заказы: признак и итоги', 
     { num: 'Г2', date: '2026-10-22', status: 'В работе', price: 0, part: 30 },
   ];
   const s = summary(orders, [], '2026-10', 4);
-  assert.deepEqual(s, { taken: 3, issued: 2, revenue: 100, profit: 35, expenses: 0, net: 35, warranty: 1, warrantyCost: 25, discounted: 0, discountSum: 0 });
+  assert.deepEqual(s, { taken: 3, issued: 2, revenue: 100, profit: 35, expenses: 0, net: 35, warranty: 1, warrantyCost: 25, discounted: 0, discountSum: 0, stockCost: 0 });
 });
 
 await test('скидка на работу: цена со скидкой, запись в комментарии, итоги', async () => {
@@ -781,7 +781,7 @@ await test('Apps Script: ключ, список, запись, повтор, ф�
   assert.equal(gas.post({ op: 'kvGet', key: 'test-key', name: 'p' }).data.value.slice(0, 4), '+abc');
   assert.ok(fr > 0);
   // гарантийные заказы: своя нумерация Г1, Г2…, обычная не сбивается; столбец «Гарантия по №» появляется сам
-  assert.equal(gas.post({ op: 'list', key: 'test-key' }).data.version, 6);
+  assert.equal(gas.post({ op: 'list', key: 'test-key' }).data.version, 7);
   const nextNum = Math.max(...gas.post({ op: 'list', key: 'test-key' }).data.orders.map((o) => (typeof o.num === 'number' ? o.num : 0))) + 1;
   const wr = gas.post({ op: 'batch', key: 'test-key', ops: [
     { id: 'w1', op: 'addOrder', warranty: true, fields: { model: 'iPhone 11', client: 'Иван', phone: '291112233', wfor: 2, price: 0, part: 25 } },
@@ -860,7 +860,7 @@ await test('Apps Script: номер «№» считает формула — г
   const fix = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'retry1', op: 'updateOrder', ref: 'old1', num: 'Г2', row: n.row, fields: { status: 'Принят' } }] }).data[0];
   assert.equal(fix.ok, true, fix.error);
   assert.deepEqual([sh.getRange(n.row, 1).getValue(), sh.getRange(n.row, 5).getValue()], ['Г2', 'Принят'], '«Повторить» после обновления скрипта чинит номер');
-  assert.equal(gas.post({ op: 'list', key: 'k' }).data.version, 6);
+  assert.equal(gas.post({ op: 'list', key: 'k' }).data.version, 7);
   // удаление при формуле в «№»: строка остаётся с номером-числом (номера ниже не съедут), остальное очищено, в списке её нет
   const d = gas.post({ op: 'batch', key: 'k', ops: [{ id: 'd1', op: 'deleteOrder', num: 1, row: 2 }] }).data[0];
   assert.deepEqual([d.ok, d.cleared, d.row], [true, true, 2], d.error);
@@ -926,7 +926,7 @@ await test('очередь приложения: правка заказа во 
   assert.equal(s.failed.length, 0);
   const g = s.orders().find((o) => o.num === 'Г1');
   assert.ok(g && isWarranty(g), 'после отправки номер Г1');
-  assert.equal(s.version, 6);
+  assert.equal(s.version, 7);
   assert.deepEqual([sh.getRange(g.row, 1).getValue(), sh.getRange(g.row, 3).getValue()], ['Г1', 'iPhone 11']);
   s.update('updateOrder', g, { status: 'Выдан' });
   while (s.outbox.length || s.running) await (s.running || s.flush());
@@ -936,7 +936,7 @@ await test('очередь приложения: правка заказа во 
   const plain = globalThis.fetch;
   globalThis.fetch = async (url, o) => {
     const t = await (await plain(url, o)).text();
-    return new Response(url.endsWith('/old') ? t.replace(/"version":6/g, '"version":1') : t);
+    return new Response(url.endsWith('/old') ? t.replace(/"version":7/g, '"version":1') : t);
   };
   const phone = new SheetSync();
   phone.configure({ url: 'https://script.google.com/old', key: 'k' });
@@ -945,7 +945,7 @@ await test('очередь приложения: правка заказа во 
   assert.equal(await phone.followUrl(), false, 'адреса нового скрипта в таблице ещё нет');
   assert.equal(await s.followUrl(), false, 'компьютер только оставляет адрес');
   assert.equal(await phone.followUrl(), true);
-  assert.deepEqual([phone.cfg.url, phone.version], ['https://script.google.com/x', 6]);
+  assert.deepEqual([phone.cfg.url, phone.version], ['https://script.google.com/x', 7]);
   assert.equal(await phone.followUrl(), false, 'уже на новом адресе');
   globalThis.fetch = plain;
   // удаление: не ушедший в таблицу заказ убирается из очереди, ушедший — операцией в таблице
@@ -1032,7 +1032,7 @@ await test('Apps Script: выкуп — устройства и запчасти
   const dev = book.getSheetByName('Устройства');
   const prt = book.getSheetByName('Запчасти');
   const list = gas.post({ op: 'list', key: 'k' }).data;
-  assert.equal(list.version, 6);
+  assert.equal(list.version, 7);
   assert.deepEqual(list.devices.map((d) => [d.num, d.device, d.buy, d.row]), [[1, 'Apple Watch S6 44 мм', 17.5, 3], [2, 'AirPods 1', 17.5, 4]]);
   assert.deepEqual([list.devices[0].date, list.devices[0].status, list.devices[1].problem, list.devices[1].date], ['2026-11-01', 'Куплено', 'нет одного наушника', null]);
   assert.deepEqual(list.parts.map((p) => [p.dnum, p.name, p.where, p.price]), [[1, 'Ремешок', 'AliExpress', 5]]);
@@ -1522,7 +1522,7 @@ await test('выбор клиента: разные форматы номера,
 
 await test('Apps Script: поля отказа, склад, привязка к заказу, повтор и контроль остатка', async () => {
   const { makeBook, loadScript } = await import('./gas-mock.mjs');
-  const { stockPositions } = await imp('js/view-stock.js');
+  const { stockPositions } = await imp('js/stock.js');
   const orders = ['№', 'Дата приёма', 'Клиент', 'Статус', 'Цена для клиента', 'Запчасть', 'Если отказ'];
   const book = makeBook({ Заказы: [orders.map((v) => ({ v, f: '' }))], Расходы: [[{ v: 'Дата', f: '' }]] });
   const gas = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, 'k');
@@ -1548,6 +1548,132 @@ await test('Apps Script: поля отказа, склад, привязка к 
   const [item] = stockPositions(list().stock);
   assert.deepEqual([item.name, item.model, item.cost, item.qty, item.history.length], ['Проклейка OLED', 'iPhone 15', 2, 1, 4]);
   assert.deepEqual([item.history[2].order, item.history[2].cost, item.history[2].note], ['1', 1.5, '+использовано']);
+});
+
+await test('заказ со склада: количество, себестоимость, старые журналы, конкурентные правки и возврат', async () => {
+  const { makeBook, loadScript } = await import('./gas-mock.mjs');
+  const { stockPositions } = await imp('js/stock.js');
+  const cell = (v, f = '') => ({ v, f });
+  const header = ['№', 'Клиент', 'Дата приёма', 'Модель', 'Цена для клиента', 'Запчасть', 'Прибыль', 'Статус', 'Если отказ'];
+  const stockHead = ['ID операции', 'ID позиции', 'Действие', 'Дата', 'Название', 'Модель', 'Цена, BYN', 'Количество', 'Заказ №', 'Примечание'];
+  const book = makeBook({
+    Заказы: [header.map(cellValue => cell(cellValue)), [cell(1), cell('Старый'), cell({ date: '2026-11-24' }), cell('iPhone 12'),
+      cell(50), cell(10), cell(40, '=E2-F2'), cell('Выдан'), cell('')]],
+    Расходы: [['Дата'].map((x) => cell(x))],
+    'Склад (журнал)': [
+      stockHead.map((x) => cell(x)),
+      ['stock-1', 'stock-1', 'addStock', { date: '2026-11-24' }, 'Проклейка', 'iPhone 12', 2.75, 5, '', ''].map((x) => cell(x)),
+      ['stock-2', 'stock-1', 'moveStock', { date: '2026-11-24' }, '', '', 2.75, -1, '1', ''].map((x) => cell(x)),
+    ],
+  });
+  const gas = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, 'k');
+  const batch = (...ops) => gas.post({ op: 'batch', key: 'k', ops }).data;
+  const list = () => gas.post({ op: 'list', key: 'k' }).data;
+  const inventory = () => { const data = list(); return stockPositions(data.stock, data.orders)[0]; };
+  const details = (rev, before, qty, cost = 2.75, direct = 20) => ({
+    rev, before, direct, items: qty ? [{ item: 'stock-1', qty, cost }] : [],
+  });
+  const create = (id, stockUse) => ({ id, op: 'addOrderStock', fields: { client: 'Федя', date: '2026-11-25', model: 'iPhone 12', price: 100,
+    part: 999, status: 'Выдан', stockUse } });
+  assert.equal(inventory().qty, 4);
+  const op = create('order-2', details('reserve-2', '', 2));
+  const first = batch(op)[0];
+  assert.deepEqual([first.ok, first.num, inventory().qty], [true, 2, 2], first.error);
+  const orders = book.getSheetByName('Заказы');
+  assert.equal(orders.getRange(1, 6).getValue(), 'Запчасть');
+  assert.equal(orders.getRange(2, 8).getFormula(), '=E2-F2', 'формула справа от нового столбца сохранена');
+  assert.ok(orders.hiddenColumns.has(7));
+  const journal = book.getSheetByName('Склад (журнал)');
+  assert.deepEqual([journal.getRange(2, 3).getValue(), journal.getRange(3, 3).getValue(), journal.getRange(3, 5).getValue()],
+    ['Позиция добавлена', 'Списание', 'Проклейка']);
+  assert.deepEqual([...journal.hiddenColumns], [1, 2]);
+  let data = list();
+  let o = data.orders.find((x) => x.num === 2);
+  assert.deepEqual([o.part, o.stockUse.items[0].model, o.stockUse.items[0].cost, data.expenses.length], [25.5, 'iPhone 12', 2.75, 0]);
+  assert.deepEqual(inventory().history.map((entry) => [entry.kind, entry.qty]), [['addStock', 5], ['moveStock', -1], ['orderStock', -2]]);
+  const result = summary(data.orders, data.expenses, '2026-11', 4);
+  assert.deepEqual([result.profit, result.stockCost, result.expenses], [114.5, 5.5, 0]);
+  gas.props.set('done', '{}');
+  assert.equal(batch(op)[0].repeat, true, 'повтор не создаёт ещё один заказ');
+  assert.match(batch(create('order-over', details('reserve-over', '', 3)))[0].error, /доступно 2/);
+  assert.equal(list().orders.length, 2, 'при нехватке заказ не создаётся');
+  assert.match(batch({ id: 'stock-manual', op: 'moveStock', fields: { item: 'stock-1', qty: -3 } })[0].error, /2 шт/);
+  assert.equal(batch({ id: 'stock-edit', op: 'editStock', fields: { item: 'stock-1', name: 'Проклейка', model: 'iPhone 12', cost: 3 } })[0].ok, true);
+  assert.match(batch(create('order-stale-cost', details('reserve-stale-cost', '', 1)))[0].error, /цена изменилась/);
+  const update = (id, stockUse, extra) => ({ id, op: 'updateOrderStock', num: 2, fields: { stockUse, ...extra } });
+  assert.match(batch(update('order-refusal', details('reserve-refusal', 'reserve-2', 1), { status: 'Отказ', refusal: 'Вернул' }))[0].error, /убери их из заказа/);
+  assert.equal(batch(update('order-change', details('reserve-change', 'reserve-2', 1)))[0].ok, true);
+  data = list();
+  o = data.orders.find((x) => x.num === 2);
+  assert.deepEqual([o.part, o.stockUse.items[0].cost, inventory().qty], [22.75, 2.75, 3], 'у сохранённой детали цена не меняется');
+  assert.match(batch(update('order-stale', details('reserve-stale', 'reserve-2', 2)))[0].error, /уже изменились/);
+  assert.match(batch({ id: 'stale-part', num: 2, op: 'updateOrder', fields: { part: 30 } })[0].error, /складские детали/);
+  assert.match(batch({ id: 'delete-stale', num: 2, op: 'deleteOrder', stockBase: 'reserve-2' })[0].error, /перед удалением/);
+  assert.equal(batch(update('order-return', details('reserve-return', 'reserve-change', 0, 0, null)))[0].ok, true);
+  assert.deepEqual([list().orders[1].part, inventory().qty], [null, 4]);
+  const next = batch(create('order-new', details('reserve-new', '', 1, 3, null)))[0];
+  assert.deepEqual([next.ok, list().orders[2].part, inventory().qty], [true, 3, 3]);
+  assert.equal(batch({ id: 'order-delete', op: 'deleteOrder', num: next.num, stockBase: 'reserve-new' })[0].ok, true);
+  assert.equal(inventory().qty, 4);
+});
+
+await test('сбой при записи склада оставляет прежний остаток и себестоимость, затем повтор проходит', async () => {
+  const { makeBook, loadScript } = await import('./gas-mock.mjs');
+  const { stockPositions } = await imp('js/stock.js');
+  const cell = (v) => ({ v, f: '' });
+  const book = makeBook({
+    Заказы: [['№', 'Клиент', 'Запчасть'].map(cell), [1, 'Тест', 5].map(cell)],
+    Расходы: [['Дата'].map(cell)],
+  });
+  const gas = loadScript(path.join(ROOT, 'apps-script/Code.gs'), book, 'k');
+  const batch = (op) => gas.post({ op: 'batch', key: 'k', ops: [op] }).data[0];
+  assert.equal(batch({ id: 'stock-1', op: 'addStock', fields: { name: 'Проклейка', cost: 3, qty: 5 } }).ok, true);
+  const sh = book.getSheetByName('Заказы');
+  const range = sh.getRange.bind(sh);
+  let fail = true;
+  sh.getRange = (r, c, nr, nc) => {
+    const result = range(r, c, nr, nc);
+    if (fail && r === 2 && c === 3 && nc === 2) {
+      result.setValues = () => { fail = false; throw new Error('Сбой записи'); };
+    }
+    return result;
+  };
+  const op = { id: 'stock-apply', op: 'updateOrderStock', num: 1,
+    fields: { stockUse: { rev: 'reserve-1', before: '', direct: 5, items: [{ item: 'stock-1', qty: 2, cost: 3 }] } } };
+  const read = () => {
+    const data = gas.post({ op: 'list', key: 'k' }).data;
+    return [data.orders[0].part, stockPositions(data.stock, data.orders)[0].qty];
+  };
+  assert.match(batch(op).error, /Сбой записи/);
+  assert.deepEqual(read(), [5, 5]);
+  assert.equal(batch(op).ok, true);
+  assert.deepEqual(read(), [11, 3]);
+  assert.equal(batch(op).repeat, true);
+  assert.deepEqual(read(), [11, 3]);
+});
+
+await test('офлайн-очередь объединяет правки нового заказа со складом и передаёт безопасную команду', async () => {
+  const { SheetSync } = await imp('js/sheet.js');
+  const ls = new Map();
+  globalThis.localStorage = { getItem: (k) => ls.get(k) ?? null, setItem: (k, v) => ls.set(k, v), removeItem: (k) => ls.delete(k) };
+  const sync = new SheetSync();
+  sync.add('addOrder', { client: 'Тест', part: 5, stockUse: { rev: 'reserve-1', before: '', direct: 0, items: [{ qty: 1 }] } });
+  const order = sync.orders()[0];
+  sync.update('updateOrder', order, { part: 10, stockUse: { rev: 'reserve-2', before: 'reserve-1', direct: 0, items: [{ qty: 2 }] } });
+  sync.update('updateOrder', sync.orders()[0], { problem: 'Проклейка' });
+  assert.equal(sync.outbox.length, 1);
+  assert.deepEqual([sync.orders()[0].part, sync.orders()[0].stockUse.before, sync.orders()[0].problem], [10, '', 'Проклейка']);
+  let submitted;
+  sync.call = async (op, data) => {
+    if (op === 'list') return { version: 6, orders: [] };
+    submitted = data.ops;
+    return submitted.map((request) => ({ id: request.id, ok: false, error: 'Неизвестная операция: ' + request.op }));
+  };
+  sync.configure({ url: 'https://script.google.com/mock', key: 'k' });
+  await sync.flush();
+  assert.equal(submitted[0].op, 'addOrderStock');
+  assert.equal(sync.failed[0].fields.stockUse.items[0].qty, 2);
+  assert.deepEqual(sync.orders(), [], 'на старом скрипте обычная запись без склада не отправлена');
 });
 
 // --- Настоящий прайс: только с паролем
