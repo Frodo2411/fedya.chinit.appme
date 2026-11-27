@@ -13,15 +13,17 @@ const NM = [
   [pyRe(String.raw`\bpro\s*plus\b`, 'g'), 'pro+'],
   [pyRe(String.raw`\s*\bplus\b`, 'g'), '+'],
   [pyRe(String.raw`\s+\+`, 'g'), '+'],
-  [pyRe(String.raw`\b4g\b`, 'g'), ' '],
+  [pyRe(String.raw`\b(?:4g|wi-?fi|lte|3g)\b`, 'g'), ' '],
   [pyRe(String.raw`\(\s*(20\d\d)\s*\)`, 'g'), ' $1 '],
+  [pyRe(String.raw`(\d+(?:\.\d+)?)\s*(?:''|"|”|″)`, 'g'), '$1'],
   [pyRe(String.raw`(?<=[a-z])(?=\d)`, 'g'), ' '],
 ];
 
 export function normModel(s) {
   let t = s.toLowerCase().replace(/ё/g, 'е');
-  // слитно у поставщика: «iPhone11», «iPhoneXR», «13Pro», «16Plus»
+  // слитно у поставщика: «iPhone11», «iPhoneXR», «13Pro», «16Plus», «46 мм»
   t = t.replace(/\biphone(?=[0-9a-zа-я])/g, 'iphone ').replace(/(\d)(pro|plus|max|mini|air)\b/g, '$1 $2');
+  t = t.replace(/(\d{2})\s*(?:мм(?![а-яё])|mm\b)/g, '$1mm');
   t = t.replace(/\biphone 17 air\b/, 'iphone air'); // у поставщиков «iPhone 17 Air», на сайте «iPhone Air»
   for (const [re, rep] of NM) t = t.replace(re, rep);
   t = t.replace(/\s+/g, ' ').trim();
@@ -61,14 +63,17 @@ const LOOKALIKE = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O
 const INCH55 = /((?:\d+[sS]?\s*\/\s*)*\d+[sS]?)\s*\(5[,.]5\s*["'”″]*\s*\)/g;
 const applePlus = (s) => (/iPhone/i.test(s) ? s.replace(INCH55, (_, g) => g.split(/\s*\/\s*/).map((x) => x + ' Plus').join('/')) : s);
 
+const SEG_MM = /\(\s*(\d{2})\s*(?:мм|mm)\s*\)/gi;
+const SEG_WIFI_SLASH = /\bwi-?fi\s*\/\s*(?:lte|5g|3g)\b/gi;
+
 export function modelSegment(name) {
   let s = name.trim().replace(KIND_PREFIX, '');
   // русская буква внутри модели, похожая на латинскую: «iPhoneХS», «Redmi 13С», «iPhone5С»
   s = s.replace(/(?<=[0-9A-Za-z])[АВЕКМНОРСТХаеорсхук]|[АВЕКМНОРСТХаеорсх](?=[0-9A-Za-z])/g, (ch) => LOOKALIKE[ch] || ch);
-  s = applePlus(s).replace(/\bApple\s+(?=iPhone)/i, '');
+  s = applePlus(s).replace(/\bApple\s+(?=iPhone|iPad)/i, '');
   s = s.replace(/\biPhone(?=[0-9A-Za-zА-Яа-яЁё])/gi, 'iPhone ').replace(/(\d)(Pro|Plus|Max|mini|Air)\b/gi, '$1 $2').replace(/\bSE(?=\d)/g, 'SE ');
   s = beforeFirst(s, SEG_SPLIT);
-  s = s.replace(SEG_YEAR, ' $1');
+  s = s.replace(SEG_YEAR, ' $1').replace(SEG_MM, ' $1mm').replace(/(\d{2})\s*мм(?![а-яё])/gi, '$1mm').replace(SEG_WIFI_SLASH, ' ');
   s = s.replace(SEG_PAREN, ' ');
   s = s.replace(SEG_TAIL, '');
   s = s.replace(SEG_QUALITY, '').replace(SEG_ESIM, '');
@@ -77,8 +82,8 @@ export function modelSegment(name) {
   return pyStrip(s.replace(/\s+/g, ' '), ' ,');
 }
 
-const BRAND_WORDS = ['Xiaomi', 'Redmi', 'Poco', 'Mi', 'Huawei', 'Honor', 'Samsung', 'Galaxy', 'Realme', 'iPhone', 'Google', 'Pixel'];
-const FAMILY_LEADS = ['Xiaomi', 'Redmi', 'Poco', 'Huawei', 'Honor', 'Samsung', 'Realme', 'iPhone', 'Google', 'Pixel'];
+const BRAND_WORDS = ['Xiaomi', 'Redmi', 'Poco', 'Mi', 'Huawei', 'Honor', 'Samsung', 'Galaxy', 'Realme', 'iPhone', 'iPad', 'Apple', 'Google', 'Pixel'];
+const FAMILY_LEADS = ['Xiaomi', 'Redmi', 'Poco', 'Huawei', 'Honor', 'Samsung', 'Realme', 'iPhone', 'iPad', 'Apple', 'Google', 'Pixel'];
 // Бренды, которых нет на сайте (их модели только в приложении): слово в названии → семья. Регистр любой: TECNO, Oppo.
 const MORE_FAM = {
   tecno: 'tecno', itel: 'itel', infinix: 'infinix', vivo: 'vivo', iqoo: 'vivo', oppo: 'oppo', oneplus: 'oneplus', nothing: 'nothing', cmf: 'nothing',
@@ -201,6 +206,8 @@ export function networkOk(name, model) {
   return true;
 }
 
+const INCH_SIZE = /\s+\d{1,2}(?:[.,]\d{1,2})?\s*(?:''|"|”|″)/g;
+
 export function matchModels(name, idx) {
   const found = [];
   for (const alts of items(name)) {
@@ -208,6 +215,11 @@ export function matchModels(name, idx) {
       const k = normModel(it);
       let cands = [...(idx.get(k) || [])];
       if (!cands.length && k.endsWith(' 5g')) cands = (idx.get(k.slice(0, -3)) || []).filter(only5gAllowed);
+      if (!cands.length && INCH_SIZE.test(it)) {
+        const noInch = normModel(it.replace(INCH_SIZE, ' '));
+        cands = [...(idx.get(noInch) || [])];
+        if (!cands.length && noInch.endsWith(' 5g')) cands = (idx.get(noInch.slice(0, -3)) || []).filter(only5gAllowed);
+      }
       if (cands.length) {
         for (const m of cands) if (!found.includes(m)) found.push(m);
         break;
@@ -347,10 +359,10 @@ export function lineKey(name) {
 }
 
 // --- Для новых строк прайса: что за деталь и для какого бренда
-const FAM = { iphone: 'apple', samsung: 'samsung', galaxy: 'samsung', xiaomi: 'xiaomi', redmi: 'xiaomi', poco: 'xiaomi', mi: 'xiaomi', huawei: 'huawei', honor: 'huawei', realme: 'realme', google: 'google', pixel: 'google', ...MORE_FAM };
-const BRAND_RE = new RegExp(String.raw`iPhone|Samsung|Galaxy|Xiaomi|Redmi|Poco|Huawei|Honor|Realme|Google|Pixel|\bMi\b|\b(?:` + Object.keys(MORE_FAM).join('|') + String.raw`)\b`, 'gi');
+const FAM = { iphone: 'apple', ipad: 'ipad', 'apple watch': 'applewatch', samsung: 'samsung', galaxy: 'samsung', xiaomi: 'xiaomi', redmi: 'xiaomi', poco: 'xiaomi', mi: 'xiaomi', huawei: 'huawei', honor: 'huawei', realme: 'realme', google: 'google', pixel: 'google', ...MORE_FAM };
+const BRAND_RE = new RegExp(String.raw`iPhone|iPad|Apple\s+Watch|Samsung|Galaxy|Xiaomi|Redmi|Poco|Huawei|Honor|Realme|Google|Pixel|\bMi\b|\b(?:` + Object.keys(MORE_FAM).join('|') + String.raw`)\b`, 'gi');
 export const BRAND_FAM = {
-  iPhone: 'apple', Samsung: 'samsung', Xiaomi: 'xiaomi', Redmi: 'xiaomi', Poco: 'xiaomi', Huawei: 'huawei', Honor: 'huawei', Realme: 'realme', Google: 'google',
+  iPhone: 'apple', iPad: 'ipad', 'Apple Watch': 'applewatch', Samsung: 'samsung', Xiaomi: 'xiaomi', Redmi: 'xiaomi', Poco: 'xiaomi', Huawei: 'huawei', Honor: 'huawei', Realme: 'realme', Google: 'google',
   Tecno: 'tecno', Itel: 'itel', Infinix: 'infinix', Vivo: 'vivo', OPPO: 'oppo', OnePlus: 'oneplus', Nothing: 'nothing', Oukitel: 'oukitel', Blackview: 'blackview',
   Doogee: 'doogee', Ulefone: 'ulefone', TCL: 'tcl', ZTE: 'zte', Lenovo: 'lenovo', Motorola: 'motorola', Nokia: 'nokia', Sony: 'sony', Wiko: 'wiko',
 };
@@ -359,7 +371,7 @@ const BRAND_ONE = new RegExp(BRAND_RE.source, 'i');
 
 export function families(name) {
   const out = new Set();
-  for (const m of name.matchAll(BRAND_RE)) out.add(FAM[m[0].toLowerCase()]);
+  for (const m of name.matchAll(BRAND_RE)) out.add(FAM[m[0].toLowerCase().replace(/\s+/g, ' ')]);
   return out;
 }
 
@@ -452,6 +464,8 @@ function moreModels(name) {
   const dash = tail.indexOf(' - ');
   const head = applePlus(dash < 0 ? tail : tail.slice(0, dash))
     .replace(/\(\s*(20\d\d)\s*\)/g, ' $1')
+    .replace(SEG_MM, ' $1mm')
+    .replace(SEG_WIFI_SLASH, ' ')
     .replace(/\([^)]*\)/g, ' ')
     .replace(SEG_ESIM, '')
     .replace(/\s*\+\s*(?:OCA|рамк[а-яё]*)(?=\s|$)/gi, ' ')
@@ -470,6 +484,7 @@ function parenModels(name, idx) {
     if (/^(19|20)\d\d$/.test(inner)) continue;
     // код до или после модели внутри скобок: «(A346B A34 5G/A546E A54 5G)», «( N910C Note 4 )», «(S22 S901B)»
     const clean = inner
+      .replace(SEG_WIFI_SLASH, ' ')
       .replace(/\b[A-Z]{1,3}\d{3,4}[A-Z]{0,3}\s+(?=\S)/g, '')
       .replace(/(?<=\S)\s+[A-Z]{1,3}\d{3,4}[A-Z]{1,3}\b/g, '');
     const c = BRAND_ONE.test(clean) ? clean : b[0] + ' ' + clean;

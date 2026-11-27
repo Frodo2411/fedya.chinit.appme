@@ -307,6 +307,63 @@ export const APP_MODELS = [
   ['Oukitel', 'Oukitel WP62', 2025], ['Oukitel', 'Oukitel WP300', 2025],
   // Wiko — 3
   ['Wiko', 'Wiko 10', 2022], ['Wiko', 'Wiko T10', 2022], ['Wiko', 'Wiko T50', 2022],
+  // Планшеты и часы
+  // iPad — 26
+  ['iPad', 'iPad 3', 2012], ['iPad', 'iPad 4', 2012], ['iPad', 'iPad mini', 2012], ['iPad', 'iPad Air', 2013],
+  ['iPad', 'iPad mini 2', 2013, ['iPad mini 2 Retina']], ['iPad', 'iPad Air 2', 2014, ['iPad Air 2i']],
+  ['iPad', 'iPad mini 3', 2014], ['iPad', 'iPad mini 4', 2015], ['iPad', 'iPad Pro 9.7', 2016],
+  ['iPad', 'iPad 5', 2017, ['iPad 9.7 2017']], ['iPad', 'iPad Pro 10.5', 2017], ['iPad', 'iPad 6', 2018, ['iPad 9.7 2018']],
+  ['iPad', 'iPad 7', 2019, ['iPad 10.2 2019']], ['iPad', 'iPad Air 3', 2019, ['iPad Air 3 10.5 2019']],
+  ['iPad', 'iPad mini 5', 2019, ['iPad mini 5 2019']], ['iPad', 'iPad 8', 2020, ['iPad 10.2 2020']], ['iPad', 'iPad Air 4', 2020],
+  ['iPad', 'iPad 9', 2021, ['iPad 10.2 2021']], ['iPad', 'iPad mini 6', 2021], ['iPad', 'iPad 10', 2022], ['iPad', 'iPad Air 5', 2022],
+  ['iPad', 'iPad Pro 11', 2022], ['iPad', 'iPad Pro 12.9', 2022], ['iPad', 'iPad Air 6 11', 2024], ['iPad', 'iPad Air 6 13', 2024],
+  ['iPad', 'iPad mini 7', 2024],
+  // Apple Watch — 21
+  ['Apple Watch', 'Apple Watch 1 38mm', 2015], ['Apple Watch', 'Apple Watch 1 42mm', 2015],
+  ['Apple Watch', 'Apple Watch 2 38mm', 2016], ['Apple Watch', 'Apple Watch 2 42mm', 2016],
+  ['Apple Watch', 'Apple Watch 3 38mm', 2017], ['Apple Watch', 'Apple Watch 3 42mm', 2017],
+  ['Apple Watch', 'Apple Watch 4 40mm', 2018], ['Apple Watch', 'Apple Watch 4 44mm', 2018],
+  ['Apple Watch', 'Apple Watch 5 40mm', 2019], ['Apple Watch', 'Apple Watch 5 44mm', 2019],
+  ['Apple Watch', 'Apple Watch SE 40mm', 2020, ['Apple Watch SE 2022 40mm']],
+  ['Apple Watch', 'Apple Watch SE 44mm', 2020, ['Apple Watch SE 2022 44mm']],
+  ['Apple Watch', 'Apple Watch 6 40mm', 2020], ['Apple Watch', 'Apple Watch 6 44mm', 2020],
+  ['Apple Watch', 'Apple Watch 7 41mm', 2021], ['Apple Watch', 'Apple Watch 7 45mm', 2021],
+  ['Apple Watch', 'Apple Watch 8 41mm', 2022], ['Apple Watch', 'Apple Watch 8 45mm', 2022],
+  ['Apple Watch', 'Apple Watch Ultra 49mm', 2022],
+  ['Apple Watch', 'Apple Watch 9 41mm', 2023], ['Apple Watch', 'Apple Watch 9 45mm', 2023],
+  // Samsung Galaxy Tab — 25
+  ['Samsung', 'Samsung Galaxy Tab S 8.4', 2014], ['Samsung', 'Samsung Galaxy Tab S 10.5', 2014],
+  ['Samsung', 'Samsung Galaxy Tab A 9.7', 2015], ['Samsung', 'Samsung Galaxy Tab E 9.6', 2015],
+  ['Samsung', 'Samsung Galaxy Tab A 7.0', 2016], ['Samsung', 'Samsung Galaxy Tab A 10.5', 2018],
+  ['Samsung', 'Samsung Galaxy Tab A 10.1 (2019)', 2019], ['Samsung', 'Samsung Galaxy Tab S5e', 2019], ['Samsung', 'Samsung Galaxy Tab S6', 2019],
+  ['Samsung', 'Samsung Galaxy Tab A7', 2020], ['Samsung', 'Samsung Galaxy Tab S6 Lite', 2020],
+  ['Samsung', 'Samsung Galaxy Tab S7', 2020], ['Samsung', 'Samsung Galaxy Tab S7+', 2020],
+  ['Samsung', 'Samsung Galaxy Tab A7 Lite', 2021], ['Samsung', 'Samsung Galaxy Tab A8', 2021], ['Samsung', 'Samsung Galaxy Tab S7 FE', 2021],
+  ['Samsung', 'Samsung Galaxy Tab S8', 2022], ['Samsung', 'Samsung Galaxy Tab S8+', 2022], ['Samsung', 'Samsung Galaxy Tab S8 Ultra', 2022],
+  ['Samsung', 'Samsung Galaxy Tab A9', 2023], ['Samsung', 'Samsung Galaxy Tab A9+', 2023],
+  ['Samsung', 'Samsung Galaxy Tab S9', 2023], ['Samsung', 'Samsung Galaxy Tab S9+', 2023],
+  ['Samsung', 'Samsung Galaxy Tab S9 FE', 2023], ['Samsung', 'Samsung Galaxy Tab S9 Ultra', 2023],
+  // Huawei MatePad / Watch — 18
+  ['Huawei', 'Huawei MediaPad T5 10', 2018], ['Huawei', 'Huawei Watch GT 2 46mm', 2019, ['Huawei Watch GT2 46mm']],
+  ['Huawei', 'Huawei MatePad 10.4', 2020], ['Huawei', 'Huawei MatePad T 10', 2020], ['Huawei', 'Huawei MatePad T 10s', 2020],
+  ['Huawei', 'Huawei MatePad T8', 2020], ['Huawei', 'Huawei MatePad 11', 2021],
+  ['Huawei', 'Huawei Watch GT 3 42mm', 2021, ['Huawei Watch GT3 42mm']],
+  ['Huawei', 'Huawei Watch GT 3 46mm', 2021, ['Huawei Watch GT3 46mm']],
+  ['Huawei', 'Huawei MatePad 10.4 (2022)', 2022, ['Huawei MatePad 2022 10.4']],
+  ['Huawei', 'Huawei MatePad Pro 11 (2022)', 2022], ['Huawei', 'Huawei MatePad SE 10.4', 2022],
+  ['Huawei', 'Huawei Watch GT 3 Pro 46mm', 2022, ['Huawei Watch GT3 Pro 46mm']],
+  ['Huawei', 'Huawei MatePad 11 (2023)', 2023], ['Huawei', 'Huawei MatePad 11.5', 2023],
+  ['Huawei', 'Huawei Watch GT 4 46mm', 2023, ['Huawei Watch GT4 46mm']],
+  ['Huawei', 'Huawei MatePad 11.5 (2025)', 2025], ['Huawei', 'Huawei MatePad Mini', 2025],
+  // Honor Pad — 9
+  ['Honor', 'Honor Pad 5', 2019], ['Honor', 'Honor Pad 8', 2022], ['Honor', 'Honor Pad X8', 2022],
+  ['Honor', 'Honor Pad 9', 2023], ['Honor', 'Honor Pad X9', 2023], ['Honor', 'Honor Pad X8a', 2024],
+  ['Honor', 'Honor Pad V9', 2025], ['Honor', 'Honor Pad 10', 2025], ['Honor', 'Honor Pad X7', 2025],
+  // Xiaomi / Redmi Pad — 11
+  ['Xiaomi', 'Xiaomi Pad 5', 2021], ['Xiaomi', 'Xiaomi Pad 5 Pro', 2021],
+  ['Xiaomi', 'Xiaomi Pad 6', 2023], ['Xiaomi', 'Xiaomi Pad 6 Pro', 2023], ['Xiaomi', 'Xiaomi Pad 6S Pro', 2024],
+  ['Xiaomi', 'Xiaomi Pad 7', 2024], ['Xiaomi', 'Xiaomi Pad 7 Pro', 2024],
+  ['Redmi', 'Redmi Pad', 2022], ['Redmi', 'Redmi Pad SE', 2023], ['Redmi', 'Redmi Pad Pro', 2024], ['Redmi', 'Redmi Pad SE 8.7', 2024],
 ];
 
 // Другие названия моделей сайта у поставщиков: [как пишет поставщик, модель сайта]
