@@ -19,15 +19,20 @@ export const APP_MODELS = [
   ['iPhone', 'iPhone 6', 2014], ['iPhone', 'iPhone 6 Plus', 2014], ['iPhone', 'iPhone 6s', 2015], ['iPhone', 'iPhone 6s Plus', 2015],
   ['iPhone', 'iPhone 7', 2016], ['iPhone', 'iPhone 7 Plus', 2016], ['iPhone', 'iPhone SE 2016', 2016, ['iPhone SE', 'iPhone 5SE']],
   ['iPhone', 'iPhone 8', 2017], ['iPhone', 'iPhone 8 Plus', 2017], ['iPhone', 'iPhone X', 2017],
-  // Samsung — 85
+  // Samsung — 98
+  ['Samsung', 'Samsung Galaxy Note 3', 2013], ['Samsung', 'Samsung Galaxy Core Prime', 2014],
+  ['Samsung', 'Samsung Galaxy Grand Prime', 2014, ['Samsung G530H', 'Samsung G531H', 'Samsung G532F']],
+  ['Samsung', 'Samsung Galaxy J2', 2015], ['Samsung', 'Samsung Galaxy J5', 2015, ['Samsung J500H']],
   ['Samsung', 'Samsung Galaxy A5 (2016)', 2015], ['Samsung', 'Samsung Galaxy A7 (2016)', 2015, ['Samsung A7 A710']],
-  ['Samsung', 'Samsung Galaxy J7 (2016)', 2016], ['Samsung', 'Samsung Galaxy S7', 2016],
+  ['Samsung', 'Samsung Galaxy J3 (2016)', 2016, ['Samsung J320F']], ['Samsung', 'Samsung Galaxy J5 (2016)', 2016],
+  ['Samsung', 'Samsung Galaxy J5 Prime', 2016], ['Samsung', 'Samsung Galaxy J7 (2016)', 2016], ['Samsung', 'Samsung Galaxy S7', 2016],
   ['Samsung', 'Samsung Galaxy A5 (2017)', 2017, ['Samsung A520 A5 2017']],
   ['Samsung', 'Samsung Galaxy A7 (2017)', 2017, ['Samsung A720 A7 2017']], ['Samsung', 'Samsung Galaxy J5 (2017)', 2017],
   ['Samsung', 'Samsung Galaxy J7 (2017)', 2017], ['Samsung', 'Samsung Galaxy Note8', 2017], ['Samsung', 'Samsung Galaxy S8', 2017],
   ['Samsung', 'Samsung Galaxy S8+', 2017], ['Samsung', 'Samsung Galaxy A6 (2018)', 2018], ['Samsung', 'Samsung Galaxy A6+ (2018)', 2018],
   ['Samsung', 'Samsung Galaxy A7 (2018)', 2018], ['Samsung', 'Samsung Galaxy A8 (2018)', 2018, ['Samsung A8 A530']],
   ['Samsung', 'Samsung Galaxy A8+ (2018)', 2018], ['Samsung', 'Samsung Galaxy A9 (2018)', 2018],
+  ['Samsung', 'Samsung Galaxy J2 Core', 2018, ['Samsung J260F']], ['Samsung', 'Samsung Galaxy J2 Pro (2018)', 2018, ['Samsung J250F']],
   ['Samsung', 'Samsung Galaxy J4 (2018)', 2018], ['Samsung', 'Samsung Galaxy J4+ (2018)', 2018],
   ['Samsung', 'Samsung Galaxy J6 (2018)', 2018], ['Samsung', 'Samsung Galaxy J6+ (2018)', 2018],
   ['Samsung', 'Samsung Galaxy J8 (2018)', 2018], ['Samsung', 'Samsung Galaxy Note9', 2018], ['Samsung', 'Samsung Galaxy A10s', 2019],
@@ -48,39 +53,42 @@ export const APP_MODELS = [
   ['Samsung', 'Samsung Galaxy A04e', 2022], ['Samsung', 'Samsung Galaxy M13', 2022], ['Samsung', 'Samsung Galaxy M23 5G', 2022],
   ['Samsung', 'Samsung Galaxy M33 5G', 2022], ['Samsung', 'Samsung Galaxy M53 5G', 2022],
   ['Samsung', 'Samsung Galaxy Z Flip4', 2022, ['Samsung Flip 4']], ['Samsung', 'Samsung Galaxy Z Fold4', 2022, ['Samsung Fold 4']],
-  ['Samsung', 'Samsung Galaxy A14 5G', 2023], ['Samsung', 'Samsung Galaxy A15 5G', 2023], ['Samsung', 'Samsung Galaxy M14 5G', 2023],
+  ['Samsung', 'Samsung Galaxy A14 5G', 2023], ['Samsung', 'Samsung Galaxy A15 5G', 2023, ['Samsung A156B']], ['Samsung', 'Samsung Galaxy M14 5G', 2023],
   ['Samsung', 'Samsung Galaxy M54 5G', 2023], ['Samsung', 'Samsung Galaxy Z Flip5', 2023, ['Samsung Flip 5']],
   ['Samsung', 'Samsung Galaxy Z Fold5', 2023, ['Samsung Fold 5']], ['Samsung', 'Samsung Galaxy A16 5G', 2024, ['Samsung A166P']],
   ['Samsung', 'Samsung Galaxy M15 5G', 2024], ['Samsung', 'Samsung Galaxy M55 5G', 2024],
   ['Samsung', 'Samsung Galaxy Z Flip6', 2024, ['Samsung Flip 6']], ['Samsung', 'Samsung Galaxy Z Fold6', 2024, ['Samsung Fold 6']],
-  ['Samsung', 'Samsung Galaxy A06 5G', 2025, ['Samsung A066F']], ['Samsung', 'Samsung Galaxy M07', 2025],
-  ['Samsung', 'Samsung Galaxy M17 5G', 2025], ['Samsung', 'Samsung Galaxy M56 5G', 2025],
+  ['Samsung', 'Samsung Galaxy A06 5G', 2025, ['Samsung A066F']], ['Samsung', 'Samsung Galaxy A17 5G', 2025, ['Samsung A176B']],
+  ['Samsung', 'Samsung Galaxy M07', 2025], ['Samsung', 'Samsung Galaxy M17 5G', 2025], ['Samsung', 'Samsung Galaxy M56 5G', 2025],
   ['Samsung', 'Samsung Galaxy Z Flip7', 2025, ['Samsung Flip 7']], ['Samsung', 'Samsung Galaxy Z Flip7 FE', 2025, ['Samsung Flip 7 FE']],
-  ['Samsung', 'Samsung Galaxy F70e 5G', 2026],
-  // Xiaomi — 18
-  ['Xiaomi', 'Xiaomi Mi 6', 2017], ['Xiaomi', 'Xiaomi Mi A1', 2017], ['Xiaomi', 'Xiaomi Mi Play', 2018], ['Xiaomi', 'Xiaomi 12 Pro', 2021],
+  ['Samsung', 'Samsung Galaxy A07s', 2026, ['Samsung A077F']], ['Samsung', 'Samsung Galaxy F70e 5G', 2026],
+  ['Samsung', 'Samsung Galaxy S26 FE', 2026, ['Samsung S741B']], ['Samsung', 'Samsung Galaxy Z Flip8', 2026, ['Samsung Flip 8', 'Samsung F776B']],
+  // Xiaomi — 21
+  ['Xiaomi', 'Xiaomi Mi 4c', 2015], ['Xiaomi', 'Xiaomi Mi 6', 2017], ['Xiaomi', 'Xiaomi Mi A1', 2017], ['Xiaomi', 'Xiaomi Mi Max 2', 2017],
+  ['Xiaomi', 'Xiaomi Mi Max 3', 2018], ['Xiaomi', 'Xiaomi Mi Play', 2018], ['Xiaomi', 'Xiaomi 12 Pro', 2021],
   ['Xiaomi', 'Xiaomi 12X', 2021], ['Xiaomi', 'Xiaomi Mi 11 Pro', 2021], ['Xiaomi', 'Xiaomi Mi 11 Ultra', 2021],
   ['Xiaomi', 'Xiaomi Mi 11i', 2021], ['Xiaomi', 'Xiaomi 13 Pro', 2022], ['Xiaomi', 'Xiaomi Black Shark 5', 2022],
   ['Xiaomi', 'Xiaomi 13 Ultra', 2023], ['Xiaomi', 'Xiaomi 14 Pro', 2023], ['Xiaomi', 'Xiaomi 14 Ultra', 2024],
   ['Xiaomi', 'Xiaomi 15 Ultra', 2025], ['Xiaomi', 'Xiaomi 17 Pro', 2025], ['Xiaomi', 'Xiaomi 17 Pro Max', 2025],
   ['Xiaomi', 'Xiaomi 17 Ultra', 2025], ['Xiaomi', 'Xiaomi 17T', 2026],
-  // Redmi — 22
-  ['Redmi', 'Redmi 3', 2016], ['Redmi', 'Redmi 3 Pro', 2016], ['Redmi', 'Redmi 3S', 2016], ['Redmi', 'Redmi Note 4', 2016],
+  // Redmi — 24
+  ['Redmi', 'Redmi 3', 2016], ['Redmi', 'Redmi 3 Pro', 2016], ['Redmi', 'Redmi 3S', 2016], ['Redmi', 'Redmi Note 3 Pro', 2016], ['Redmi', 'Redmi Note 4', 2016],
   ['Redmi', 'Redmi 4X', 2017], ['Redmi', 'Redmi 5', 2017], ['Redmi', 'Redmi 5 Plus', 2017], ['Redmi', 'Redmi Note 4X', 2017],
   ['Redmi', 'Redmi Note 5A', 2017], ['Redmi', 'Redmi Note 5A Prime', 2017], ['Redmi', 'Redmi S2', 2018], ['Redmi', 'Redmi Go', 2019],
   ['Redmi', 'Redmi Note 10T', 2021], ['Redmi', 'Redmi Note 11 5G', 2021], ['Redmi', 'Redmi Note 11 Pro+', 2021],
   ['Redmi', 'Redmi 10 5G', 2022], ['Redmi', 'Redmi A1+', 2022], ['Redmi', 'Redmi Note 11S 5G', 2022], ['Redmi', 'Redmi A2+', 2023],
-  ['Redmi', 'Redmi A3x', 2024], ['Redmi', 'Redmi 15 5G', 2025], ['Redmi', 'Redmi A7 Pro', 2026],
-  // Poco — 25
+  ['Redmi', 'Redmi A3x', 2024], ['Redmi', 'Redmi 15 5G', 2025], ['Redmi', 'Redmi A7 Pro', 2026], ['Redmi', 'Redmi Note 17 Pro 5G', 2026],
+  // Poco — 26
   ['Poco', 'Poco F2 Pro', 2020], ['Poco', 'Poco M3 Pro 5G', 2021], ['Poco', 'Poco M4 Pro 5G', 2021], ['Poco', 'Poco X3 GT', 2021],
   ['Poco', 'Poco F4 GT', 2022], ['Poco', 'Poco M4 5G', 2022], ['Poco', 'Poco M5s', 2022], ['Poco', 'Poco X4 GT', 2022],
   ['Poco', 'Poco C51', 2023], ['Poco', 'Poco F5 Pro', 2023], ['Poco', 'Poco C61', 2024], ['Poco', 'Poco F6 Pro', 2024],
   ['Poco', 'Poco M6', 2024], ['Poco', 'Poco M7 Pro 5G', 2024, ['Poco M7 Pro']], ['Poco', 'Poco C71', 2025], ['Poco', 'Poco C85', 2025],
   ['Poco', 'Poco F7 Pro', 2025], ['Poco', 'Poco F7 Ultra', 2025], ['Poco', 'Poco F8 Pro', 2025], ['Poco', 'Poco F8 Ultra', 2025],
   ['Poco', 'Poco M7', 2025], ['Poco', 'Poco C81 Pro', 2026], ['Poco', 'Poco M8 5G', 2026], ['Poco', 'Poco M8 Pro 5G', 2026],
-  ['Poco', 'Poco X8 Pro Max 5G', 2026],
-  // Huawei — 79
-  ['Huawei', 'Huawei Mate 10 lite', 2017], ['Huawei', 'Huawei Mate 10 Pro', 2017, ['Honor Mate 10 Pro']],
+  ['Poco', 'Poco X8 5G', 2026, ['Poco X8']], ['Poco', 'Poco X8 Pro Max 5G', 2026],
+  // Huawei — 84
+  ['Huawei', 'Huawei G610', 2013], ['Huawei', 'Huawei G700', 2013], ['Huawei', 'Huawei G710', 2013], ['Huawei', 'Huawei Y600', 2014],
+  ['Huawei', 'Huawei Y3 II', 2016], ['Huawei', 'Huawei Mate 10 lite', 2017], ['Huawei', 'Huawei Mate 10 Pro', 2017, ['Honor Mate 10 Pro']],
   ['Huawei', 'Huawei nova 2 Plus', 2017], ['Huawei', 'Huawei nova 2i', 2017], ['Huawei', 'Huawei nova 2s', 2017],
   ['Huawei', 'Huawei P Smart 2018', 2017, ['Huawei P Smart']], ['Huawei', 'Huawei P8 lite 2017', 2017],
   ['Huawei', 'Huawei P9 lite 2017', 2017], ['Huawei', 'Huawei P10', 2017], ['Huawei', 'Huawei P10 lite', 2017],
@@ -128,9 +136,10 @@ export const APP_MODELS = [
   ['Honor', 'Honor X9c Smart', 2024], ['Honor', 'Honor 400', 2025], ['Honor', 'Honor 400 Lite', 2025], ['Honor', 'Honor 400 Pro', 2025],
   ['Honor', 'Honor 400 Smart 5G', 2025], ['Honor', 'Honor Magic 7 Lite', 2025], ['Honor', 'Honor Magic 8 Pro', 2025],
   ['Honor', 'Honor X5c Plus', 2025], ['Honor', 'Honor 600', 2026], ['Honor', 'Honor 600 Lite', 2026], ['Honor', 'Honor 600 Pro', 2026],
-  ['Honor', 'Honor Magic 8 Pro Air', 2026], ['Honor', 'Honor X5d Plus', 2026], ['Honor', 'Honor X6d', 2026], ['Honor', 'Honor X7e', 2026],
-  // Realme — 50
-  ['Realme', 'Realme X2', 2019], ['Realme', 'Realme XT', 2019], ['Realme', 'Realme 6s', 2020], ['Realme', 'Realme 8 5G', 2021],
+  ['Honor', 'Honor Magic 8 Pro Air', 2026], ['Honor', 'Honor X5d', 2026], ['Honor', 'Honor X5d Plus', 2026],
+  ['Honor', 'Honor X6d', 2026], ['Honor', 'Honor X6e', 2026], ['Honor', 'Honor X7e', 2026],
+  // Realme — 51
+  ['Realme', 'Realme X2', 2019], ['Realme', 'Realme XT', 2019], ['Realme', 'Realme 6s', 2020], ['Realme', 'Realme C17', 2020], ['Realme', 'Realme 8 5G', 2021],
   ['Realme', 'Realme C20', 2021], ['Realme', 'Realme GT 5G', 2021], ['Realme', 'Realme GT Neo', 2021], ['Realme', 'Realme GT Neo 2', 2021],
   ['Realme', 'Realme Narzo 30', 2021], ['Realme', 'Realme Narzo 30 5G', 2021], ['Realme', 'Realme Narzo 30A', 2021],
   ['Realme', 'Realme Narzo 50A', 2021], ['Realme', 'Realme Narzo 50i', 2021], ['Realme', 'Realme Q3i', 2021],
@@ -145,12 +154,14 @@ export const APP_MODELS = [
   ['Realme', 'Realme P3 Lite', 2025], ['Realme', 'Realme 16 5G', 2026], ['Realme', 'Realme 16 Pro', 2026],
   ['Realme', 'Realme 16 Pro+', 2026], ['Realme', 'Realme C100i', 2026], ['Realme', 'Realme C100x', 2026],
   ['Realme', 'Realme Note 80', 2026], ['Realme', 'Realme P4x', 2026],
-  // OPPO — 19
+  // OPPO — 26
   ['OPPO', 'OPPO A3s', 2018], ['OPPO', 'OPPO A5', 2018], ['OPPO', 'OPPO A1k', 2019], ['OPPO', 'OPPO A5 (2020)', 2019],
-  ['OPPO', 'OPPO A9 (2020)', 2019], ['OPPO', 'OPPO A31', 2020], ['OPPO', 'OPPO A93s', 2021], ['OPPO', 'OPPO A57', 2022],
+  ['OPPO', 'OPPO A9 (2020)', 2019], ['OPPO', 'OPPO A31', 2020], ['OPPO', 'OPPO A32', 2020], ['OPPO', 'OPPO A33', 2020],
+  ['OPPO', 'OPPO A53', 2020], ['OPPO', 'OPPO A53s', 2020], ['OPPO', 'OPPO A74', 2021], ['OPPO', 'OPPO A93s', 2021], ['OPPO', 'OPPO A57', 2022],
   ['OPPO', 'OPPO A57s', 2022], ['OPPO', 'OPPO Reno 9', 2022], ['OPPO', 'OPPO A58', 2023], ['OPPO', 'OPPO Reno 12 F', 2024],
   ['OPPO', 'OPPO A6x', 2025], ['OPPO', 'OPPO Reno 13 F', 2025], ['OPPO', 'OPPO Reno 14', 2025], ['OPPO', 'OPPO Reno 14 F 5G', 2025],
   ['OPPO', 'OPPO Reno 15', 2025], ['OPPO', 'OPPO A6', 2026], ['OPPO', 'OPPO Reno 15 F 5G', 2026],
+  ['OPPO', 'OPPO Reno 16 5G', 2026, ['OPPO Reno 16']], ['OPPO', 'OPPO Reno 16 F 5G', 2026, ['OPPO Reno 16F 5G']],
   // OnePlus — 38
   ['OnePlus', 'OnePlus 6', 2018], ['OnePlus', 'OnePlus 6T', 2018], ['OnePlus', 'OnePlus 7', 2019], ['OnePlus', 'OnePlus 7 Pro', 2019],
   ['OnePlus', 'OnePlus 7T', 2019], ['OnePlus', 'OnePlus 7T Pro', 2019], ['OnePlus', 'OnePlus 8', 2020], ['OnePlus', 'OnePlus 8 Pro', 2020],
@@ -217,9 +228,9 @@ export const APP_MODELS = [
   ['Tecno', 'Tecno Spark 40 Pro Plus', 2025], ['Tecno', 'Tecno Spark 40C', 2025], ['Tecno', 'Tecno Spark Go 2', 2025],
   ['Tecno', 'Tecno Spark Slim', 2025], ['Tecno', 'Tecno Camon 50 Pro', 2026], ['Tecno', 'Tecno Camon 50 Ultra', 2026],
   ['Tecno', 'Tecno Pova 8', 2026], ['Tecno', 'Tecno Spark 50', 2026], ['Tecno', 'Tecno Spark Go 3', 2026],
-  // Itel — 3
-  ['Itel', 'Itel S18 Pro', 2022], ['Itel', 'Itel Vision 5 Plus', 2022], ['Itel', 'Itel S23', 2023],
-  // Infinix — 72
+  // Itel — 4
+  ['Itel', 'Itel S18 Pro', 2022], ['Itel', 'Itel Vision 3', 2022], ['Itel', 'Itel Vision 5 Plus', 2022], ['Itel', 'Itel S23', 2023],
+  // Infinix — 74
   ['Infinix', 'Infinix Hot 10 Lite', 2020], ['Infinix', 'Infinix Hot 10 Play', 2021], ['Infinix', 'Infinix Hot 10S', 2021],
   ['Infinix', 'Infinix Hot 11', 2021], ['Infinix', 'Infinix Hot 11 Play', 2021], ['Infinix', 'Infinix Hot 11S', 2021],
   ['Infinix', 'Infinix Note 10', 2021], ['Infinix', 'Infinix Note 10 Pro', 2021], ['Infinix', 'Infinix Note 11', 2021],
@@ -243,8 +254,8 @@ export const APP_MODELS = [
   ['Infinix', 'Infinix Hot 60 Pro+', 2025], ['Infinix', 'Infinix Hot 60i', 2025], ['Infinix', 'Infinix Note 50', 2025],
   ['Infinix', 'Infinix Note 50 Pro', 2025], ['Infinix', 'Infinix Note 50 Pro+', 2025], ['Infinix', 'Infinix Smart 10', 2025],
   ['Infinix', 'Infinix Smart 10 Plus', 2025], ['Infinix', 'Infinix GT 50 Pro', 2026], ['Infinix', 'Infinix Hot 70', 2026],
-  ['Infinix', 'Infinix Note 60', 2026], ['Infinix', 'Infinix Note 60 Pro', 2026], ['Infinix', 'Infinix Note Edge', 2026],
-  ['Infinix', 'Infinix Smart 20', 2026],
+  ['Infinix', 'Infinix Hot 70 Pro 5G', 2026], ['Infinix', 'Infinix Note 60', 2026], ['Infinix', 'Infinix Note 60 Pro', 2026],
+  ['Infinix', 'Infinix Note 60 Ultra 5G', 2026], ['Infinix', 'Infinix Note Edge', 2026], ['Infinix', 'Infinix Smart 20', 2026],
   // Nothing — 6
   ['Nothing', 'Nothing Phone 1', 2022], ['Nothing', 'Nothing Phone 2', 2023],
   ['Nothing', 'Nothing CMF Phone 1', 2024, ['Nothing Phone 1 CMF']], ['Nothing', 'Nothing Phone 2a', 2024],
@@ -307,6 +318,6 @@ export const SITE_ALIASES = [
   ['Huawei Honor P30 Lite', 'Huawei P30 lite'], ['Huawei Honor P40 Lite', 'Huawei P40 lite'], ['Huawei Honor Mate 20 Lite', 'Huawei Mate 20 lite'],
   ['Huawei Honor Pura P 70', 'Huawei Pura 70'], ['Huawei Honor Pura P 70 Pro', 'Huawei Pura 70 Pro'], ['Huawei Honor 9X Premium', 'Honor 9X'],
   // коды Samsung вместо названия: SM-A356B — это A35
-  ['Samsung A356F', 'Samsung Galaxy A35'], ['Samsung A356B', 'Samsung Galaxy A35'], ['Samsung A546B', 'Samsung Galaxy A54'],
-  ['Samsung A256B', 'Samsung Galaxy A25'], ['Samsung A556B', 'Samsung Galaxy A55'], ['Samsung A27 5G', 'Samsung Galaxy A27'],
+  ['Samsung A155F', 'Samsung Galaxy A15'], ['Samsung A356F', 'Samsung Galaxy A35'], ['Samsung A356B', 'Samsung Galaxy A35'], ['Samsung A546B', 'Samsung Galaxy A54'],
+  ['Samsung A256B', 'Samsung Galaxy A25'], ['Samsung A556B', 'Samsung Galaxy A55'], ['Samsung A27 5G', 'Samsung Galaxy A27'], ['Samsung A276B', 'Samsung Galaxy A27'],
 ];

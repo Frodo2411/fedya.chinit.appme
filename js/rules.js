@@ -8,7 +8,7 @@ const KIND_PREFIX = pyRe(String.raw`^(Аккумулятор|АКБ|Диспле
 
 const NM = [
   [pyRe(String.raw`\bgalaxy\b|\bsamsung\b|\bapple\b|\bgoogle\b|\bhuawei\b(?=\s+(honor|nova|mate|p\d|pura|p smart))`, 'g'), ' '],
-  [pyRe(String.raw`\bxiaomi\b(?=\s+(redmi|poco|mi)\b)`, 'g'), ' '],
+  [pyRe(String.raw`(?:\bxiaomi\s+)+(?=(?:redmi|poco|mi)\b)`, 'g'), ' '],
   [pyRe(String.raw`\bxiaomi\s+mi\b|\bmi\b`, 'g'), ' xiaomi '],
   [pyRe(String.raw`\bpro\s*plus\b`, 'g'), 'pro+'],
   [pyRe(String.raw`\s*\bplus\b`, 'g'), '+'],
@@ -154,7 +154,7 @@ export function items(name) {
 }
 
 // --- Сети 4G/5G: из merge_mapping.py
-const SAMSUNG_5G_ONLY = new Set(['a52s', 'a33', 'a53', 'a73', 'a34', 'a54', 'a35', 'a55', 'a25', 'a36', 'a56', 'a26', 'a37', 'a57', 'a42']);
+const SAMSUNG_5G_ONLY = new Set(['a52s', 'a33', 'a53', 'a73', 'a34', 'a54', 'a35', 'a55', 'a25', 'a36', 'a56', 'a26', 'a27', 'a37', 'a57', 'a42']);
 const POCO_5G_ONLY = new Set(['f3', 'f4', 'f5', 'f6', 'f7', 'x5 pro', 'x6', 'x6 pro', 'x7', 'x7 pro', 'x8 pro']);
 const HONOR_5G_ONLY = new Set(['x9a', 'x9b', 'x9c', 'x9d', '50']);
 const REALME_5G_ONLY = new Set(['12+']);
@@ -464,10 +464,14 @@ function parenModels(name, idx) {
   const b = name.match(BRAND_ONE);
   if (!b) return [];
   const out = [];
-  for (const [, inner] of name.matchAll(/\(\s*([^()]*?[A-Za-z0-9][^()]*?)\s*\)/g)) {
+  // вложенные скобки с кодом модели: «(Nova Y91 (STG-LX1))» → «(Nova Y91 )»
+  const flat = name.replace(/\(([^()]*)\(\s*[A-Z0-9-]{3,}\s*\)([^()]*)\)/g, '($1$2)');
+  for (const [, inner] of flat.matchAll(/\(\s*([^()]*?[A-Za-z0-9][^()]*?)\s*\)/g)) {
     if (/^(19|20)\d\d$/.test(inner)) continue;
-    // код перед моделью внутри скобок: «(A346B A34 5G/A546E A54 5G)», «( N910C Note 4 )»
-    const clean = inner.replace(/\b[A-Z]{1,3}\d{3,4}[A-Z]{0,3}\s+(?=\S)/g, '');
+    // код до или после модели внутри скобок: «(A346B A34 5G/A546E A54 5G)», «( N910C Note 4 )», «(S22 S901B)»
+    const clean = inner
+      .replace(/\b[A-Z]{1,3}\d{3,4}[A-Z]{0,3}\s+(?=\S)/g, '')
+      .replace(/(?<=\S)\s+[A-Z]{1,3}\d{3,4}[A-Z]{1,3}\b/g, '');
     const c = BRAND_ONE.test(clean) ? clean : b[0] + ' ' + clean;
     for (const m of matchModels('Дисплей ' + c, idx)) if (!out.includes(m)) out.push(m);
   }
