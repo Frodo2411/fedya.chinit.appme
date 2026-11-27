@@ -308,8 +308,8 @@ export const APP_MODELS = [
   // Wiko — 3
   ['Wiko', 'Wiko 10', 2022], ['Wiko', 'Wiko T10', 2022], ['Wiko', 'Wiko T50', 2022],
   // Планшеты и часы
-  // iPad — 26
-  ['iPad', 'iPad 3', 2012], ['iPad', 'iPad 4', 2012], ['iPad', 'iPad mini', 2012], ['iPad', 'iPad Air', 2013],
+  // iPad — 28
+  ['iPad', 'iPad 2', 2011], ['iPad', 'iPad 3', 2012], ['iPad', 'iPad 4', 2012], ['iPad', 'iPad mini', 2012], ['iPad', 'iPad Air', 2013],
   ['iPad', 'iPad mini 2', 2013, ['iPad mini 2 Retina']], ['iPad', 'iPad Air 2', 2014, ['iPad Air 2i']],
   ['iPad', 'iPad mini 3', 2014], ['iPad', 'iPad mini 4', 2015], ['iPad', 'iPad Pro 9.7', 2016],
   ['iPad', 'iPad 5', 2017, ['iPad 9.7 2017']], ['iPad', 'iPad Pro 10.5', 2017], ['iPad', 'iPad 6', 2018, ['iPad 9.7 2018']],
@@ -317,20 +317,22 @@ export const APP_MODELS = [
   ['iPad', 'iPad mini 5', 2019, ['iPad mini 5 2019']], ['iPad', 'iPad 8', 2020, ['iPad 10.2 2020']], ['iPad', 'iPad Air 4', 2020],
   ['iPad', 'iPad 9', 2021, ['iPad 10.2 2021']], ['iPad', 'iPad mini 6', 2021], ['iPad', 'iPad 10', 2022], ['iPad', 'iPad Air 5', 2022],
   ['iPad', 'iPad Pro 11', 2022], ['iPad', 'iPad Pro 12.9', 2022], ['iPad', 'iPad Air 6 11', 2024], ['iPad', 'iPad Air 6 13', 2024],
-  ['iPad', 'iPad mini 7', 2024],
-  // Apple Watch — 21
-  ['Apple Watch', 'Apple Watch 1 38mm', 2015], ['Apple Watch', 'Apple Watch 1 42mm', 2015],
+  ['iPad', 'iPad mini 7', 2024], ['iPad', 'iPad 11', 2025],
+  // Apple Watch — 24
+  ['Apple Watch', 'Apple Watch 1 38mm', 2015, ['Apple Watch 38mm']], ['Apple Watch', 'Apple Watch 1 42mm', 2015, ['Apple Watch 42mm']],
   ['Apple Watch', 'Apple Watch 2 38mm', 2016], ['Apple Watch', 'Apple Watch 2 42mm', 2016],
   ['Apple Watch', 'Apple Watch 3 38mm', 2017], ['Apple Watch', 'Apple Watch 3 42mm', 2017],
   ['Apple Watch', 'Apple Watch 4 40mm', 2018], ['Apple Watch', 'Apple Watch 4 44mm', 2018],
   ['Apple Watch', 'Apple Watch 5 40mm', 2019], ['Apple Watch', 'Apple Watch 5 44mm', 2019],
-  ['Apple Watch', 'Apple Watch SE 40mm', 2020, ['Apple Watch SE 2022 40mm']],
-  ['Apple Watch', 'Apple Watch SE 44mm', 2020, ['Apple Watch SE 2022 44mm']],
+  ['Apple Watch', 'Apple Watch SE 40mm', 2020, ['Apple Watch SE 2022 40mm', 'Apple Watch SE 2023 40mm']],
+  ['Apple Watch', 'Apple Watch SE 44mm', 2020, ['Apple Watch SE 2022 44mm', 'Apple Watch SE 2023 44mm']],
   ['Apple Watch', 'Apple Watch 6 40mm', 2020], ['Apple Watch', 'Apple Watch 6 44mm', 2020],
   ['Apple Watch', 'Apple Watch 7 41mm', 2021], ['Apple Watch', 'Apple Watch 7 45mm', 2021],
   ['Apple Watch', 'Apple Watch 8 41mm', 2022], ['Apple Watch', 'Apple Watch 8 45mm', 2022],
   ['Apple Watch', 'Apple Watch Ultra 49mm', 2022],
   ['Apple Watch', 'Apple Watch 9 41mm', 2023], ['Apple Watch', 'Apple Watch 9 45mm', 2023],
+  ['Apple Watch', 'Apple Watch Ultra 2 49mm', 2023],
+  ['Apple Watch', 'Apple Watch 10 42mm', 2024], ['Apple Watch', 'Apple Watch 10 46mm', 2024],
   // Samsung Galaxy Tab — 25
   ['Samsung', 'Samsung Galaxy Tab S 8.4', 2014], ['Samsung', 'Samsung Galaxy Tab S 10.5', 2014],
   ['Samsung', 'Samsung Galaxy Tab A 9.7', 2015], ['Samsung', 'Samsung Galaxy Tab E 9.6', 2015],

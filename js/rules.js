@@ -24,6 +24,10 @@ export function normModel(s) {
   // слитно у поставщика: «iPhone11», «iPhoneXR», «13Pro», «16Plus», «46 мм»
   t = t.replace(/\biphone(?=[0-9a-zа-я])/g, 'iphone ').replace(/(\d)(pro|plus|max|mini|air)\b/g, '$1 $2');
   t = t.replace(/(\d{2})\s*(?:мм(?![а-яё])|mm\b)/g, '$1mm');
+  if (/\b(?:ipad|watch)\b/.test(t)) {
+    t = t.replace(/\ba\d{4}\b/g, ' ').replace(/\b\d-gen\b/g, ' ').replace(/\bgps\b/g, ' ').replace(/(\d+)\.0\b/g, '$1');
+    t = t.replace(/\bwatch\s+s(\d)/g, 'watch $1').replace(/\bwatch\s+ultra\s+1\b/g, 'watch ultra');
+  }
   t = t.replace(/\biphone 17 air\b/, 'iphone air'); // у поставщиков «iPhone 17 Air», на сайте «iPhone Air»
   for (const [re, rep] of NM) t = t.replace(re, rep);
   t = t.replace(/\s+/g, ' ').trim();
@@ -48,7 +52,7 @@ export function siteIndex(modelNames, aliases) {
 
 // « - » отделяет модель от описания; бывает и без пробела перед тире: «iPhone 15 Pro Max- DEJI»
 const SEG_SPLIT = pyRe(String.raw`\s+-\s+|\s+–\s+|(?<=\S)-\s+`);
-const SEG_YEAR = pyRe(String.raw`\(\s*(20\d\d)\s*\)`, 'g');
+const SEG_YEAR = pyRe(String.raw`\(\s*(20\d\d(?:\s*\/\s*20\d\d)*)\s*\)`, 'g');
 const SEG_PAREN = pyRe(String.raw`\([^)]*\)`, 'g');
 const SEG_TAIL = pyRe(String.raw`\b(на системный разъем|системный разъем|на зарядку|премиум|в раме|с рамкой)\b.*$`, 'i');
 // Вариант детали прямо в названии модели: «Samsung A34 5G In-Cell»
@@ -115,16 +119,21 @@ function trimApple(p) {
 // 'Xiaomi 13T/Redmi Note 13 Pro 4G/14S' -> [['Xiaomi 13T'], ['Redmi Note 13 Pro 4G'], ['Redmi Note 14S', 'Xiaomi 14S', ...]]
 export function items(name) {
   const seg = modelSegment(name);
-  // русские слова после модели — цвет и пояснения: «iPhone 6 белый», «Mi 8 Lite с разъемом зарядки»
+  // русские слова после модели — цвет и пояснения: «iPhone 6 белый», «Mi 8 Lite с разъемом зарядки», «Cерый» (латинская C)
   const apple = /^iPhone\b/i.test(seg);
-  const parts = seg.split(/\s*\/\s*/).map((p) => p.replace(/\s+[а-яё].*$/i, '').trim()).map((p) => (apple ? trimApple(p) : p)).filter(Boolean);
+  const parts = seg.split(/\s*\/\s*/).map((p) => p.replace(/\s+(?:[A-Za-z](?=[а-яё]))?[а-яё].*$/i, '').trim()).map((p) => (apple ? trimApple(p) : p)).filter(Boolean);
   // «iPhone 6/6S Plus» — 6 Plus и 6s Plus, а не 6 и 6s Plus (маленький пишут «6/6S (4,7")»)
   if (apple) parts.forEach((p, i) => { const m = /^(?:iPhone )?(\d+)$/i.exec(p); if (m && new RegExp('^' + m[1] + 's Plus$', 'i').test(parts[i + 1] || '')) parts[i] = p + ' Plus'; });
+  // «Apple Watch 4/5/SE (40 мм)» — размер корпуса в конце относится ко всем моделям через «/»
+  if (/^Apple Watch\b/i.test(seg)) {
+    const mm = /\b(\d{2}mm)\b/i.exec(parts[parts.length - 1] || '');
+    if (mm) for (let i = 0; i < parts.length; i++) if (!/\b\d{2}mm\b/i.test(parts[i])) parts[i] += ' ' + mm[1];
+  }
   const out = [];
   const prefixes = [];
   for (const p of parts) {
-    if (/^(4G|5G)$/i.test(p) && out.length) {
-      out.push(out[out.length - 1].map((a) => a.replace(/\s*(4G|5G)$/i, '') + ' ' + p));
+    if (/^(4G|5G|20\d\d)$/i.test(p) && out.length) {
+      out.push(out[out.length - 1].map((a) => a.replace(/\s*(4G|5G|20\d\d)$/i, '') + ' ' + p));
       continue;
     }
     const lead = leadWords(pySplit(p));
@@ -219,6 +228,11 @@ export function matchModels(name, idx) {
         const noInch = normModel(it.replace(INCH_SIZE, ' '));
         cands = [...(idx.get(noInch) || [])];
         if (!cands.length && noInch.endsWith(' 5g')) cands = (idx.get(noInch.slice(0, -3)) || []).filter(only5gAllowed);
+        if (!cands.length && noInch.startsWith('ipad ')) cands = [...(idx.get(noInch.replace(/\s+20\d\d$/, '')) || [])];
+      }
+      if (!cands.length && k.startsWith('ipad ')) {
+        const noYear = k.replace(/\s+20\d\d$/, '');
+        if (noYear !== k) cands = [...(idx.get(noYear) || [])];
       }
       if (cands.length) {
         for (const m of cands) if (!found.includes(m)) found.push(m);
@@ -463,13 +477,14 @@ function moreModels(name) {
   const tail = name.slice(at);
   const dash = tail.indexOf(' - ');
   const head = applePlus(dash < 0 ? tail : tail.slice(0, dash))
-    .replace(/\(\s*(20\d\d)\s*\)/g, ' $1')
+    .replace(SEG_YEAR, ' $1')
     .replace(SEG_MM, ' $1mm')
+    .replace(/(\d{2})\s*мм(?![а-яё])/gi, '$1mm')
     .replace(SEG_WIFI_SLASH, ' ')
     .replace(/\([^)]*\)/g, ' ')
     .replace(SEG_ESIM, '')
     .replace(/\s*\+\s*(?:OCA|рамк[а-яё]*)(?=\s|$)/gi, ' ')
-    .replace(/\s+[а-яё].*$/i, '');
+    .replace(/\s+(?:[A-Za-z](?=[а-яё]))?[а-яё].*$/i, '');
   return 'Дисплей ' + head + (dash < 0 ? '' : tail.slice(dash));
 }
 
