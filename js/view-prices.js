@@ -196,7 +196,7 @@ export function createPricesView(app) {
           h('div', { class: 'small', style: 'color:var(--accent)', text: 'Цены сейчас только у: ' + supNames(chosen()) + '.' }),
           h('button', { class: 'btn small', style: 'margin-top:8px', text: 'Показать всех поставщиков', onclick: () => setSups([]) })) : null,
         h('div', { class: 'card flat', style: 'margin-top:16px' },
-          h('div', { class: 'small muted' }, 'В прайсе ', app.data.models.length, ' моделей. Прайсы: ',
+          h('div', { class: 'small muted' }, 'В прайсе ', app.data.models.length, ' ', pluralModels(app.data.models.length), '. Прайсы: ',
             Object.values(sup).map((s) => s.name + ' от ' + fmt(s.date || app.data.priceDate)).join(', '), '.'),
           h('div', { class: 'small faint', style: 'margin-top:6px' }, 'Ищи по-русски и с ошибками: «айфон 14 про», «самсунг а52», «поко х6», «пиксель 6».')),
       );
@@ -216,6 +216,8 @@ export function createPricesView(app) {
 
   // push: false — модель открыта из истории браузера (кнопка «вперёд»), новый шаг не нужен
   function openModel(name, push = true) {
+    const e = P().model(name);
+    if (!e) return;
     if (push) {
       const state = { fcModel: name };
       if (history.state && history.state.fcModel) history.replaceState(state, '');
@@ -228,7 +230,6 @@ export function createPricesView(app) {
     st.showHidden = false;
     const recent = [name, ...store.get('recent', []).filter((n) => n !== name)].slice(0, 12);
     store.set('recent', recent);
-    const e = P().model(name);
     const has = (svc) => e.services[svc].opts.some((o) => !o.hidden);
     if (!has(st.svc)) st.svc = SERVICES.find(has) || 'd';
     draw();
@@ -308,8 +309,8 @@ export function createPricesView(app) {
   function watchTitle(bar, title) {
     if (titleWatch) titleWatch.disconnect();
     if (!('IntersectionObserver' in window)) return;
-    titleWatch = new IntersectionObserver(([en]) => bar.classList.toggle('stuck', !en.isIntersecting && en.boundingClientRect.top < 80),
-      { rootMargin: '-64px 0px 0px 0px' });
+    titleWatch = new IntersectionObserver(([en]) => bar.classList.toggle('stuck', !en.isIntersecting && en.boundingClientRect.bottom < 72),
+      { rootMargin: '-56px 0px 0px 0px', threshold: 0 });
     titleWatch.observe(title);
   }
 
@@ -404,7 +405,7 @@ export function createPricesView(app) {
     }
     const card = h('div', { class: 'card variant' + (o.hidden ? ' dim' : '') },
       h('div', { class: 'head' }, h('div', { class: 'vname', text: svc === 'd' && matrixUnknown(p.part, o.tier) ? 'Копия (тип матрицы не указан)' : VAR_APP[o.tier] }), h('div', { class: 'price', text: p.price + ' р.' })),
-      h('div', { class: 'earn' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), ' · деталь ', money(p.cost),
+      h('div', { class: 'earn' }, 'заработок ', h('b', { class: earn < 0 ? 'minus' : null, text: money(Math.round(earn * 100) / 100) }), ' · деталь ', money(p.cost),
         glue.total ? ' · проклейка ' + money(glue.total) : '', ' · работа ', o.work, ' р.', P().soldered(entry.model, svc) ? ' (с пайкой)' : '',
         riskReserve(S, svc, p.cost) ? ' · запас на брак ' + money(Math.round(riskReserve(S, svc, p.cost) * 100) / 100) : '',
         h('span', { class: 'faint', text: ' · налог ' + Math.round(p.price * S.tax) + ' р.' })),
@@ -555,7 +556,7 @@ export function createPricesView(app) {
       h('div', { class: 'head' }, h('div', { class: 'vname', text: 'Комплекс · ' + items.length }), h('div', { class: 'price', text: t.total + ' р.' })),
       items.map((x) => h('div', { class: 'small' }, SVC[x.svc] + ' — ' + lcFirst(VAR_APP[x.tier]) + ': ' + x.price + ' р.')),
       t.discount ? h('div', { class: 'small', style: 'margin-top:6px' }, 'Скидка ' + S.combo_discount + '% на работу второго и следующих: ', h('b', { text: '−' + t.discount + ' р.' })) : h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'Добавь второй ремонт — будет скидка ' + S.combo_discount + '% на его работу.' }),
-      h('div', { class: 'earn', style: 'margin-top:6px' }, 'заработок ', h('b', { text: money(Math.round(earn * 100) / 100) }), glue ? ' · проклейка ' + money(glue) : ''),
+      h('div', { class: 'earn', style: 'margin-top:6px' }, 'заработок ', h('b', { class: earn < 0 ? 'minus' : null, text: money(Math.round(earn * 100) / 100) }), glue ? ' · проклейка ' + money(glue) : ''),
       promoLine(t.total, t.total - earn),
       h('div', { class: 'actions wrap' },
         h('button', {
@@ -632,13 +633,14 @@ export function createPricesView(app) {
           h('span', { class: 'tiny faint', style: 'display:block', text: 'только этот ремонт на ' + e.model + ', и на сайте тоже; сумма — в «Ещё → Расчёт цены»' }))),
       h('div', { class: 'small faint', style: 'margin-top:14px', text: 'Работа ' + svcData.work + ' р.' + (app.pricer.soldered(e.model, st.svc) ? ' (с пайкой)' : '') + '. Цена = (работа + деталь) / (1 − ' + String(S.tax).replace('.', ',') + '), округление до ' + S.round + ' р., сверка с SmartFix.' }),
     );
+    const anyVisible = SERVICES.some((s) => e.services[s].opts.some((o) => !o.hidden));
     fill(dock, h('div', { class: 'inner' },
       h('button', {
         class: 'btn primary', disabled: !visible.length,
         onclick: async () => { if (await copyText(clientText(e, [st.svc]))) toast('Текст для клиента скопирован'); },
       }, icon('copy'), 'Скопировать клиенту'),
       h('button', {
-        class: 'btn', 'aria-label': 'Скопировать все ремонты',
+        class: 'btn', 'aria-label': 'Скопировать все ремонты', disabled: !anyVisible,
         onclick: async () => { if (await copyText(clientText(e, SERVICES))) toast('Все ремонты скопированы'); },
       }, 'Все')));
     fill(root, modelScreen, dock);
@@ -649,6 +651,15 @@ export function createPricesView(app) {
     if (!d) return '—';
     const [y, m, dd] = d.split('-');
     return dd + '.' + m + '.' + y;
+  }
+
+  function pluralModels(n) {
+    const m100 = n % 100;
+    const m10 = n % 10;
+    if (m100 >= 11 && m100 <= 14) return 'моделей';
+    if (m10 === 1) return 'модель';
+    if (m10 >= 2 && m10 <= 4) return 'модели';
+    return 'моделей';
   }
 
   return {
@@ -685,7 +696,7 @@ export function openOwnPart(app, entry, svc, item) {
     const earn = Math.round((cp.price - x.cost - glue) * 100) / 100;
     fill(preview,
       h('div', { class: 'row' }, h('div', { class: 'grow small muted', text: 'Цена клиенту' }), h('b', { style: 'font-size:24px', text: cp.price + ' р.' })),
-      h('div', { class: 'small muted', style: 'margin-top:4px' }, 'заработок ', h('b', { style: 'color:var(--good)', text: money(earn) }),
+      h('div', { class: 'small muted', style: 'margin-top:4px' }, 'заработок ', h('b', { style: earn < 0 ? 'color:var(--bad)' : 'color:var(--good)', text: money(earn) }),
         ' · деталь ', money(x.cost), glue ? ' · проклейка ' + money(glue) : '', ' · работа ', work, ' р.'),
       cp.smartfix ? h('div', { class: 'tiny faint', style: 'margin-top:4px', text: 'Сверено с SmartFix: у них ' + cp.smartfix + ' р.' }) : null);
   };

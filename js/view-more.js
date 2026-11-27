@@ -14,7 +14,7 @@ const numText = (x) => String(Math.round(Number(x) * 100) / 100).replace('.', ',
 import { today } from './store.js';
 
 // Тот же выпуск, что VERSION в sw.js (тест следит, чтобы совпадали): дата и номер выпуска за день
-export const APP_VERSION = '2026-11-25.6';
+export const APP_VERSION = '2026-11-27.2';
 
 export function createMoreView(app) {
   const root = h('div');
@@ -28,7 +28,7 @@ export function createMoreView(app) {
   }
 
   function draw() {
-    const sups = Object.entries(app.data.suppliers).sort((a, b) => (a[1].rank ?? 9) - (b[1].rank ?? 9)).reverse();
+    const sups = Object.entries(app.data.suppliers).sort((a, b) => (a[1].rank ?? 9) - (b[1].rank ?? 9));
     const pickers = Object.fromEntries(sups.map(([k]) => [k, filePicker(k)]));
     const hist = (app.data.history || []).slice(-6).reverse();
     fill(root, 
@@ -304,10 +304,13 @@ function openSupplier(app, key) {
 
 function openFormula(app) {
   const S = settingsWithDefaults(app.settings.formula);
-  const num = (v, label, set, opts = {}) => field(label, h('input', {
-    class: 'input num', inputmode: 'decimal', value: String(v).replace('.', ','),
-    oninput: (e) => { const n = parseNum(e.target.value); if (n !== null) set(opts.pct ? n / 100 : n); },
-  }));
+  const num = (v, label, set, opts = {}) => {
+    const input = h('input', {
+      class: 'input num', inputmode: 'decimal', value: String(v).replace('.', ','),
+      oninput: (e) => { const n = parseNum(e.target.value); if (n !== null) set(opts.pct ? n / 100 : n); },
+    });
+    return label ? field(label, input) : h('div', { style: 'margin-top:10px' }, input);
+  };
   // Ремонты с пайкой: отмечаются на экране модели («Нужна пайка»), здесь — список и убрать лишнее
   const solderList = h('div', { style: 'margin-top:6px' });
   const drawSolder = () => fill(solderList,

@@ -147,6 +147,17 @@ export class SheetSync {
     this.onChange();
   }
 
+  retryFailed(id) {
+    const op = this.failed.find((f) => f.id === id);
+    if (!op) return;
+    const { error, ...retry } = op;
+    this.failed = this.failed.filter((f) => f.id !== id);
+    this.outbox.push(retry);
+    this.save();
+    this.onChange();
+    this.flush();
+  }
+
   // Отправить очередь. Если отправка уже идёт, дождаться её и отправить ещё раз то, что добавилось.
   flush() {
     if (!this.connected || !this.outbox.length) return Promise.resolve();

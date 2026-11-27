@@ -1718,6 +1718,40 @@ await test('остатки в таблице: одна строка на поз�
   assert.equal(view.getLastRow(), 1);
 });
 
+await test('склад в приложении учитывает неподтверждённые операции из очереди', async () => {
+  const { currentStock } = await imp('js/stock.js');
+  const { SheetSync } = await imp('js/sheet.js');
+  const ls = new Map();
+  globalThis.localStorage = { getItem: (k) => ls.get(k) ?? null, setItem: (k, v) => ls.set(k, v), removeItem: (k) => ls.delete(k) };
+  const sync = new SheetSync();
+  sync.cache = { stock: [{ id: 's1', item: 's1', kind: 'addStock', date: '2026-11-25', name: 'Клей B-7000', model: '', cost: 4, qty: 2, order: '', note: '' }], orders: [] };
+  sync.add('addStock', { name: 'Проклейка iPhone 15', model: 'iPhone 15', cost: 2.5, qty: 3 });
+  sync.add('moveStock', { item: 's1', qty: 4, note: 'закупка' });
+  sync.add('editStock', { item: 's1', name: 'Клей B-7000 50мл', model: '', cost: 5 });
+  const items = currentStock(sync).filter((x) => !x.archived);
+  assert.equal(items.length, 2);
+  const glue = items.find((x) => x.id === 's1');
+  const seal = items.find((x) => x.name === 'Проклейка iPhone 15');
+  assert.deepEqual([glue.name, glue.cost, glue.qty, glue.pending], ['Клей B-7000 50мл', 5, 6, true]);
+  assert.equal(glue.history[1].cost, 4, 'приход до editStock помнит прежнюю цену');
+  assert.deepEqual([seal.qty, seal.cost, seal.pending], [3, 2.5, true]);
+  sync.add('archiveStock', { item: seal.id, expectedQty: 3 });
+  assert.equal(currentStock(sync).filter((x) => !x.archived).length, 1);
+});
+
+await test('SheetSync.retryFailed возвращает операцию в очередь без поля error', async () => {
+  const { SheetSync } = await imp('js/sheet.js');
+  const ls = new Map();
+  globalThis.localStorage = { getItem: (k) => ls.get(k) ?? null, setItem: (k, v) => ls.set(k, v), removeItem: (k) => ls.delete(k) };
+  const sync = new SheetSync();
+  sync.failed = [{ id: 'f1', op: 'addExpense', fields: { what: 'Флюс', sum: 12 }, error: 'сеть' }];
+  sync.retryFailed('f1');
+  assert.equal(sync.failed.length, 0);
+  assert.equal(sync.outbox.length, 1);
+  assert.equal(sync.outbox[0].id, 'f1');
+  assert.equal('error' in sync.outbox[0], false);
+});
+
 // --- Настоящий прайс: только с паролем
 if (process.env.FC_PASSWORD) {
   await test('data/prices.enc открывается паролем', async () => {

@@ -111,18 +111,24 @@ export function openSheet(title, body, foot, opts = {}) {
     if (!el.isConnected) return;
     el.remove();
     document.removeEventListener('keydown', onKey);
+    if (!document.querySelector('.sheet')) document.body.classList.remove('sheet-open');
     if (opts.onClose) opts.onClose();
   };
   const onKey = (e) => {
     const all = document.querySelectorAll('.sheet');
     if (e.key === 'Escape' && all[all.length - 1] === el) close();
   };
-  const el = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-    h('div', { class: 'sheet-panel' },
-      h('div', { class: 'sheet-head' }, h('h3', { text: title }), h('button', { class: 'x', 'aria-label': 'Закрыть', text: '✕', onclick: () => close() })),
-      h('div', { class: 'sheet-body' }, body),
-      foot ? h('div', { class: 'sheet-foot' }, foot) : null));
+  const el = h('div', {
+    class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title,
+    onmousedown: (e) => { if (e.target === el) el._bgDown = true; else el._bgDown = false; },
+    onclick: (e) => { if (e.target === el && el._bgDown) close(); el._bgDown = false; },
+  },
+  h('div', { class: 'sheet-panel' },
+    h('div', { class: 'sheet-head' }, h('h3', { text: title }), h('button', { type: 'button', class: 'x', 'aria-label': 'Закрыть', text: '✕', onclick: () => close() })),
+    h('div', { class: 'sheet-body' }, body),
+    foot ? h('div', { class: 'sheet-foot' }, foot) : null));
   document.body.append(el);
+  document.body.classList.add('sheet-open');
   document.addEventListener('keydown', onKey);
   return { el, close };
 }

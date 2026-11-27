@@ -438,9 +438,9 @@ async function unlock(keyBytes, env) {
 function lockScreen(env, message) {
   const input = h('input', { class: 'input', type: 'password', placeholder: 'Пароль', autocomplete: 'current-password', autocapitalize: 'off', autocorrect: 'off', spellcheck: false, enterkeyhint: 'go' });
   const err = h('div', { class: 'err', text: message || '' });
-  const btn = h('button', { class: 'btn primary block', style: 'margin-top:12px', text: 'Открыть' });
+  const btn = h('button', { class: 'btn primary block', type: 'submit', style: 'margin-top:12px', text: 'Открыть' });
   const go = async () => {
-    if (!input.value.trim()) return;
+    if (btn.disabled || !input.value.trim()) return;
     btn.disabled = true;
     fill(btn, h('span', { class: 'spin' }), ' Проверяю…');
     err.textContent = '';
@@ -455,8 +455,6 @@ function lockScreen(env, message) {
       btn.textContent = 'Открыть';
     }
   };
-  btn.onclick = go;
-  input.onkeydown = (e) => { if (e.key === 'Enter') go(); };
   fill(document.body, h('div', { class: 'lock' },
     h('img', { class: 'logo', src: 'icons/icon-180.png', alt: '' }),
     h('h1', { text: 'Федя чинит · мастер' }),

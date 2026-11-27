@@ -1,7 +1,7 @@
 // Склад: позиции и журнал движений общей Google Таблицы.
-import { h, fill, field, select, openSheet, parseNum, money, fmtDate, toast } from './ui.js';
+import { h, fill, icon, field, select, openSheet, parseNum, money, fmtDate, toast } from './ui.js';
 import { STOCK_VERSION, STOCK_ARCHIVE_VERSION, STOCK_OPS } from './sheet.js';
-import { currentStock } from './stock.js';
+import { currentStock, stockCost } from './stock.js';
 import { norm } from './search.js';
 
 export const stockReady = (app) => app.sheet.connected && Array.isArray(app.sheet.cache?.stock);
@@ -18,6 +18,13 @@ function stockInput(value = '', attrs = {}) {
   return h('input', { class: 'input', value, autocomplete: 'off', ...attrs });
 }
 
+function searchField(input, onClear) {
+  const clear = h('button', { class: 'clear', type: 'button', 'aria-label': 'Очистить', text: '✕', hidden: !input.value,
+    onclick: () => { input.value = ''; clear.hidden = true; onClear(); input.focus(); } });
+  input.addEventListener('input', () => { clear.hidden = !input.value; });
+  return { el: h('div', { class: 'search-wrap' }, input, clear), clear };
+}
+
 const modelKey = (text) => norm(text).split(' ').sort().join(' ');
 
 function modelPicker(app, value = '') {
@@ -31,9 +38,18 @@ function modelPicker(app, value = '') {
   }
   const selected = h('div');
   const results = h('div');
-  const custom = stockInput(unlisted.join(', '), { maxLength: MODEL_TEXT_LIMIT, placeholder: 'Названия через запятую' });
+  const limitHint = h('div', { class: 'tiny faint', style: 'margin-top:4px' });
+  const custom = stockInput(unlisted.join(', '), { maxLength: MODEL_TEXT_LIMIT, placeholder: 'Названия через запятую',
+    oninput: () => drawLimit() });
   const search = stockInput('', { type: 'search', placeholder: 'Например, айфон 15 или Galaxy A54',
     oninput: () => drawResults() });
+  const searchWrap = searchField(search, () => drawResults());
+  const combined = () => [...new Set([...chosen, ...compatibleModelNames(custom.value)])].join(', ');
+  function drawLimit() {
+    const len = combined().length;
+    limitHint.textContent = len > 80 ? 'Длина списка: ' + len + ' из ' + MODEL_TEXT_LIMIT + ' симв.' : '';
+    limitHint.style.color = len > MODEL_TEXT_LIMIT ? 'var(--bad)' : '';
+  }
   function drawSelected() {
     fill(selected, chosen.size ? h('div', { class: 'chips', style: 'margin:8px 0' }, [...chosen].map((name) =>
       h('button', { type: 'button', class: 'chip on', 'aria-label': 'Убрать ' + name, text: name + ' ×',
@@ -41,7 +57,9 @@ function modelPicker(app, value = '') {
           chosen.delete(name);
           drawSelected();
           drawResults();
+          drawLimit();
         } }))) : null);
+    drawLimit();
   }
   function drawResults() {
     const query = search.value.trim();
@@ -57,30 +75,40 @@ function modelPicker(app, value = '') {
   }
   drawSelected();
   return {
-    el: h('div', {}, field('Совместимые модели', search), selected, results,
+    el: h('div', {}, field('Совместимые модели', searchWrap.el), selected, limitHint, results,
       h('details', { open: unlisted.length > 0, style: 'margin-top:8px' },
         h('summary', { class: 'small muted', text: 'Указать модели вручную' }), field('Совместимость', custom))),
-    value: () => [...new Set([...chosen, ...compatibleModelNames(custom.value)])].join(', '),
+    value: combined,
   };
 }
 
 export function createStockView(app) {
   const root = h('div');
   const sync = h('div');
+  const summary = h('div', { class: 'small muted', style: 'margin-bottom:10px' });
   const list = h('div');
-  const actions = h('div');
-  const search = stockInput('', { type: 'search', placeholder: 'Название или модель', 'aria-label': 'Поиск по складу',
-    oninput: () => drawItems() });
-  root.append(h('h1', { text: 'Склад' }), sync, actions, search, list);
+  const search = h('input', { class: 'search', type: 'search', placeholder: 'Название или модель', 'aria-label': 'Поиск по складу',
+    autocomplete: 'off', autocorrect: 'off', spellcheck: false, oninput: () => drawItems() });
+  const searchBox = h('div', { class: 'searchbar', style: 'padding-top:0;margin-top:0;top:var(--safe-t)' }, searchField(search, () => drawItems()).el);
+  const fab = h('button', { class: 'fab', onclick: () => openStockEditor(app) }, icon('plus'), 'Позиция');
+  root.append(h('h1', { text: 'Склад' }), sync, searchBox, summary, list, fab);
 
   function drawItems() {
     const q = search.value.trim();
-    const items = filterStock(app, currentStock(app.sheet).filter((item) => !item.archived), q);
-    fill(list, items.length ? h('div', { class: 'list', style: 'margin-top:12px' }, items.map((item) =>
-      h('button', { class: 'item', type: 'button', onclick: () => openPosition(app, item.id) },
-        h('div', { class: 'grow' }, h('div', { class: 't', text: item.name }),
-          h('div', { class: 's', text: [item.model, money(item.cost) + ' / шт.'].filter(Boolean).join(' · ') })),
-        h('b', { class: 'nowrap', text: item.qty + ' шт.' }))))
+    const active = currentStock(app.sheet).filter((item) => !item.archived);
+    const totalQty = active.reduce((sum, item) => sum + Math.max(0, item.qty), 0);
+    const totalValue = stockCost(active.filter((item) => item.qty > 0));
+    summary.hidden = !active.length;
+    if (active.length) {
+      summary.textContent = 'Позиций: ' + active.length + ' · ' + totalQty + ' шт. · на ' + money(totalValue);
+    }
+    const items = filterStock(app, active, q);
+    fill(list, items.length ? h('div', { class: 'list' }, items.map((item) =>
+      h('button', { class: 'item' + (item.qty <= 0 ? ' dim' : ''), type: 'button', onclick: () => openPosition(app, item.id) },
+        h('div', { class: 'grow' },
+          h('div', { class: 't' }, item.name, item.pending ? h('span', { class: 'badge warn', style: 'margin-left:6px', text: 'не отправлено' }) : null),
+          h('div', { class: 's', text: [item.model || 'Универсальная', money(item.cost) + ' / шт.'].filter(Boolean).join(' · ') })),
+        h('b', { class: 'nowrap mono' + (item.qty <= 0 ? ' muted' : ''), text: item.qty + ' шт.' }))))
       : h('div', { class: 'empty', text: q ? 'Ничего не нашлось.' : 'На складе пока нет позиций.' }));
   }
 
@@ -89,37 +117,31 @@ export function createStockView(app) {
     const ready = stockReady(app);
     const pending = s.outbox.filter((op) => STOCK_OPS.includes(op.op) || op.fields?.stockUse).length;
     const failed = s.failed.filter((op) => STOCK_OPS.includes(op.op));
-    const refresh = h('button', { class: 'btn small', text: 'Обновить', disabled: s.busy, onclick: () => s.refresh() });
+    const refreshBtn = h('button', { class: 'btn small', 'aria-label': 'Обновить', disabled: s.busy, onclick: () => s.refresh() }, icon('refresh'));
     const needsSetup = !s.connected || (s.version !== null && s.version < STOCK_VERSION);
     const badHeader = s.connected && !needsSetup && s.version !== null && !ready;
     const status = needsSetup ? (!s.connected ? 'Подключи Google Таблицу, чтобы вести склад.' : 'Для склада нужен Apps Script версии ' + STOCK_VERSION + '.')
       : badHeader ? 'Проверь заголовки листа «Склад (журнал)».' : '';
-    const progress = s.error ? (ready ? 'Показаны последние остатки. ' : '') + s.error
-      : s.busy ? (ready ? 'Обновляю остатки…' : 'Загружаю остатки…') : pending ? 'Складских операций в очереди: ' + pending
-        : !ready && s.connected && !status ? 'Остатки ещё не загружены.' : '';
-    fill(sync, status ? h('div', { class: 'banner warn', style: 'margin-bottom:12px' },
-      h('div', { text: status }),
-      h('div', { class: 'row wrap', style: 'margin-top:8px' }, needsSetup
-        ? h('button', { class: 'btn small', text: 'Открыть «Google Таблица»', onclick: () => app.openSheetSetup() }) : refresh)) : null,
-    progress ? h('div', { class: 'syncbar', role: 'status' }, h('span', { class: 'grow', text: progress }),
-      !ready && !status && !s.busy ? refresh : null) : null,
-    s.cache?.stockViewError ? h('div', { class: 'small muted', text: 'Лист остатков: ' + s.cache.stockViewError }) : null,
-    failed.map((op) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
-      h('div', { text: 'Складская операция не записалась. ' + op.error }),
-      h('div', { class: 'row wrap', style: 'margin-top:8px' },
-        h('button', { class: 'btn small', text: 'Повторить', onclick: () => {
-          s.dropFailed(op.id);
-          const { error, ...retry } = op;
-          s.outbox.push(retry);
-          s.save();
-          s.flush();
-        } }),
-        h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => s.dropFailed(op.id) })))));
-    search.hidden = list.hidden = actions.hidden = !ready;
-    if (!ready) return;
-    fill(actions, h('div', { class: 'row wrap', style: 'margin-bottom:12px' },
-      h('button', { class: 'btn small primary', text: '+ Позиция', onclick: () => openStockEditor(app) }),
-      refresh));
+    let syncText;
+    if (s.busy) syncText = h('span', {}, h('span', { class: 'spin' }), ' Связь с таблицей…');
+    else if (s.error) syncText = h('span', { style: 'color:var(--bad)', text: (ready ? 'Показаны последние остатки. ' : '') + s.error });
+    else if (pending) syncText = 'Складских операций в очереди: ' + pending;
+    else syncText = s.cache ? 'Обновлено в ' + new Date(s.cache.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'Ещё не загружено';
+    fill(sync,
+      s.connected ? h('div', { class: 'syncbar', role: 'status' }, h('div', { class: 'grow' }, syncText), refreshBtn) : null,
+      status ? h('div', { class: 'banner warn', style: 'margin-bottom:12px' },
+        h('div', { text: status }),
+        h('div', { class: 'row wrap', style: 'margin-top:8px' }, needsSetup
+          ? h('button', { class: 'btn small', text: 'Открыть «Google Таблица»', onclick: () => app.openSheetSetup() })
+          : h('button', { class: 'btn small', text: 'Обновить', disabled: s.busy, onclick: () => s.refresh() }))) : null,
+      s.cache?.stockViewError ? h('div', { class: 'small muted', style: 'margin-bottom:8px', text: 'Лист остатков: ' + s.cache.stockViewError }) : null,
+      failed.map((op) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
+        h('div', { text: 'Складская операция не записалась. ' + op.error }),
+        h('div', { class: 'row wrap', style: 'margin-top:8px' },
+          h('button', { class: 'btn small', text: 'Повторить', onclick: () => s.retryFailed(op.id) }),
+          h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => s.dropFailed(op.id) })))));
+    searchBox.hidden = list.hidden = fab.hidden = !ready;
+    if (!ready) { summary.hidden = true; return; }
     drawItems();
   }
   return { el: root, draw };
@@ -128,7 +150,7 @@ export function createStockView(app) {
 function openStockEditor(app, item) {
   const name = stockInput(item?.name, { maxLength: 160 });
   const model = modelPicker(app, item?.model);
-  const cost = stockInput(item?.cost, { inputmode: 'decimal' });
+  const cost = stockInput(item?.cost != null ? String(item.cost).replace('.', ',') : '', { inputmode: 'decimal' });
   const qty = stockInput('0', { inputmode: 'numeric' });
   const body = h('div', {},
     field('Название *', name), model.el,
@@ -154,6 +176,7 @@ function openStockEditor(app, item) {
 function openPosition(app, id) {
   const item = currentStock(app.sheet).find((x) => x.id === id && !x.archived);
   if (!item) return;
+  const deleteAvailable = app.sheet.version >= STOCK_ARCHIVE_VERSION;
   const body = h('div', {},
     h('p', { class: 'muted', text: [item.model, item.qty + ' шт. в наличии', money(item.cost) + ' / шт.'].filter(Boolean).join(' · ') }),
     h('div', { class: 'row wrap' },
@@ -166,13 +189,12 @@ function openPosition(app, id) {
       const title = row.kind === 'editStock' ? 'Изменение позиции' : row.kind === 'addStock' ? 'Позиция добавлена'
         : row.qty > 0 ? 'Пополнение' : 'Списание';
       return h('div', { class: 'item' }, h('div', { class: 'grow' },
-        h('div', { class: 't', text: title + (row.order ? ' · заказ №' + row.order : '') }),
+        h('div', { class: 't' }, title + (row.order ? ' · заказ №' + row.order : ''),
+          row.pending ? h('span', { class: 'badge warn', style: 'margin-left:6px', text: 'не отправлено' }) : null),
         h('div', { class: 's', text: [fmtDate(String(row.date || '').slice(0, 10), true), money(row.cost) + ' / шт.', row.note].filter(Boolean).join(' · ') })),
-      row.qty ? h('b', { class: 'nowrap', text: (row.qty > 0 ? '+' : '') + row.qty + ' шт.' }) : null);
-    })));
-  const deleteAvailable = app.sheet.version >= STOCK_ARCHIVE_VERSION;
-  const modal = openSheet(item.name, body, [
-    h('button', { class: 'btn danger', text: 'Удалить со склада', onclick: () => {
+      row.qty ? h('b', { class: 'nowrap mono', style: row.qty > 0 ? 'color:var(--good)' : 'color:var(--bad)', text: (row.qty > 0 ? '+' : '') + row.qty + ' шт.' }) : null);
+    })),
+    h('button', { class: 'btn small danger block', style: 'margin-top:20px', text: 'Удалить со склада', onclick: () => {
       if (!deleteAvailable) {
         app.openSheetSetup();
         return toast('Для удаления со склада обнови Apps Script до версии ' + STOCK_ARCHIVE_VERSION);
@@ -181,7 +203,9 @@ function openPosition(app, id) {
       if (!latest) { modal.close(); return; }
       if (!confirm('Удалить «' + latest.name + '» со склада? В архив уйдёт позиция с остатком ' + latest.qty + ' шт.')) return;
       stockQueue(app, 'archiveStock', { item: id, expectedQty: latest.qty }, modal);
-    } }),
+    } }));
+  const modal = openSheet(item.name, body, [
+    h('button', { class: 'btn', text: 'Закрыть', onclick: () => modal.close() }),
   ]);
 }
 
@@ -242,30 +266,40 @@ export function openOrderStockPicker(app, { model, initial, current, editing, es
     .map((item) => ({ ...item, priority: !item.model ? 1 : key && hasModel(item, key) ? 2 : 0 }))
     .sort((a, b) => b.priority - a.priority);
   let chosen = editing ? options[0] : null;
+  let onlyModel = false;
   let replacement = editing?.replaces || '';
   const taken = new Set(current.filter((part) => part !== editing).map((part) => part.replaces).filter(Boolean));
   const planned = estimates.filter((part) => !taken.has(part.id));
   const inputQty = stockInput(editing?.qty || '1', { inputmode: 'numeric' });
-  const label = (item) => [item.model, item.qty + ' шт.', money(original.get(item.id)?.cost ?? item.cost) + ' / шт.']
+  const label = (item) => [item.model || 'Универсальная', item.qty + ' шт.', money(original.get(item.id)?.cost ?? item.cost) + ' / шт.']
     .filter(Boolean).join(' · ');
   const matches = h('div');
-  const search = stockInput(canonical || '', { type: 'search', placeholder: 'Например, айфон 12 или проклейка',
-    oninput: () => drawMatches() });
+  const hasModelMatch = !editing && canonical && options.some((item) => item.priority === 2);
+  const search = stockInput('', { type: 'search', placeholder: 'Например, айфон 12 или проклейка',
+    oninput: () => { onlyModel = false; if (modelFilterBtn) modelFilterBtn.classList.remove('on'); drawMatches(); } });
+  const searchWrap = searchField(search, () => drawMatches());
+  const modelFilterBtn = hasModelMatch ? h('button', { type: 'button', class: 'chip', style: 'margin-bottom:8px', text: 'Только для ' + canonical,
+    onclick: () => { onlyModel = !onlyModel; modelFilterBtn.classList.toggle('on', onlyModel); drawMatches(); } }) : null;
   function drawMatches() {
-    const rows = filterStock(app, options, search.value);
+    const base = onlyModel ? options.filter((item) => item.priority === 2) : options;
+    const rows = filterStock(app, base, search.value);
     if (chosen && !rows.includes(chosen)) chosen = null;
     fill(matches, rows.length ? h('div', { class: 'list', style: 'max-height:min(38vh,280px);overflow-y:auto' },
       rows.map((item) => h('button', { class: 'item', type: 'button', 'aria-pressed': String(chosen === item),
         onclick: () => { chosen = item; drawMatches(); } },
-      h('div', { class: 'grow' }, h('div', { class: 't', text: item.name }), h('div', { class: 's', text: label(item) })),
-      chosen === item ? h('span', { class: 'badge', text: 'Выбрано' }) : null)))
+      h('div', { class: 'grow' },
+        h('div', { class: 't' }, item.name,
+          item.priority === 2 ? h('span', { class: 'badge good', style: 'margin-left:6px', text: 'подходит' })
+            : item.priority === 1 && canonical ? h('span', { class: 'badge info', style: 'margin-left:6px', text: 'универсальная' }) : null),
+        h('div', { class: 's', text: label(item) })),
+      chosen === item ? h('span', { class: 'badge warn', text: 'Выбрано' }) : null)))
       : h('div', { class: 'empty', text: 'По этому запросу деталей в наличии нет.' }));
   }
   if (!editing && options.length) drawMatches();
   const body = h('div', {},
     options.length ? [
       editing ? h('p', { class: 'muted', text: chosen.name + ' · ' + label(chosen) })
-        : [field('Найти модель или деталь', search), matches],
+        : [field('Найти модель или деталь', searchWrap.el), modelFilterBtn, matches],
       field('Количество, шт.', inputQty),
       planned.length ? field('Вместо позиции из расчёта', select(planned.map((part) => ({ value: part.id, label: part.name + ' · ' + money(part.cost) })),
         replacement, (value) => { replacement = value; }, { empty: 'Дополнительная деталь' }),

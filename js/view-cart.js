@@ -54,16 +54,16 @@ export function createCartView(app) {
         h('div', { class: 'cart-meta tiny muted' },
           (x.uses || []).length ? h('span', { text: 'для ' + x.uses.join('; ') }) : null,
           x.glue && x.per > 1 ? h('span', { text: 'в наборе ' + x.per + ' шт., нужно ' + x.need }) : null,
-          x.gone ? h('span', { class: 'badge bad', text: 'нет в прайсе' }) : supplierStock(app, x.sup, x.stock)),
+          x.gone ? h('span', { class: 'badge bad', text: 'нет в прайсе' }) : supplierStock(app, x.sup, x.stock),
+          alts > 1 ? h('button', { type: 'button', class: 'link', style: 'padding:0;font-size:13px', text: 'Другой поставщик', onclick: () => openSwap(x) }) : null),
         h('div', { class: 'row', style: 'margin-top:8px' },
           h('div', { class: 'qty' },
-            h('button', { 'aria-label': 'Меньше', text: '−', disabled: x.qty <= 1, onclick: () => save(cartSetQty(cart(), x.id, x.qty - 1)) }),
+            h('button', { type: 'button', 'aria-label': 'Меньше', text: '−', disabled: x.qty <= 1, onclick: () => save(cartSetQty(cart(), x.id, x.qty - 1)) }),
             h('span', { text: x.qty + (x.glue && x.per > 1 ? ' наб.' : ' шт.') }),
-            h('button', { 'aria-label': 'Больше', text: '+', onclick: () => save(cartSetQty(cart(), x.id, x.qty + 1)) })),
-          alts > 1 ? h('button', { class: 'link', text: 'Другой поставщик', onclick: () => openSwap(x) }) : null,
+            h('button', { type: 'button', 'aria-label': 'Больше', text: '+', onclick: () => save(cartSetQty(cart(), x.id, x.qty + 1)) })),
           h('span', { class: 'grow' }),
-          h('b', { class: 'nowrap', text: money(Math.round((x.cost || 0) * x.qty * 100) / 100) }),
-          h('button', { class: 'cart-x', 'aria-label': 'Убрать из корзины', text: '✕', onclick: () => save(cartRemove(cart(), x.id)) }))));
+          h('b', { class: 'nowrap mono', text: money(Math.round((x.cost || 0) * x.qty * 100) / 100) }),
+          h('button', { type: 'button', class: 'cart-x', 'aria-label': 'Убрать из корзины', text: '✕', onclick: () => save(cartRemove(cart(), x.id)) }))));
   }
 
   function group(g) {

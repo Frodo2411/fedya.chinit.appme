@@ -80,9 +80,9 @@ export async function openImport(app, supKey, file) {
       h('summary', { text: 'Столбцы: название ' + colName(cols.nameCol) + ', цена ' + colName(cols.priceCol) + stockText }),
       cols.stockCols && cols.stockCols.length ? h('div', { class: 'small muted', text: 'В наличии, если «+» хоть в одном из столбцов ' + cols.stockCols.map(colName).join(', ') + '. Другие города не учитываю.' }) : null,
       pc && pc.known ? h('div', { class: 'small muted', text: 'Цена в этом столбце совпала с прошлой у ' + pc.hits + ' из ' + pc.known + ' знакомых позиций.' }) : null,
-      field('Название детали', h('select', { class: 'input', onchange: (e) => { cols.nameCol = Number(e.target.value); rebuild(); } }, colOptions(cols.nameCol))),
-      field(sup.currency === 'USD' ? 'Цена, $' : 'Цена, BYN', h('select', { class: 'input', onchange: (e) => { cols.priceCol = Number(e.target.value); rebuild(); } }, colOptions(cols.priceCol))),
-      sup.stock ? field('Наличие', h('select', { class: 'input', onchange: (e) => { const v = Number(e.target.value); cols.stockCol = v < 0 ? null : v; cols.stockCols = null; rebuild(); } }, colOptions(cols.stockCol, true))) : null);
+      field('Название детали', h('select', { class: 'input select', onchange: (e) => { cols.nameCol = Number(e.target.value); rebuild(); } }, colOptions(cols.nameCol))),
+      field(sup.currency === 'USD' ? 'Цена, $' : 'Цена, BYN', h('select', { class: 'input select', onchange: (e) => { cols.priceCol = Number(e.target.value); rebuild(); } }, colOptions(cols.priceCol))),
+      sup.stock ? field('Наличие', h('select', { class: 'input select', onchange: (e) => { const v = Number(e.target.value); cols.stockCol = v < 0 ? null : v; cols.stockCols = null; rebuild(); } }, colOptions(cols.stockCol, true))) : null);
   }
 
   function draw() {

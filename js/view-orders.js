@@ -111,7 +111,11 @@ export function createOrdersView(app) {
   const listBox = h('div');
   const search = h('input', {
     class: 'search', type: 'search', placeholder: 'Номер, модель, клиент, телефон', autocomplete: 'off', autocorrect: 'off',
-    spellcheck: false, 'aria-label': 'Поиск заказа', oninput: () => { st.q = search.value; drawList(); },
+    spellcheck: false, 'aria-label': 'Поиск заказа', oninput: () => { st.q = search.value; searchClear.hidden = !st.q; drawList(); },
+  });
+  const searchClear = h('button', {
+    class: 'clear', type: 'button', 'aria-label': 'Очистить', text: '✕', hidden: true,
+    onclick: () => { search.value = ''; st.q = ''; searchClear.hidden = true; drawList(); search.focus(); },
   });
 
   function inFilter(o, f) {
@@ -153,11 +157,13 @@ export function createOrdersView(app) {
           w ? h('span', { class: 'badge violet', text: 'гарантия' }) : null,
           disc ? h('span', { class: 'badge warn', text: '−' + String(disc.pct).replace('.', ',') + '%' }) : null,
           showPrice ? h('span', { class: 'price', text: money(o.price) }) : null),
-        h('div', { class: 'row' }, h('div', { class: 'prob grow', text: o.problem || o.done || '' }), statusBadge(o.status)),
+        h('div', { class: 'row' }, h('div', { class: 'prob grow', text: o.problem || o.done || '' }),
+          o.urgent === 'Да' ? h('span', { class: 'badge bad', text: 'срочно' }) : null,
+          statusBadge(o.status)),
         o.status === 'Отказ' && (o.refusalReason || o.quoted != null) ? h('div', { class: 'small muted',
           text: [o.refusalReason, o.quoted != null ? 'Предложено ' + money(o.quoted) : null].filter(Boolean).join(' · ') }) : null,
         h('div', { class: 'tiny faint', style: 'margin-top:2px' },
-          [fmtDate(o.date, true), w && o.wfor ? 'по заказу №' + o.wfor : null, o.source, o.urgent === 'Да' ? 'срочно' : null, o.client,
+          [fmtDate(o.date, true), w && o.wfor ? 'по заказу №' + o.wfor : null, o.source, o.client,
             o.status === 'Выдан' && c.warranty ? 'гарантия до ' + fmtDate(c.warranty) : null].filter(Boolean).join(' · '),
           o.pending ? h('span', { class: 'badge warn', style: 'margin-left:6px', text: 'не отправлено' }) : null)));
   }
@@ -171,7 +177,7 @@ export function createOrdersView(app) {
   const chipsBox = h('div');
   const connected = h('div', {},
     syncBox, promoBox, failedBox,
-    h('div', { class: 'searchbar', style: 'padding-top:0;margin-top:0;top:var(--safe-t)' }, search),
+    h('div', { class: 'searchbar', style: 'padding-top:0;margin-top:0;top:var(--safe-t)' }, h('div', { class: 'search-wrap' }, search, searchClear)),
     chipsBox, h('div', { style: 'height:12px' }), listBox,
     h('button', { class: 'fab', onclick: () => openOrderForm(app, null) }, icon('plus'), 'Заказ'));
   root.append(title, connectBox, connected);
@@ -187,10 +193,11 @@ export function createOrdersView(app) {
     const all = app.sheet.orders();
     const count = (f) => all.filter((o) => inFilter(o, f)).length;
     const s = app.sheet;
+    const mine = s.outbox.filter((o) => !DEVICE_OPS.includes(o.op) && !STOCK_OPS.includes(o.op)).length;
     let syncText;
     if (s.busy) syncText = h('span', {}, h('span', { class: 'spin' }), ' Связь с таблицей…');
     else if (s.error) syncText = h('span', { style: 'color:var(--bad)', text: s.error });
-    else if (s.outbox.length) syncText = 'Не отправлено: ' + s.outbox.length;
+    else if (mine) syncText = 'Не отправлено: ' + mine;
     else syncText = s.cache ? 'Обновлено в ' + new Date(s.cache.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'Ещё не загружено';
     fill(syncBox, h('div', { class: 'grow' }, syncText),
       h('button', { class: 'btn small', 'aria-label': 'Обновить', disabled: s.busy, onclick: () => s.refresh() }, icon('refresh')));
@@ -209,7 +216,7 @@ export function createOrdersView(app) {
       h('div', {}, h('b', { text: 'Не записалось в таблицу: ' }), describeOp(f), ' — ', f.error),
       h('div', { class: 'row wrap', style: 'margin-top:8px' },
         f.fields?.stockUse ? h('button', { class: 'btn small', text: 'Исправить заказ', onclick: () => openFailedStockOrder(app, f) }) : null,
-        h('button', { class: 'btn small', text: 'Повторить', onclick: () => { s.dropFailed(f.id); s.outbox.push({ ...f, error: undefined }); s.save(); s.flush(); } }),
+        h('button', { class: 'btn small', text: 'Повторить', onclick: () => s.retryFailed(f.id) }),
         h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => s.dropFailed(f.id) })))));
     fill(chipsBox, select([
       { value: 'active', label: 'Активные · ' + count('active') }, { value: 'ready', label: 'Готов · ' + count('ready') },
@@ -291,14 +298,18 @@ export function openOrderForm(app, order, prefill, failed) {
   const orig = order || { ...o, stockUse: null };
   const initialStock = orig.stockUse?.items ?? [];
   let chosenStock = (o.stockUse?.items ?? []).slice();
-  let directPart = o.stockUse && 'direct' in o.stockUse ? o.stockUse.direct : initialStock.length
-    ? roundMoney((parseNum(o.part) || 0) - stockCost(initialStock)) : (parseNum(o.part) ?? null);
+  const parsedPart = parseNum(o.part);
+  const partDiff = parsedPart === null ? null : roundMoney(parsedPart - stockCost(initialStock));
+  let directPart = o.stockUse && 'direct' in o.stockUse ? o.stockUse.direct
+    : initialStock.length ? (partDiff === 0 ? null : partDiff) : parsedPart;
   const estimates = orderEstimates(cartPlan, o.part);
   const replaced = () => new Set(chosenStock.map((part) => part.replaces).filter(Boolean));
   const buyPlan = () => remainingCart(cartPlan, replaced(), app.settings.cartGlue !== false);
   const readyForOrderStock = () => app.sheet.version >= ORDER_STOCK_VERSION && stockReady(app);
   const stockTotals = h('div', { class: 'small muted', style: 'margin-top:8px' });
   let partInput = null;
+  let priceInput = null;
+  let prepayInput = null;
   let stockChanged = !!failed;
   // цену из «Цен» запоминаем: переключил на гарантию и обратно — она вернётся
   let paid = isWarranty(o) ? null : o.price;
@@ -445,7 +456,7 @@ export function openOrderForm(app, order, prefill, failed) {
     o.status = value || null;
     if (!refusalFields() || wasRefusal === (value === 'Отказ')) return;
     if (value === 'Отказ') {
-      beforeRefusal = { price: o.price, quoted: o.quoted, disc };
+      beforeRefusal = { price: o.price, quoted: o.quoted, refusal: o.refusal, disc };
       if (!isWarranty(o) && o.price != null) o.quoted = o.price;
       o.price = isWarranty(o) ? 0 : null;
       disc = null;
@@ -453,9 +464,14 @@ export function openOrderForm(app, order, prefill, failed) {
     } else if (beforeRefusal) {
       o.price = beforeRefusal.price;
       o.quoted = beforeRefusal.quoted;
+      o.refusal = beforeRefusal.refusal;
       disc = beforeRefusal.disc;
       beforeRefusal = null;
       applyDisc();
+    } else if (wasRefusal && !isWarranty(o)) {
+      if (o.price == null && o.quoted != null) o.price = o.quoted;
+      o.quoted = null;
+      o.refusal = null;
     }
   }
 
@@ -558,13 +574,14 @@ export function openOrderForm(app, order, prefill, failed) {
 
   // Со скидкой в поле — цена без скидки, а клиент платит (и в таблицу пишется) цену со скидкой
   function priceField() {
-    return field(refusalFields() && o.status === 'Отказ' ? 'Фактически оплачено, р.' : disc ? 'Без скидки' : 'Цена, р.', h('input', {
+    priceInput = h('input', {
       class: 'input', value: (disc ? disc.base : o.price) ?? '', inputmode: 'decimal', autocomplete: 'off',
       oninput: (e) => {
         const v = parseNum(e.target.value);
         if (disc) { disc.base = v; discChanged(); } else { o.price = v; recalc(); }
       },
-    }));
+    });
+    return field(refusalFields() && o.status === 'Отказ' ? 'Фактически оплачено, р.' : disc ? 'Без скидки' : 'Цена, р.', priceInput);
   }
 
   // Скидка: в день скидки — её кнопка, и любая другая; со скидкой — процент (можно поменять) и «Убрать»
@@ -646,7 +663,11 @@ export function openOrderForm(app, order, prefill, failed) {
       h('div', { class: 'grid3' },
         priceField(),
         partField(),
-        text('prepay', 'Предоплата', { inputmode: 'decimal', num: true })),
+        (() => {
+          const f = text('prepay', 'Предоплата', { inputmode: 'decimal', num: true });
+          prepayInput = f.querySelector('input');
+          return f;
+        })()),
       stockBlock(),
       w ? h('div', { class: 'tiny faint', style: 'margin-top:6px', text: 'По гарантии клиент не платит: цена 0. Запчасть — твой расход, уйдёт в минус прибыли месяца.' })
         : refusalFields() && o.status === 'Отказ' ? null : discountBlock(),
@@ -697,10 +718,13 @@ export function openOrderForm(app, order, prefill, failed) {
       if (w && String(o.phone).replace(/\D/g, '').length < 7) { toast('Проверь телефон клиента'); return; }
       if (oldScript()) { toast('Сначала обнови скрипт таблицы: на этом устройстве он старый (версия ' + app.sheet.version + ')', 4000); return; }
       if (quotedInput?.value.trim() && (o.quoted === null || o.quoted < 0)) { toast('Проверь предложенную сумму'); return; }
+      const rawPrice = disc ? disc.base : o.price;
+      if (priceInput?.value.trim() && (rawPrice === null || rawPrice < 0)) { toast('Проверь цену'); return; }
+      if (prepayInput?.value.trim() && (o.prepay === null || o.prepay < 0)) { toast('Проверь предоплату'); return; }
       const withStock = Boolean(initialStock.length || chosenStock.length);
       const writesStock = withStock && (stockChanged || (o.part ?? null) !== (orig.part ?? null));
-      if (withStock && partInput.value.trim() && (directPart === null || (chosenStock.length && directPart < 0))) {
-        return toast('Проверь стоимость запчастей вне склада');
+      if (partInput?.value.trim() && (withStock ? (directPart === null || directPart < 0) : (o.part === null || o.part < 0))) {
+        return toast(withStock ? 'Проверь стоимость запчастей вне склада' : 'Проверь стоимость запчасти');
       }
       if (writesStock && !readyForOrderStock()) return toast('Для списания из заказа обнови скрипт до версии ' + ORDER_STOCK_VERSION);
       if (chosenStock.length && o.status === 'Отказ' && o.refusal === 'Вернул') {

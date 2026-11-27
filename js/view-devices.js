@@ -67,8 +67,23 @@ function describeOp(op) {
 }
 
 export function createDevicesView(app) {
-  const st = { filter: 'open' };
+  const st = { filter: 'open', q: '' };
   const root = h('div');
+  const headBox = h('div');
+  const listBox = h('div');
+  const footBox = h('div');
+  const search = h('input', {
+    class: 'search', type: 'search', placeholder: 'Номер, устройство, проблема', autocomplete: 'off', autocorrect: 'off',
+    spellcheck: false, 'aria-label': 'Поиск устройства',
+    oninput: () => { st.q = search.value; searchClear.hidden = !st.q; drawList(); },
+  });
+  const searchClear = h('button', {
+    class: 'clear', type: 'button', 'aria-label': 'Очистить', text: '✕', hidden: true,
+    onclick: () => { search.value = ''; st.q = ''; searchClear.hidden = true; drawList(); search.focus(); },
+  });
+  const searchBar = h('div', { class: 'searchbar', style: 'padding-top:0;margin-top:0;top:var(--safe-t)' },
+    h('div', { class: 'search-wrap' }, search, searchClear));
+  root.append(headBox, searchBar, listBox, footBox);
 
   function syncBar() {
     const s = app.sheet;
@@ -87,7 +102,7 @@ export function createDevicesView(app) {
     return s.failed.filter((f) => DEVICE_OPS.includes(f.op)).map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
       h('div', {}, h('b', { text: 'Не записалось в таблицу: ' }), describeOp(f), ' — ', f.error),
       h('div', { class: 'row', style: 'margin-top:8px' },
-        h('button', { class: 'btn small', text: 'Повторить', onclick: () => { s.dropFailed(f.id); s.outbox.push({ ...f, error: undefined }); s.save(); s.flush(); } }),
+        h('button', { class: 'btn small', text: 'Повторить', onclick: () => s.retryFailed(f.id) }),
         h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => s.dropFailed(f.id) }))));
   }
 
@@ -115,44 +130,64 @@ export function createDevicesView(app) {
           d.pending ? h('span', { class: 'badge warn', style: 'margin-left:6px', text: 'не отправлено' }) : null)));
   }
 
+  function matchDevice(d, q) {
+    if (!q) return true;
+    const hay = [d.num, d.device, d.cat, d.problem, d.source, d.note].filter(Boolean).join(' ').toLowerCase().replace(/ё/g, 'е');
+    return q.toLowerCase().replace(/ё/g, 'е').split(/\s+/).filter(Boolean).every((t) => hay.includes(t));
+  }
+
+  function drawList() {
+    const s = app.sheet;
+    const devices = s.devices();
+    const parts = s.parts();
+    const now = today();
+    const q = st.q.trim();
+    const rows = sorted(devices).filter((d) => matchDevice(d, q));
+    fill(listBox, rows.length ? h('div', { class: 'list' }, rows.map((d) => item(d, parts, now)))
+      : h('div', { class: 'empty', text: q ? 'Ничего не нашлось.' : st.filter === 'sold' ? 'Проданных пока нет.' : 'Здесь пока пусто. Купил устройство — нажми «+ Устройство».' }));
+  }
+
   function draw() {
     const s = app.sheet;
     const m = mode(app);
     const now = today();
-    const tile = (label, value, hl) => h('div', { class: 'tile' + (hl ? ' hl' : '') }, h('div', { class: 'v', text: value }), h('div', { class: 'l', text: label }));
-    let main = null;
+    const tile = (label, value, hl) => h('div', { class: 'tile' + (hl === true ? ' hl' : hl ? ' ' + hl : '') }, h('div', { class: 'v', text: value }), h('div', { class: 'l', text: label }));
+    let mainTop = null;
+    let mainFoot = null;
     if (m === 'ok') {
       const devices = s.devices();
       const parts = s.parts();
       const sum = deviceSummary(devices, parts, now);
-      const rows = sorted(devices);
-      main = [
+      mainTop = [
         h('div', { class: 'tiles four' },
           tile('Вложено в непроданные', money(sum.investedOpen)), tile('Ожидаемая прибыль', signed(sum.expected)),
-          tile('Заработано на проданных', signed(sum.profit), true), tile('Продано', sum.sold + ' из ' + sum.count)),
+          tile('Заработано на проданных', signed(sum.profit), sum.profit < 0 ? 'hl-bad' : 'hl'), tile('Продано', sum.sold + ' из ' + sum.count)),
         sum.sold ? h('div', { class: 'small muted', style: 'margin-top:10px' },
           'Доходность проданных ', h('b', { text: pct(sum.roi) }),
           sum.avgDays !== null ? [', продаются в среднем за ', h('b', { text: Math.round(sum.avgDays) + ' дн.' })] : '.') : null,
-        h('div', { class: 'row', style: 'margin-top:16px' },
+        h('div', { class: 'row', style: 'margin:16px 0 10px' },
           h('div', { class: 'grow' }, select([
             { value: 'open', label: 'В работе · ' + sum.open }, { value: 'sold', label: 'Продано · ' + sum.sold }, { value: 'all', label: 'Все · ' + sum.count },
           ], st.filter, (v) => { st.filter = v; draw(); }, { label: 'Какие устройства показать' })),
           h('button', { class: 'btn', text: 'Калькулятор', onclick: () => openBuyCalc(app) })),
-        h('div', { style: 'height:12px' }),
-        rows.length ? h('div', { class: 'list' }, rows.map((d) => item(d, parts, now)))
-          : h('div', { class: 'empty', text: st.filter === 'sold' ? 'Проданных пока нет.' : 'Здесь пока пусто. Купил устройство — нажми «+ Устройство».' }),
+      ];
+      mainFoot = [
         h('div', { class: 'tiny faint', style: 'margin-top:12px', text: 'Себестоимость = цена покупки + запчасти + прочие расходы. Доходность = прибыль ÷ себестоимость. Продано — когда вписана цена продажи. Своя работа не считается.' }),
         h('button', { class: 'fab', onclick: () => openDeviceForm(app, null) }, icon('plus'), 'Устройство'),
       ];
     }
-    fill(root,
+    fill(headBox,
       h('h1', { text: 'Выкуп' }),
       m === 'connect' ? connectCard(app, 'Выкупленные устройства') : syncBar(),
       m === 'old' ? oldScriptBanner(app, draw) : null,
       m === 'nosheet' ? h('div', { class: 'banner warn', style: 'margin-bottom:12px' },
         h('b', { text: 'Не читаются листы выкупа. ' }), s.cache.devicesError || 'В таблице нет листа «Устройства».') : null,
       m === 'connect' ? null : failedBanners(),
-      main,
+      mainTop);
+    searchBar.hidden = listBox.hidden = m !== 'ok';
+    if (m === 'ok') drawList();
+    fill(footBox,
+      mainFoot,
       m === 'ok' ? null : h('div', { class: 'card', style: 'margin-top:12px' },
         h('h3', { text: 'Калькулятор перед покупкой' }),
         h('div', { class: 'small muted', text: 'Сколько можно заплатить за устройство, чтобы заработать нужный процент. Работает и без таблицы.' }),
@@ -173,20 +208,32 @@ export function openDeviceForm(app, device, prefill) {
   const info = h('div', { class: 'small muted', style: 'margin-top:10px' });
 
   const lotNames = () => extras.map((x) => String(x.device || '').trim()).filter(Boolean);
-  const input = (key, label, opts = {}) => field(label, h(opts.area ? 'textarea' : 'input', {
-    class: 'input', value: d[key] ?? '', type: opts.area ? null : (opts.type || 'text'), inputmode: opts.inputmode, placeholder: opts.placeholder || '',
-    autocomplete: 'off',
-    oninput: (e) => {
-      const v = e.target.value;
-      d[key] = opts.num ? parseNum(v) : (opts.type === 'date' ? v || null : v);
-      recalc();
-    },
-  }));
+  const numInputs = {};
+  const input = (key, label, opts = {}) => {
+    const el = h(opts.area ? 'textarea' : 'input', {
+      class: 'input', value: d[key] ?? '', type: opts.area ? null : (opts.type || 'text'), inputmode: opts.inputmode, placeholder: opts.placeholder || '',
+      autocomplete: 'off',
+      oninput: (e) => {
+        const v = e.target.value;
+        d[key] = opts.num ? parseNum(v) : (opts.type === 'date' ? v || null : v);
+        recalc();
+      },
+    });
+    if (opts.num) numInputs[key] = [el, label];
+    return field(label, el);
+  };
+
+  function currentDevice() {
+    if (!empty(d.num) || !d.pendingId) return d;
+    const sent = app.sheet.sent[d.pendingId];
+    return sent && !empty(sent.num) ? { ...d, num: sent.num } : d;
+  }
 
   function recalc() {
     const n = 1 + lotNames().length;
     const shares = n > 1 && !empty(d.buy) ? splitEven(d.buy, n) : null;
-    const c = deviceCalc(shares ? { ...d, buy: shares[0] } : d, isNew ? [] : app.sheet.parts(), today());
+    const cur = currentDevice();
+    const c = deviceCalc(shares ? { ...cur, buy: shares[0] } : cur, isNew ? [] : app.sheet.parts(), today());
     fill(info,
       'Себестоимость ', h('b', { text: money(c.cost) }),
       c.parts ? ' (запчасти ' + money(c.parts) + ')' : null,
@@ -196,11 +243,12 @@ export function openDeviceForm(app, device, prefill) {
   }
 
   function partsBlock() {
-    const parts = partsOf(d, app.sheet.parts());
+    const cur = currentDevice();
+    const parts = partsOf(cur, app.sheet.parts());
     return h('div', {},
       h('div', { class: 'row', style: 'margin-top:20px' }, h('h3', { class: 'grow', style: 'margin:0', text: 'Запчасти' }),
-        h('button', { class: 'btn small', text: '+ Запчасть', onclick: () => openPartForm(app, d, null, draw) })),
-      parts.length ? h('div', { class: 'list', style: 'margin-top:8px' }, parts.map((p) => h('button', { type: 'button', class: 'item', onclick: () => openPartForm(app, d, p, draw) },
+        h('button', { class: 'btn small', text: '+ Запчасть', onclick: () => openPartForm(app, cur, null, draw) })),
+      parts.length ? h('div', { class: 'list', style: 'margin-top:8px' }, parts.map((p) => h('button', { type: 'button', class: 'item', onclick: () => openPartForm(app, cur, p, draw) },
         h('div', { class: 'grow' }, h('div', { class: 't', text: p.name || 'Без названия' }),
           h('div', { class: 's' }, [p.status, p.where, p.date ? fmtDate(p.date, true) : null].filter(Boolean).join(' · '),
             p.pending ? h('span', { class: 'badge warn', style: 'margin-left:6px', text: 'не отправлено' }) : null)),
@@ -267,6 +315,9 @@ export function openDeviceForm(app, device, prefill) {
     class: 'btn primary', text: isNew ? 'Записать' : 'Сохранить',
     onclick: () => {
       if (!String(d.device || '').trim()) { toast('Напиши, что за устройство'); return; }
+      for (const [k, [el]] of Object.entries(numInputs)) {
+        if (el.isConnected && el.value.trim() && (d[k] === null || d[k] < 0)) { toast('Проверь числа в форме'); return; }
+      }
       if (d.status === SOLD && empty(d.sold)) { toast('Впиши, за сколько продал'); return; }
       if (!empty(d.sold)) {
         d.status = SOLD;
@@ -310,11 +361,16 @@ export function openPartForm(app, device, part, after) {
   const isNew = !part;
   const p = isNew ? { date: today(), status: 'Заказана' } : { ...part };
   const orig = { ...p };
-  const input = (key, label, opts = {}) => field(label, h(opts.area ? 'textarea' : 'input', {
-    class: 'input', value: p[key] ?? '', type: opts.area ? null : (opts.type || 'text'), inputmode: opts.inputmode, placeholder: opts.placeholder || '',
-    autocomplete: 'off',
-    oninput: (e) => { const v = e.target.value; p[key] = opts.num ? parseNum(v) : (opts.type === 'date' ? v || null : v); },
-  }));
+  let priceEl = null;
+  const input = (key, label, opts = {}) => {
+    const el = h(opts.area ? 'textarea' : 'input', {
+      class: 'input', value: p[key] ?? '', type: opts.area ? null : (opts.type || 'text'), inputmode: opts.inputmode, placeholder: opts.placeholder || '',
+      autocomplete: 'off',
+      oninput: (e) => { const v = e.target.value; p[key] = opts.num ? parseNum(v) : (opts.type === 'date' ? v || null : v); },
+    });
+    if (key === 'price') priceEl = el;
+    return field(label, el);
+  };
   const done = () => {
     sheet.close();
     app.redraw();
@@ -343,6 +399,7 @@ export function openPartForm(app, device, part, after) {
     class: 'btn primary', text: isNew ? 'Записать' : 'Сохранить',
     onclick: () => {
       if (!String(p.name || '').trim()) { toast('Напиши, что за запчасть'); return; }
+      if (priceEl?.value.trim() && (p.price === null || p.price < 0)) { toast('Проверь цену запчасти'); return; }
       if (isNew) {
         const fields = pick(p, PART_KEYS);
         let extra;

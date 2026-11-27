@@ -1,6 +1,6 @@
 // Экран «Итоги»: месяц, выручка, прибыль, расходы. Считается так же, как лист «Итоги» в таблице.
 
-import { h, fill, money, fmtDate, monthTitle, toast, openSheet, field, select, parseNum } from './ui.js';
+import { h, fill, icon, money, number, fmtDate, monthTitle, toast, openSheet, field, select, parseNum } from './ui.js';
 import { summary, statusCounts, months, sourceSummary } from './orders.js';
 import { today } from './store.js';
 import { connectCard } from './view-orders.js';
@@ -24,6 +24,13 @@ export function createSummaryView(app) {
     }
     const orders = app.sheet.orders();
     const expenses = app.sheet.expenses();
+    const sNode = app.sheet;
+    let syncText;
+    if (sNode.busy) syncText = h('span', {}, h('span', { class: 'spin' }), ' Связь с таблицей…');
+    else if (sNode.error) syncText = h('span', { style: 'color:var(--bad)', text: sNode.error });
+    else if (sNode.outbox.length) syncText = 'Не отправлено: ' + sNode.outbox.length;
+    else syncText = sNode.cache ? 'Обновлено в ' + new Date(sNode.cache.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : 'Ещё не загружено';
+    const expFailed = sNode.failed.filter((f) => f.op === 'addExpense' || f.op === 'updateExpense');
     const wm = app.sheet.lists.warrantyMonths;
     const s = summary(orders, expenses, st.month, wm);
     const stockValue = Array.isArray(app.sheet.cache?.stock)
@@ -31,9 +38,16 @@ export function createSummaryView(app) {
     const now = statusCounts(orders);
     const ms = [...new Set([today().slice(0, 7), ...months(orders, expenses)])].sort().reverse().slice(0, 12);
     const monthExpenses = expenses.filter((e) => (e.date || '').startsWith(st.month)).sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    const tile = (label, value, hl) => h('div', { class: 'tile' + (hl ? ' hl' : '') }, h('div', { class: 'v', text: value }), h('div', { class: 'l', text: label }));
+    const tile = (label, value, hl) => h('div', { class: 'tile' + (hl === true ? ' hl' : hl ? ' ' + hl : '') }, h('div', { class: 'v', text: value }), h('div', { class: 'l', text: label }));
     fill(root, 
       h('h1', { text: 'Итоги' }),
+      h('div', { class: 'syncbar' }, h('div', { class: 'grow' }, syncText),
+        h('button', { class: 'btn small', 'aria-label': 'Обновить', disabled: sNode.busy, onclick: () => sNode.refresh() }, icon('refresh'))),
+      expFailed.map((f) => h('div', { class: 'banner bad', style: 'margin-bottom:10px' },
+        h('div', {}, h('b', { text: 'Расход не записался: ' }), (f.fields && f.fields.what) || '', ' — ', f.error),
+        h('div', { class: 'row wrap', style: 'margin-top:8px' },
+          h('button', { class: 'btn small', text: 'Повторить', onclick: () => sNode.retryFailed(f.id) }),
+          h('button', { class: 'btn small ghost', text: 'Убрать', onclick: () => sNode.dropFailed(f.id) })))),
       h('div', { class: 'month' },
         h('button', { class: 'btn', 'aria-label': 'Прошлый месяц', text: '‹', onclick: () => shift(-1) }),
         h('b', { text: monthTitle(st.month) }),
@@ -41,7 +55,7 @@ export function createSummaryView(app) {
       h('div', { class: 'tiles' },
         tile('Принято заказов', String(s.taken)), tile('Выдано', String(s.issued)),
         tile('Выручка', money(s.revenue)), tile('Прибыль с заказов', money(s.profit)),
-        tile('Расходы', money(s.expenses)), tile('Чистая прибыль', money(s.net), true)),
+        tile('Расходы', money(s.expenses)), tile('Чистая прибыль', money(s.net), s.net < 0 ? 'hl-bad' : 'hl')),
       stockValue !== null ? h('div', { class: 'card row wrap', style: 'margin-top:12px' },
         h('div', { class: 'grow' }, h('b', { text: 'Склад сейчас' }),
           h('div', { class: 'small muted', text: 'Закупочная стоимость текущих остатков' })),
@@ -70,12 +84,12 @@ export function createSummaryView(app) {
         : h('div', { class: 'empty', text: 'Расходов за этот месяц нет.' }),
       h('h2', { text: 'По месяцам' }),
       h('div', { class: 'card scrollx', style: 'padding:6px 10px' },
-        h('table', { class: 'tbl' },
+        h('table', { class: 'tbl clickable' },
           h('thead', {}, h('tr', {}, ['Месяц', 'Принято', 'Выдано', 'Выручка', 'Прибыль', 'Расходы', 'Чистая'].map((t) => h('th', { text: t })))),
           h('tbody', {}, ms.map((m) => {
             const x = summary(orders, expenses, m, wm);
-            return h('tr', { onclick: () => { st.month = m; draw(); window.scrollTo(0, 0); } },
-              [monthTitle(m), x.taken, x.issued, Math.round(x.revenue), Math.round(x.profit), Math.round(x.expenses), Math.round(x.net)].map((v) => h('td', { text: String(v) })));
+            return h('tr', { class: m === st.month ? 'on' : null, onclick: () => { st.month = m; draw(); window.scrollTo(0, 0); } },
+              [monthTitle(m), x.taken, x.issued, number(Math.round(x.revenue)), number(Math.round(x.profit)), number(Math.round(x.expenses)), number(Math.round(x.net))].map((v) => h('td', { text: String(v) })));
           })))),
       h('div', { class: 'tiny faint', style: 'margin-top:10px', text: 'Прибыль с заказов = цена − запчасть по выданным заказам и отказам, налог не вычитается. Месяц заказа — по дате выдачи, а если её нет — по дате приёма.' }),
     );
@@ -103,7 +117,10 @@ export function openExpenseForm(app, exp) {
   const orig = { ...e };
   const input = (key, label, opts = {}) => field(label, h('input', {
     class: 'input', type: opts.type || 'text', value: e[key] ?? '', inputmode: opts.inputmode, autocomplete: 'off',
-    oninput: (ev) => { e[key] = opts.num ? parseNum(ev.target.value) : ev.target.value; },
+    oninput: (ev) => {
+      const v = ev.target.value;
+      e[key] = opts.num ? parseNum(v) : (opts.type === 'date' ? v || null : v);
+    },
   }));
   const body = h('div', {},
     input('what', 'Что купил'),
@@ -117,7 +134,7 @@ export function openExpenseForm(app, exp) {
     h('button', {
       class: 'btn primary', text: isNew ? 'Записать' : 'Сохранить',
       onclick: () => {
-        if (!e.what || e.sum === null) { toast('Заполни, что купил, и сумму'); return; }
+        if (!String(e.what || '').trim() || e.sum === null || e.sum < 0) { toast('Заполни, что купил, и корректную сумму'); return; }
         if (isNew) {
           const fields = {};
           for (const k of KEYS) if (e[k] !== null && e[k] !== '') fields[k] = e[k];
