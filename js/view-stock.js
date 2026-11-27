@@ -41,7 +41,7 @@ function modelPicker(app, value = '') {
   const limitHint = h('div', { class: 'tiny faint', style: 'margin-top:4px' });
   const custom = stockInput(unlisted.join(', '), { maxLength: MODEL_TEXT_LIMIT, placeholder: 'Названия через запятую',
     oninput: () => drawLimit() });
-  const search = stockInput('', { type: 'search', placeholder: 'Например, айфон 15 или Galaxy A54',
+  const search = stockInput('', { class: 'input mp-search', type: 'search', placeholder: 'Например, айфон 15 или Galaxy A54',
     oninput: () => drawResults() });
   const searchWrap = searchField(search, () => drawResults());
   const combined = () => [...new Set([...chosen, ...compatibleModelNames(custom.value)])].join(', ');
@@ -51,33 +51,39 @@ function modelPicker(app, value = '') {
     limitHint.style.color = len > MODEL_TEXT_LIMIT ? 'var(--bad)' : '';
   }
   function drawSelected() {
-    fill(selected, chosen.size ? h('div', { class: 'chips', style: 'margin:8px 0' }, [...chosen].map((name) =>
-      h('button', { type: 'button', class: 'chip on', 'aria-label': 'Убрать ' + name, text: name + ' ×',
+    fill(selected, chosen.size ? h('div', { class: 'mp-chips' }, [...chosen].map((name) =>
+      h('button', { type: 'button', class: 'mp-chip', 'aria-label': 'Убрать ' + name,
         onclick: () => {
           chosen.delete(name);
           drawSelected();
           drawResults();
           drawLimit();
-        } }))) : null);
+        } }, name, h('span', { class: 'mp-chip-x', 'aria-hidden': 'true', text: '×' })))) : null);
     drawLimit();
   }
   function drawResults() {
     const query = search.value.trim();
     const hits = query ? [...new Set(app.search.find(query).map((entry) => entry.model))] : [];
-    fill(results, hits.length ? h('div', { class: 'list', style: 'max-height:min(32vh,230px);overflow-y:auto' },
-      hits.map((name) => h('label', { class: 'item' },
-        h('input', { type: 'checkbox', checked: chosen.has(name), onchange: (e) => {
-          if (e.target.checked) chosen.add(name);
-          else chosen.delete(name);
-          drawSelected();
-        } }), name)))
-      : query ? h('div', { class: 'small muted', text: 'Модели не найдены.' }) : null);
+    fill(results, hits.length ? h('div', { class: 'mp-list' },
+      hits.map((name) => {
+        const on = chosen.has(name);
+        const row = h('label', { class: 'mp-row' + (on ? ' on' : '') },
+          h('input', { type: 'checkbox', class: 'mp-check', checked: on, onchange: (e) => {
+            if (e.target.checked) chosen.add(name);
+            else chosen.delete(name);
+            row.classList.toggle('on', e.target.checked);
+            drawSelected();
+          } }),
+          h('span', { class: 'mp-name', text: name }));
+        return row;
+      }))
+      : query ? h('div', { class: 'mp-empty', text: 'Модели не найдены' }) : null);
   }
   drawSelected();
   return {
-    el: h('div', {}, field('Совместимые модели', searchWrap.el), selected, limitHint, results,
-      h('details', { open: unlisted.length > 0, style: 'margin-top:8px' },
-        h('summary', { class: 'small muted', text: 'Указать модели вручную' }), field('Совместимость', custom))),
+    el: h('div', { class: 'mp' }, field('Совместимые модели', searchWrap.el), selected, limitHint, results,
+      h('details', { class: 'mp-manual', open: unlisted.length > 0 },
+        h('summary', { text: 'Указать модели вручную' }), field('Совместимость', custom))),
     value: combined,
   };
 }
