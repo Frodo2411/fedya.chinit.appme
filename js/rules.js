@@ -8,14 +8,16 @@ const KIND_PREFIX = pyRe(String.raw`^(Аккумулятор|АКБ|Диспле
 
 const NM = [
   [pyRe(String.raw`\bgalaxy\b|\bsamsung\b|\bapple\b|\bgoogle\b|\bhuawei\b(?=\s+(honor|nova|mate|p\d|pura|p smart))`, 'g'), ' '],
+  [pyRe(String.raw`\bhonor\b(?=\s+(?:matepad|mate\s|pura\s|nova\s|p\s*smart|p\d{2}\b))`, 'g'), ' '],
   [pyRe(String.raw`(?:\bxiaomi\s+)+(?=(?:redmi|poco|mi)\b)`, 'g'), ' '],
+  [pyRe(String.raw`\bmi\s+(?=(?:redmi|poco)\b)`, 'g'), ' '],
   [pyRe(String.raw`\bxiaomi\s+mi\b|\bmi\b`, 'g'), ' xiaomi '],
   [pyRe(String.raw`\bpro\s*plus\b`, 'g'), 'pro+'],
   [pyRe(String.raw`\s*\bplus\b`, 'g'), '+'],
   [pyRe(String.raw`\s+\+`, 'g'), '+'],
   [pyRe(String.raw`\b(?:4g|wi-?fi|lte|3g)\b`, 'g'), ' '],
   [pyRe(String.raw`\(\s*(20\d\d)\s*\)`, 'g'), ' $1 '],
-  [pyRe(String.raw`(\d+(?:\.\d+)?)\s*(?:''|"|”|″)`, 'g'), '$1'],
+  [pyRe(String.raw`(\d+(?:\.\d+)?)\s*(?:''|'|"|”|″)`, 'g'), '$1'],
   [pyRe(String.raw`(?<=[a-z])(?=\d)`, 'g'), ' '],
 ];
 
@@ -25,8 +27,14 @@ export function normModel(s) {
   t = t.replace(/\biphone(?=[0-9a-zа-я])/g, 'iphone ').replace(/(\d)(pro|plus|max|mini|air)\b/g, '$1 $2');
   t = t.replace(/(\d{2})\s*(?:мм(?![а-яё])|mm\b)/g, '$1mm');
   if (/\b(?:ipad|watch)\b/.test(t)) {
-    t = t.replace(/\ba\d{4}\b/g, ' ').replace(/\b\d-gen\b/g, ' ').replace(/\bgps\b/g, ' ').replace(/(\d+)\.0\b/g, '$1');
+    // код A#### убираем, только если кроме него есть ещё слово модели («iPad a3355» оставляем как алиас)
+    if (!/^(?:apple\s+)?ipad\s+a\d{4}$/.test(t.trim())) t = t.replace(/\ba\d{4}\b/g, ' ');
+    t = t.replace(/\b\d-gen\b/g, ' ').replace(/\bgps\b/g, ' ').replace(/(\d+)\.0\b/g, '$1');
     t = t.replace(/\bwatch\s+s(\d)/g, 'watch $1').replace(/\bwatch\s+ultra\s+1\b/g, 'watch ultra');
+    t = t.replace(/\bwatch\s+se\s*[23]\b/g, 'watch se');
+    // «iPad Pro 3 11», «iPad Pro 5 12.9 (2021) 6 12.9 (2022)» → «iPad Pro 11» / «iPad Pro 12.9» (не трогая «iPad Pro 11 M4»)
+    t = t.replace(/\bipad\s+pro\s+[1-7]\s+(9\.7|10\.5|11|12\.9)\b/g, 'ipad pro $1');
+    t = t.replace(/\bipad\s+pro\s+(9\.7|10\.5|11|12\.9)\s+20\d\d\b.*$/g, 'ipad pro $1');
   }
   t = t.replace(/\biphone 17 air\b/, 'iphone air'); // у поставщиков «iPhone 17 Air», на сайте «iPhone Air»
   for (const [re, rep] of NM) t = t.replace(re, rep);
@@ -68,7 +76,9 @@ const INCH55 = /((?:\d+[sS]?\s*\/\s*)*\d+[sS]?)\s*\(5[,.]5\s*["'”″]*\s*\)/g;
 const applePlus = (s) => (/iPhone/i.test(s) ? s.replace(INCH55, (_, g) => g.split(/\s*\/\s*/).map((x) => x + ' Plus').join('/')) : s);
 
 const SEG_MM = /\(\s*(\d{2})\s*(?:мм|mm)\s*\)/gi;
+const SEG_MM_BARE = /(\d{2})\s*(?:мм(?![а-яё])|mm\b)/gi;
 const SEG_WIFI_SLASH = /\bwi-?fi\s*\/\s*(?:lte|5g|3g)\b/gi;
+const SEG_HZ = /\s+\d{2,3}\s*(?:гц(?![а-яё])|hz\b)/gi;
 
 export function modelSegment(name) {
   let s = name.trim().replace(KIND_PREFIX, '');
@@ -77,7 +87,7 @@ export function modelSegment(name) {
   s = applePlus(s).replace(/\bApple\s+(?=iPhone|iPad)/i, '');
   s = s.replace(/\biPhone(?=[0-9A-Za-zА-Яа-яЁё])/gi, 'iPhone ').replace(/(\d)(Pro|Plus|Max|mini|Air)\b/gi, '$1 $2').replace(/\bSE(?=\d)/g, 'SE ');
   s = beforeFirst(s, SEG_SPLIT);
-  s = s.replace(SEG_YEAR, ' $1').replace(SEG_MM, ' $1mm').replace(/(\d{2})\s*мм(?![а-яё])/gi, '$1mm').replace(SEG_WIFI_SLASH, ' ');
+  s = s.replace(SEG_YEAR, ' $1').replace(SEG_MM, ' $1mm').replace(SEG_MM_BARE, '$1mm').replace(SEG_WIFI_SLASH, ' ').replace(SEG_HZ, '');
   s = s.replace(SEG_PAREN, ' ');
   s = s.replace(SEG_TAIL, '');
   s = s.replace(SEG_QUALITY, '').replace(SEG_ESIM, '');
@@ -121,11 +131,13 @@ export function items(name) {
   const seg = modelSegment(name);
   // русские слова после модели — цвет и пояснения: «iPhone 6 белый», «Mi 8 Lite с разъемом зарядки», «Cерый» (латинская C)
   const apple = /^iPhone\b/i.test(seg);
-  const parts = seg.split(/\s*\/\s*/).map((p) => p.replace(/\s+(?:[A-Za-z](?=[а-яё]))?[а-яё].*$/i, '').trim()).map((p) => (apple ? trimApple(p) : p)).filter(Boolean);
+  const watch = /^Apple Watch\b/i.test(seg);
+  const splitSeg = watch ? seg.replace(/\s*,\s*/g, '/') : seg;
+  const parts = splitSeg.split(/\s*\/\s*/).map((p) => p.replace(/\s+(?:[A-Za-z](?=[а-яё]))?[а-яё].*$/i, '').trim()).map((p) => (apple ? trimApple(p) : p)).filter(Boolean);
   // «iPhone 6/6S Plus» — 6 Plus и 6s Plus, а не 6 и 6s Plus (маленький пишут «6/6S (4,7")»)
   if (apple) parts.forEach((p, i) => { const m = /^(?:iPhone )?(\d+)$/i.exec(p); if (m && new RegExp('^' + m[1] + 's Plus$', 'i').test(parts[i + 1] || '')) parts[i] = p + ' Plus'; });
   // «Apple Watch 4/5/SE (40 мм)» — размер корпуса в конце относится ко всем моделям через «/»
-  if (/^Apple Watch\b/i.test(seg)) {
+  if (watch) {
     const mm = /\b(\d{2}mm)\b/i.exec(parts[parts.length - 1] || '');
     if (mm) for (let i = 0; i < parts.length; i++) if (!/\b\d{2}mm\b/i.test(parts[i])) parts[i] += ' ' + mm[1];
   }
@@ -215,7 +227,7 @@ export function networkOk(name, model) {
   return true;
 }
 
-const INCH_SIZE = /\s+\d{1,2}(?:[.,]\d{1,2})?\s*(?:''|"|”|″)/g;
+const INCH_SIZE = /\s+\d{1,2}(?:[.,]\d{1,2})?\s*(?:''|'|"|”|″)/g;
 
 export function matchModels(name, idx) {
   const found = [];
@@ -231,8 +243,10 @@ export function matchModels(name, idx) {
         if (!cands.length && noInch.startsWith('ipad ')) cands = [...(idx.get(noInch.replace(/\s+20\d\d$/, '')) || [])];
       }
       if (!cands.length && k.startsWith('ipad ')) {
+        // «iPad Air 4 10.9 2020», «iPad 9 10.2 2021», «iPad 6 9.7 2018» → убираем год и диагональ (9.7/10.2/10.9)
         const noYear = k.replace(/\s+20\d\d$/, '');
         if (noYear !== k) cands = [...(idx.get(noYear) || [])];
+        if (!cands.length) cands = [...(idx.get(noYear.replace(/\s+(?:9\.7|10\.2|10\.9)$/, '')) || [])];
       }
       if (cands.length) {
         for (const m of cands) if (!found.includes(m)) found.push(m);
@@ -479,7 +493,7 @@ function moreModels(name) {
   const head = applePlus(dash < 0 ? tail : tail.slice(0, dash))
     .replace(SEG_YEAR, ' $1')
     .replace(SEG_MM, ' $1mm')
-    .replace(/(\d{2})\s*мм(?![а-яё])/gi, '$1mm')
+    .replace(SEG_MM_BARE, '$1mm')
     .replace(SEG_WIFI_SLASH, ' ')
     .replace(/\([^)]*\)/g, ' ')
     .replace(SEG_ESIM, '')
